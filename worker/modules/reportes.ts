@@ -1,0 +1,131 @@
+// Dashboard, estadísticas y búsqueda global.
+import { Hono } from 'hono';
+import { z } from 'zod';
+import type { AppEnv } from '../env';
+import { query, zFecha } from '../lib/http';
+import { all, first, hoy, like } from '../lib/db';
+import { requirePerm } from '../lib/auth';
+import { tienePermiso } from '../../shared/permisos';
+import { normalizarPatente } from '../../shared/dominio';
+
+export const reportes = new Hono<AppEnv>();
+
+reportes.get('/dashboard', requirePerm('operacion'), async (c) => {
+  const s = c.get('sesion');
+  const db = c.env.DB;
+  const f = hoy();
+  const mes = f.slice(0, 7);
+  const [porEstado, turnosHoy, stockBajo, presupuestos, ordenesRecientes] = await Promise.all([
+    all(db, 'SELECT estado, COUNT(*) AS cantidad FROM ordenes WHERE taller_id = ? GROUP BY estado', s.tallerId),
+    all(
+      db,
+      `SELECT t.id, t.hora, t.estado, t.motivo, c.nombre AS cliente, v.patente FROM turnos t JOIN clientes c ON c.taller_id = t.taller_id AND c.id = t.cliente_id
+         LEFT JOIN vehiculos v ON v.taller_id = t.taller_id AND v.id = t.vehiculo_id WHERE t.taller_id = ? AND t.fecha = ? ORDER BY t.hora`,
+      s.tallerId,
+      f,
+    ),
+    all(db, 'SELECT id, nombre, codigo, stock, stock_minimo, unidad FROM articulos WHERE taller_id = ? AND activo = 1 AND stock <= stock_minimo AND stock_minimo > 0 ORDER BY stock - stock_minimo LIMIT 8', s.tallerId),
+    first(db, "SELECT SUM(estado = 'pendiente') AS pendientes, SUM(estado = 'aprobado') AS aprobados FROM presupuestos WHERE taller_id = ?", s.tallerId),
+    all(
+      db,
+      `SELECT o.id, o.numero, o.estado, o.total, o.fecha_prometida, c.nombre AS cliente, v.patente FROM ordenes o
+         JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
+        WHERE o.taller_id = ? AND o.estado NOT IN ('entregada','cancelada') ORDER BY o.updated_at DESC LIMIT 8`,
+      s.tallerId,
+    ),
+  ]);
+  let finanzas = null;
+  if (tienePermiso(s.rol, 'reportes.ver')) {
+    finanzas = await first(
+      db,
+      `SELECT
+         (SELECT COALESCE(SUM(total),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND substr(fecha,1,7) = ?) AS ventas_mes,
+         (SELECT COALESCE(SUM(total),0) FROM cobros WHERE taller_id = ? AND estado = 'registrado' AND fecha = ?) AS cobrado_hoy,
+         (SELECT COALESCE(SUM(total - cobrado),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida') AS por_cobrar`,
+      s.tallerId, mes, s.tallerId, f, s.tallerId,
+    );
+  }
+  return c.json({ porEstado, turnosHoy, stockBajo, presupuestos, ordenesRecientes, finanzas });
+});
+
+reportes.get('/reportes', requirePerm('reportes.ver'), async (c) => {
+  const s = c.get('sesion');
+  const db = c.env.DB;
+  const { desde, hasta } = query(c, z.object({ desde: zFecha, hasta: zFecha }));
+  const [resumen, porDia, porMedio, topServicios, topArticulos, porMecanico, ordenesPeriodo, compras] = await Promise.all([
+    first(
+      db,
+      `SELECT COUNT(*) AS comprobantes, COALESCE(SUM(total),0) AS total, COALESCE(SUM(neto),0) AS neto, COALESCE(SUM(iva),0) AS iva,
+              COALESCE(SUM(subtotal_servicios),0) AS servicios, COALESCE(SUM(subtotal_articulos),0) AS articulos, COALESCE(AVG(total),0) AS ticket_promedio
+         FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND fecha BETWEEN ? AND ?`,
+      s.tallerId, desde, hasta,
+    ),
+    all(db, "SELECT fecha, SUM(total) AS total, COUNT(*) AS cantidad FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND fecha BETWEEN ? AND ? GROUP BY fecha ORDER BY fecha", s.tallerId, desde, hasta),
+    all(
+      db,
+      `SELECT cm.medio, SUM(cm.importe) AS total, COUNT(*) AS cantidad FROM cobro_medios cm JOIN cobros co ON co.taller_id = cm.taller_id AND co.id = cm.cobro_id
+        WHERE cm.taller_id = ? AND co.estado = 'registrado' AND co.fecha BETWEEN ? AND ? GROUP BY cm.medio ORDER BY total DESC`,
+      s.tallerId, desde, hasta,
+    ),
+    all(
+      db,
+      `SELECT vi.descripcion, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total FROM venta_items vi JOIN ventas ve ON ve.taller_id = vi.taller_id AND ve.id = vi.venta_id
+        WHERE vi.taller_id = ? AND ve.estado = 'emitida' AND ve.fecha BETWEEN ? AND ? AND vi.tipo IN ('servicio','libre') GROUP BY vi.descripcion ORDER BY total DESC LIMIT 10`,
+      s.tallerId, desde, hasta,
+    ),
+    all(
+      db,
+      `SELECT vi.descripcion, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total, SUM(vi.cantidad * a.costo) AS costo
+         FROM venta_items vi JOIN ventas ve ON ve.taller_id = vi.taller_id AND ve.id = vi.venta_id
+         LEFT JOIN articulos a ON a.taller_id = vi.taller_id AND a.id = vi.articulo_id
+        WHERE vi.taller_id = ? AND ve.estado = 'emitida' AND ve.fecha BETWEEN ? AND ? AND vi.tipo = 'articulo' GROUP BY vi.articulo_id ORDER BY total DESC LIMIT 10`,
+      s.tallerId, desde, hasta,
+    ),
+    all(
+      db,
+      `SELECT COALESCE(m.nombre, 'Sin asignar') AS mecanico, COUNT(*) AS ordenes, SUM(o.subtotal_servicios) AS mano_obra FROM ordenes o
+         LEFT JOIN mecanicos m ON m.taller_id = o.taller_id AND m.id = o.mecanico_id
+        WHERE o.taller_id = ? AND o.estado IN ('lista','entregada') AND substr(COALESCE(o.fecha_lista, o.fecha_ingreso),1,10) BETWEEN ? AND ?
+        GROUP BY o.mecanico_id ORDER BY ordenes DESC`,
+      s.tallerId, desde, hasta,
+    ),
+    first(
+      db,
+      `SELECT COUNT(*) AS ingresadas, SUM(estado = 'entregada') AS entregadas, SUM(estado = 'cancelada') AS canceladas
+         FROM ordenes WHERE taller_id = ? AND substr(fecha_ingreso,1,10) BETWEEN ? AND ?`,
+      s.tallerId, desde, hasta,
+    ),
+    first(db, "SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total FROM compras WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?", s.tallerId, desde, hasta),
+  ]);
+  return c.json({ resumen, porDia, porMedio, topServicios, topArticulos, porMecanico, ordenesPeriodo, compras });
+});
+
+reportes.get('/buscar', requirePerm('operacion'), async (c) => {
+  const s = c.get('sesion');
+  const { q } = query(c, z.object({ q: z.string().trim().min(2).max(60) }));
+  const pat = normalizarPatente(q);
+  const num = q.replace(/\D/g, '');
+  const [clientes, vehiculos, ordenes] = await Promise.all([
+    all(c.env.DB, 'SELECT id, codigo, nombre, telefono FROM clientes WHERE taller_id = ? AND activo = 1 AND (nombre LIKE ? OR documento LIKE ? OR telefono LIKE ?) LIMIT 6', s.tallerId, like(q), like(q), like(q)),
+    pat.length >= 2
+      ? all(
+          c.env.DB,
+          `SELECT v.id, v.patente, ma.nombre AS marca, mo.nombre AS modelo, c.nombre AS cliente FROM vehiculos v JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
+             LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id
+            WHERE v.taller_id = ? AND v.activo = 1 AND v.patente LIKE ? LIMIT 6`,
+          s.tallerId,
+          like(pat),
+        )
+      : Promise.resolve([]),
+    num
+      ? all(
+          c.env.DB,
+          `SELECT o.id, o.numero, o.estado, c.nombre AS cliente, v.patente FROM ordenes o JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id
+             JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id WHERE o.taller_id = ? AND CAST(o.numero AS TEXT) LIKE ? ORDER BY o.numero DESC LIMIT 6`,
+          s.tallerId,
+          `${num}%`,
+        )
+      : Promise.resolve([]),
+  ]);
+  return c.json({ clientes, vehiculos, ordenes });
+});

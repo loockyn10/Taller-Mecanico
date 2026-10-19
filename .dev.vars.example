@@ -1,0 +1,2 @@
+# Copiar a .dev.vars para desarrollo local. En producción: `wrangler secret put PLATFORM_ADMIN_TOKEN`.
+PLATFORM_ADMIN_TOKEN=dev-platform-token-cambiar

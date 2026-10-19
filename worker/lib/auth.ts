@@ -1,0 +1,100 @@
+import type { MiddlewareHandler } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import type { AppEnv, Sesion } from '../env';
+import { tienePermiso, type Permiso, type Rol } from '../../shared/permisos';
+import { ApiError, forbidden } from './http';
+import { sha256Hex, tokenAleatorio } from './crypto';
+import { ahora, first, run } from './db';
+
+export const COOKIE = 'fierro_sid';
+
+function esLocal(url: string) {
+  const h = new URL(url).hostname;
+  return h === 'localhost' || h === '127.0.0.1';
+}
+
+export async function crearSesion(c: Parameters<MiddlewareHandler<AppEnv>>[0], usuarioId: string, tallerId: string) {
+  const token = tokenAleatorio();
+  const dias = Number(c.env.SESSION_DAYS ?? 14);
+  const expira = new Date(Date.now() + dias * 86400_000).toISOString();
+  await run(
+    c.env.DB,
+    'INSERT INTO sesiones (token_hash, usuario_id, taller_id, expires_at, user_agent) VALUES (?, ?, ?, ?, ?)',
+    await sha256Hex(token),
+    usuarioId,
+    tallerId,
+    expira,
+    (c.req.header('user-agent') ?? '').slice(0, 200),
+  );
+  setCookie(c, COOKIE, token, {
+    httpOnly: true,
+    secure: !esLocal(c.req.url),
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: dias * 86400,
+  });
+}
+
+export async function cerrarSesion(c: Parameters<MiddlewareHandler<AppEnv>>[0]) {
+  const token = getCookie(c, COOKIE);
+  if (token) await run(c.env.DB, 'DELETE FROM sesiones WHERE token_hash = ?', await sha256Hex(token));
+  deleteCookie(c, COOKIE, { path: '/' });
+}
+
+/**
+ * Autentica la solicitud y fija la sesión. El taller_id SIEMPRE proviene de la sesión del servidor,
+ * nunca de parámetros de la solicitud: esa es la base de la separación entre empresas.
+ */
+export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const token = getCookie(c, COOKIE);
+  if (!token) throw new ApiError(401, 'no_autenticado', 'Iniciá sesión para continuar');
+  const fila = await first<{
+    usuario_id: string; taller_id: string; expires_at: string; rol: Rol; nombre: string; email: string;
+    usuario_activo: number; taller_activo: number; licencia_estado: string | null;
+  }>(
+    c.env.DB,
+    `SELECT s.usuario_id, s.taller_id, s.expires_at, u.rol, u.nombre, u.email, u.activo AS usuario_activo,
+            t.activo AS taller_activo, l.estado AS licencia_estado
+       FROM sesiones s
+       JOIN usuarios u ON u.id = s.usuario_id AND u.taller_id = s.taller_id
+       JOIN talleres t ON t.id = s.taller_id
+       LEFT JOIN licencias l ON l.taller_id = s.taller_id
+      WHERE s.token_hash = ?`,
+    await sha256Hex(token),
+  );
+  if (!fila || fila.expires_at < ahora() || !fila.usuario_activo || !fila.taller_activo) {
+    deleteCookie(c, COOKIE, { path: '/' });
+    throw new ApiError(401, 'sesion_invalida', 'Tu sesión expiró. Iniciá sesión nuevamente');
+  }
+  const sesion: Sesion = {
+    usuarioId: fila.usuario_id,
+    tallerId: fila.taller_id,
+    rol: fila.rol,
+    nombre: fila.nombre,
+    email: fila.email,
+    licenciaActiva: fila.licencia_estado === 'activa',
+  };
+  // Con la licencia suspendida el taller conserva acceso de solo lectura a sus datos.
+  if (!sesion.licenciaActiva && c.req.method !== 'GET' && !c.req.path.startsWith('/api/auth/')) {
+    throw new ApiError(403, 'licencia_suspendida', 'La licencia del taller está suspendida: solo se permite consultar información');
+  }
+  c.set('sesion', sesion);
+  await next();
+};
+
+export function requirePerm(...permisos: Permiso[]): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const s = c.get('sesion');
+    if (!permisos.every((p) => tienePermiso(s.rol, p))) throw forbidden();
+    await next();
+  };
+}
+
+/** Protección CSRF: las mutaciones deben enviarse como JSON (un formulario de otro sitio no puede hacerlo sin preflight CORS). */
+export const requireJson: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+    const ct = c.req.header('content-type') ?? '';
+    if (!ct.includes('application/json')) throw new ApiError(415, 'tipo_contenido', 'Las solicitudes deben enviarse como application/json');
+  }
+  await next();
+};

@@ -1,0 +1,25 @@
+{
+  // Fierro: API (Hono) + SPA servida como assets estáticos desde el mismo Worker.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fierro",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-04-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fierro",
+      // Reemplazar por el id real con `wrangler d1 create fierro` antes de desplegar.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "PBKDF2_ITERATIONS": "100000",
+    "SESSION_DAYS": "14"
+  }
+}
