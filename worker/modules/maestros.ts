@@ -197,7 +197,7 @@ export async function proximosServices(db: D1Database, tallerId: string, vehicul
     tallerId,
     ...(vehiculoId ? [vehiculoId] : []),
   );
-  const hoyMs = Date.now();
+  const hoyMs = Date.now() - 3 * 3600_000;
   return rows
     .map((r) => {
       const proximoKm = r.intervalo_km && r.km_realizado != null ? r.km_realizado + r.intervalo_km : null;

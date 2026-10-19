@@ -7,7 +7,11 @@
 
 export const uid = () => crypto.randomUUID();
 export const ahora = () => new Date().toISOString();
-export const hoy = () => new Date().toISOString().slice(0, 10);
+/**
+ * Fecha comercial del día en la zona horaria de Argentina (UTC-3, sin horario de verano).
+ * Las fechas de negocio (comprobantes, cobros, turnos) no deben usar la fecha UTC: después de las 21 h serían "mañana".
+ */
+export const hoy = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
 
 export type Stmt = D1PreparedStatement;
 

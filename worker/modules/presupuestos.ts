@@ -23,7 +23,7 @@ const zPresupuesto = zParametrosTotales.extend({
 
 const SELECT = `SELECT p.*, c.nombre AS cliente, c.telefono AS cliente_telefono, v.patente, ma.nombre AS marca, mo.nombre AS modelo,
     o.numero AS orden_numero,
-    CASE WHEN p.estado IN ('pendiente','aprobado') AND p.valido_hasta IS NOT NULL AND p.valido_hasta < date('now') THEN 1 ELSE 0 END AS vencido
+    CASE WHEN p.estado IN ('pendiente','aprobado') AND p.valido_hasta IS NOT NULL AND p.valido_hasta < date('now', '-3 hours') THEN 1 ELSE 0 END AS vencido
   FROM presupuestos p
   JOIN clientes c ON c.taller_id = p.taller_id AND c.id = p.cliente_id
   JOIN vehiculos v ON v.taller_id = p.taller_id AND v.id = p.vehiculo_id
@@ -42,7 +42,7 @@ presupuestos.get('/', async (c) => {
   const { estado, q, desde, hasta } = query(c, z.object({ estado: z.string().optional(), q: z.string().optional(), desde: z.string().optional(), hasta: z.string().optional() }));
   const cond = ['p.taller_id = ?'];
   const params: unknown[] = [s.tallerId];
-  if (estado === 'vencido') cond.push("p.estado IN ('pendiente','aprobado') AND p.valido_hasta < date('now')");
+  if (estado === 'vencido') cond.push("p.estado IN ('pendiente','aprobado') AND p.valido_hasta < date('now', '-3 hours')");
   else if (estado) (cond.push('p.estado = ?'), params.push(estado));
   if (q) (cond.push('(c.nombre LIKE ? OR v.patente LIKE ? OR CAST(p.numero AS TEXT) = ?)'), params.push(like(q), like(normalizarPatente(q) || q), q.replace(/\D/g, '')));
   if (desde) (cond.push('p.fecha >= ?'), params.push(desde));

@@ -1,0 +1,57 @@
+@import 'tailwindcss';
+
+/* Sistema de diseño de Fierro: tokens centralizados */
+@theme {
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --color-marca-50: #eef3ff;
+  --color-marca-100: #dce6ff;
+  --color-marca-200: #b9ccff;
+  --color-marca-300: #8aa8fb;
+  --color-marca-400: #5a7ff2;
+  --color-marca-500: #355ee3;
+  --color-marca-600: #1c3faa;
+  --color-marca-700: #18348c;
+  --color-marca-800: #152c72;
+  --color-marca-900: #11235a;
+
+  --color-ambar-400: #f7b955;
+  --color-ambar-500: #f5a524;
+  --color-ambar-600: #d98a0c;
+
+  --color-fondo: #f6f7f9;
+  --color-superficie: #ffffff;
+  --color-borde: #e3e6eb;
+  --color-texto: #18202c;
+  --color-tenue: #5d6878;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  background: var(--color-fondo);
+  color: var(--color-texto);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Inputs numéricos sin flechas (los importes se escriben) */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+  @page {
+    margin: 12mm;
+  }
+}

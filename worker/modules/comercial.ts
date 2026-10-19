@@ -65,6 +65,8 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
       observaciones: zTextoOpt(500),
       items: z.array(zItem).min(1).max(200),
       idem_key: z.string().min(8).max(80),
+      // Cobro inmediato del total (venta de contado): se registra en la misma transacción.
+      cobro: z.object({ medio: z.enum(MEDIOS_PAGO), referencia: zTextoOpt(120) }).nullish(),
     }),
   );
   const previa = await first(c.env.DB, `${SELECT_VENTA} WHERE ve.taller_id = ? AND ve.idem_key = ?`, s.tallerId, d.idem_key);
@@ -99,6 +101,17 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
         { articuloId, delta: -cant, tipo: 'venta', origenTipo: 'venta', origenId: id, idemKey: `venta:${d.idem_key}:${articuloId}`, usuarioId: s.usuarioId },
         negativo,
       ),
+    );
+  }
+  if (d.cobro && t.total > 0) {
+    const cobroId = uid();
+    stmts.push(
+      ...seqIncrementar(c.env.DB, s.tallerId, 'cobro'),
+      c.env.DB.prepare(`INSERT INTO cobros (id, taller_id, numero, cliente_id, fecha, total, idem_key, notas, usuario_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?)`)
+        .bind(cobroId, s.tallerId, s.tallerId, 'cobro', clienteId, d.fecha ?? hoy(), t.total, `venta:${d.idem_key}`, 'Cobro de venta de mostrador', s.usuarioId),
+      c.env.DB.prepare('INSERT INTO cobro_medios (id, taller_id, cobro_id, medio, importe, referencia) VALUES (?, ?, ?, ?, ?, ?)').bind(uid(), s.tallerId, cobroId, d.cobro.medio, t.total, d.cobro.referencia),
+      c.env.DB.prepare('INSERT INTO cobro_aplicaciones (id, taller_id, cobro_id, venta_id, importe) VALUES (?, ?, ?, ?, ?)').bind(uid(), s.tallerId, cobroId, id, t.total),
+      c.env.DB.prepare('UPDATE ventas SET cobrado = cobrado + ? WHERE taller_id = ? AND id = ?').bind(t.total, s.tallerId, id),
     );
   }
   stmts.push(auditar(c.env.DB, s.tallerId, s.usuarioId, 'venta', id, 'crear', { total: t.total }));

@@ -7,7 +7,7 @@ export class ApiError extends Error {
   }
 }
 
-export const notFound = (what = 'Registro') => new ApiError(404, 'no_encontrado', `${what} no encontrado`);
+export const notFound = (what = 'Registro') => new ApiError(404, 'no_encontrado', `${what} inexistente o sin acceso`);
 export const badRequest = (msg: string, details?: unknown) => new ApiError(400, 'datos_invalidos', msg, details);
 export const conflict = (msg: string, code = 'conflicto') => new ApiError(409, code, msg);
 export const forbidden = (msg = 'No tenés permiso para esta acción') => new ApiError(403, 'sin_permiso', msg);

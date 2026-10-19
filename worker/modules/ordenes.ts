@@ -284,7 +284,7 @@ ordenes.post('/:id/comprobante', requirePerm('ventas.emitir'), async (c) => {
     // Copia los totales calculados de la OT: el comprobante refleja exactamente lo trabajado.
     c.env.DB.prepare(
       `INSERT INTO ventas (id, taller_id, numero, cliente_id, orden_id, fecha, condicion, observaciones, created_by, ${COLS_TOTALES})
-       SELECT ?, taller_id, ${SEQ_VALOR}, cliente_id, id, date('now'), ?, ?, ?, ${COLS_TOTALES} FROM ordenes WHERE taller_id = ? AND id = ?`,
+       SELECT ?, taller_id, ${SEQ_VALOR}, cliente_id, id, date('now', '-3 hours'), ?, ?, ?, ${COLS_TOTALES} FROM ordenes WHERE taller_id = ? AND id = ?`,
     ).bind(ventaId, s.tallerId, 'venta', d.condicion, d.observaciones ?? `OT #${o.numero}`, s.usuarioId, s.tallerId, id),
     c.env.DB.prepare(
       `INSERT INTO venta_items (id, taller_id, venta_id, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, alicuota_iva, subtotal)

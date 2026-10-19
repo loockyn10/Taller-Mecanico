@@ -2,6 +2,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Api, idem, nuevoTaller } from './cliente';
 
+// Fecha comercial argentina (la API usa UTC-3 para las fechas de negocio).
+const hoyAR = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+
 let api: Api;
 const ctx: Record<string, any> = {};
 
@@ -188,7 +191,7 @@ describe('flujo operativo completo', () => {
   it('dashboard, reportes y búsqueda global responden con datos del taller', async () => {
     const d = (await api.get('/api/dashboard')).body;
     expect(d.finanzas.por_cobrar).toBe(4196000);
-    const hoy = new Date().toISOString().slice(0, 10);
+    const hoy = hoyAR();
     const r = (await api.get(`/api/reportes?desde=${hoy}&hasta=${hoy}`)).body;
     expect(r.resumen.total).toBe(9196000);
     const b = (await api.get('/api/buscar?q=AB123')).body;
@@ -207,6 +210,13 @@ describe('ventas de mostrador, compras y stock', () => {
     expect(ok[0].body.cliente).toBe('Consumidor final');
     expect((await api.post(`/api/ventas/${ok[0].body.id}/anular`, { motivo: 'devolución' })).status).toBe(200);
     expect((await api.get(`/api/articulos/${ctx.articulo}`)).body.stock).toBe(3);
+  });
+
+  it('venta de contado con cobro inmediato queda saldada en una sola operación', async () => {
+    const r = await api.post('/api/ventas', { items: [{ tipo: 'libre', descripcion: 'Lavado de motor', cantidad: 1, precio_unitario: 1500000 }], cobro: { medio: 'efectivo' }, idem_key: idem() });
+    expect(r.status).toBe(201);
+    expect(r.body.cobrado).toBe(1500000);
+    expect(r.body.saldo).toBe(0);
   });
 
   it('impide vender más que el stock disponible', async () => {
@@ -265,7 +275,7 @@ describe('agenda', () => {
     const p = await api.post('/api/presupuestos', { cliente_id: ctx.cliente.id, vehiculo_id: ctx.vehiculo.id, items: [{ tipo: 'libre', descripcion: 'Revisión', cantidad: 1, precio_unitario: 100000 }] });
     await api.post(`/api/presupuestos/${p.body.id}/estado`, { estado: 'aprobado' });
     expect((await api.get('/api/turnos/pendientes')).body.map((x: any) => x.id)).toContain(p.body.id);
-    const fecha = new Date().toISOString().slice(0, 10);
+    const fecha = hoyAR();
     const t = await api.post('/api/turnos', { fecha, hora: '09:30', cliente_id: ctx.cliente.id, vehiculo_id: ctx.vehiculo.id, presupuesto_id: p.body.id, motivo: 'Revisión' });
     expect(t.status).toBe(201);
     expect((await api.get('/api/turnos/pendientes')).body.map((x: any) => x.id)).not.toContain(p.body.id);
