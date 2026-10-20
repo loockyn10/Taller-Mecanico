@@ -67,3 +67,10 @@ export function updateParcial(db: D1Database, tabla: string, tallerId: string, i
 export function like(q: string) {
   return `%${q.replace(/[%_]/g, '')}%`;
 }
+
+/** Divide una lista en lotes: D1 admite como máximo 100 parámetros por consulta (usar lotes de ≤ 90 en los IN). */
+export function lotes<T>(items: readonly T[], tam = 90): T[][] {
+  const r: T[][] = [];
+  for (let i = 0; i < items.length; i += tam) r.push(items.slice(i, i + tam));
+  return r;
+}

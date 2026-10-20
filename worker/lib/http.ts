@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { z, type ZodTypeAny } from 'zod';
+import { esCantidadValida } from '../../shared/dominio';
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public details?: unknown) {
@@ -77,3 +78,6 @@ export const zTextoOpt = (max = 200) =>
 export const zFecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'fecha inválida (AAAA-MM-DD)');
 export const zCentavos = z.number().int().min(0).max(1e13);
 export const zPct = z.number().min(0).max(100);
+
+/** Cantidad positiva con hasta 3 decimales (el stock se opera con esa precisión). */
+export const zCantidad = z.number().positive('la cantidad debe ser mayor a 0').max(1e6).refine(esCantidadValida, 'admite hasta 3 decimales');

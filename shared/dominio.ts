@@ -109,3 +109,40 @@ export const CHECKLIST_ITEMS = {
   accesorios: ['Rueda de auxilio', 'Criquet / llave', 'Matafuego', 'Balizas', 'Llave de seguridad', 'Segunda llave', 'Documentación', 'Estéreo / pantalla'],
   ingreso: ['Funcionando', 'Llega en grúa', 'Arranca con dificultad', 'No arranca'],
 } as const;
+
+// ───── Caja y finanzas ─────
+export const TIPOS_CATEGORIA_GASTO = ['operativo', 'fijo', 'impuestos', 'otro'] as const;
+export type TipoCategoriaGasto = (typeof TIPOS_CATEGORIA_GASTO)[number];
+export const TIPO_CATEGORIA_GASTO_LABEL: Record<TipoCategoriaGasto, string> = {
+  operativo: 'Operativo',
+  fijo: 'Fijo',
+  impuestos: 'Impuestos',
+  otro: 'Otro',
+};
+
+export const FRECUENCIAS_GASTO = ['semanal', 'mensual', 'bimestral', 'trimestral', 'anual'] as const;
+export type FrecuenciaGasto = (typeof FRECUENCIAS_GASTO)[number];
+export const FRECUENCIA_GASTO_LABEL: Record<FrecuenciaGasto, string> = {
+  semanal: 'Semanal',
+  mensual: 'Mensual',
+  bimestral: 'Bimestral',
+  trimestral: 'Trimestral',
+  anual: 'Anual',
+};
+
+export const RUBROS_CAJA = ['cobro', 'pago_proveedor', 'gasto', 'otro_ingreso'] as const;
+export type RubroCaja = (typeof RUBROS_CAJA)[number];
+export const RUBRO_CAJA_LABEL: Record<RubroCaja, string> = {
+  cobro: 'Cobros de clientes',
+  pago_proveedor: 'Pagos a proveedores',
+  gasto: 'Gastos',
+  otro_ingreso: 'Otros ingresos',
+};
+
+export const DESTINOS_PRECIO_BASE = ['costo', 'precio'] as const;
+export const REDONDEOS_PRECIO = [0, 100, 1000, 10000] as const; // en centavos: sin redondeo, $1, $10, $100
+export const REDONDEO_PRECIO_LABEL: Record<number, string> = { 0: 'Sin redondeo', 100: 'A $1', 1000: 'A $10', 10000: 'A $100' };
+
+/** Cantidades de stock: se operan siempre con 3 decimales (evita errores de coma flotante). */
+export const redondearCantidad = (n: number) => Math.round(n * 1000) / 1000;
+export const esCantidadValida = (n: number) => Number.isFinite(n) && Math.abs(n * 1000 - Math.round(n * 1000)) < 1e-6;

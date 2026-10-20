@@ -2,14 +2,14 @@
 import { z } from 'zod';
 import { calcularTotales, type ResultadoCalculo } from '../../shared/totals';
 import { all, uid, type Stmt } from './db';
-import { badRequest, zCentavos, zId, zPct } from './http';
+import { badRequest, zCantidad, zCentavos, zId, zPct } from './http';
 
 export const zItem = z.object({
   tipo: z.enum(['articulo', 'servicio', 'libre']),
   articulo_id: zId.nullish(),
   servicio_id: zId.nullish(),
   descripcion: z.string().trim().min(1, 'descripción requerida').max(300),
-  cantidad: z.number().positive('cantidad debe ser mayor a 0').max(1e6),
+  cantidad: zCantidad,
   precio_unitario: zCentavos,
   desc_pct: zPct.default(0),
 });

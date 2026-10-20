@@ -13,6 +13,9 @@ import { comercial } from './modules/comercial';
 import { compras } from './modules/compras';
 import { agenda } from './modules/agenda';
 import { reportes } from './modules/reportes';
+import { caja } from './modules/caja';
+import { gastos, finanzas } from './modules/gastos';
+import { precios } from './modules/precios';
 
 const app = new Hono<AppEnv>();
 
@@ -39,6 +42,10 @@ api.route('/', comercial);
 api.route('/', compras);
 api.route('/turnos', agenda);
 api.route('/', reportes);
+api.route('/caja', caja);
+api.route('/', gastos);
+api.route('/finanzas', finanzas);
+api.route('/', precios);
 app.route('/api', api);
 
 app.all('/api/*', (c) => c.json({ error: { code: 'no_encontrado', message: 'Ruta inexistente' } }, 404));

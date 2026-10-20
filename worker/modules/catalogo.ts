@@ -6,7 +6,9 @@ import { badRequest, body, conflict, notFound, query, zCentavos, zId, zTextoOpt 
 import { all, auditar, delTaller, first, like, run, uid, updateParcial } from '../lib/db';
 import { requirePerm } from '../lib/auth';
 import { permiteNegativo, sentenciasMovimiento } from '../lib/stock';
-import { TIPOS_VEHICULO, CONDICIONES_IVA } from '../../shared/dominio';
+import { TIPOS_VEHICULO, CONDICIONES_IVA, redondearCantidad, esCantidadValida } from '../../shared/dominio';
+import { precioArticuloEnLista, precioServicioEnLista, type ReglaLista } from '../../shared/precios';
+import { resolverLista } from '../lib/listas';
 
 export const catalogo = new Hono<AppEnv>();
 
@@ -52,7 +54,9 @@ const zServicio = z.object({
 
 catalogo.get('/servicios', requirePerm('catalogo.ver'), async (c) => {
   const s = c.get('sesion');
-  const { q, todos } = query(c, z.object({ q: z.string().optional(), todos: z.string().optional() }));
+  const { q, todos, lista_id } = query(c, z.object({ q: z.string().optional(), todos: z.string().optional(), lista_id: z.string().optional() }));
+  const lst = lista_id ? await resolverLista(c.env.DB, s.tallerId, lista_id) : null;
+  const reglaLista = lst ? await first<{ servicios_pct: number | null; redondeo: number }>(c.env.DB, 'SELECT servicios_pct, redondeo FROM listas_precios WHERE taller_id = ? AND id = ?', s.tallerId, lst.id) : null;
   const rows = await all<Record<string, unknown>>(
     c.env.DB,
     `SELECT se.*, cs.nombre AS categoria FROM servicios se LEFT JOIN categorias_servicio cs ON cs.taller_id = se.taller_id AND cs.id = se.categoria_id
@@ -61,7 +65,7 @@ catalogo.get('/servicios', requirePerm('catalogo.ver'), async (c) => {
     s.tallerId,
     ...(q ? [like(q)] : []),
   );
-  return c.json(rows.map((r) => ({ ...r, checks: JSON.parse(String(r.checks ?? '[]')) })));
+  return c.json(rows.map((r) => ({ ...r, checks: JSON.parse(String(r.checks ?? '[]')), ...(reglaLista ? { precio_lista: precioServicioEnLista(reglaLista, r.precio as number) } : {}) })));
 });
 
 async function validarCategoriaServicio(db: D1Database, tallerId: string, id?: string | null) {
@@ -204,8 +208,9 @@ const zArticulo = z.object({
   costo: zCentavos.default(0),
   precio: zCentavos.default(0),
   alicuota_iva: z.number().refine((v) => [0, 2.5, 5, 10.5, 21, 27].includes(v), 'alícuota inválida').default(21),
-  stock_inicial: z.number().min(0).max(1e9).default(0),
-  stock_minimo: z.number().min(0).max(1e9).default(0),
+  stock_inicial: z.number().min(0).max(1e9).refine(esCantidadValida, 'admite hasta 3 decimales').default(0),
+  stock_minimo: z.number().min(0).max(1e9).refine(esCantidadValida, 'admite hasta 3 decimales').default(0),
+  stock_objetivo: z.number().min(0).max(1e9).refine(esCantidadValida, 'admite hasta 3 decimales').nullish(),
   unidad: z.enum(['un', 'lt', 'kg', 'm', 'juego']).default('un'),
   ubicacion: zTextoOpt(80),
   activo: z.boolean().optional(),
@@ -213,26 +218,31 @@ const zArticulo = z.object({
 
 catalogo.get('/articulos', requirePerm('catalogo.ver'), async (c) => {
   const s = c.get('sesion');
-  const { q, categoria_id, bajo_stock, limite } = query(
+  const { q, categoria_id, bajo_stock, limite, lista_id } = query(
     c,
-    z.object({ q: z.string().optional(), categoria_id: z.string().optional(), bajo_stock: z.string().optional(), limite: z.coerce.number().int().min(1).max(1000).default(300) }),
+    z.object({ q: z.string().optional(), categoria_id: z.string().optional(), bajo_stock: z.string().optional(), lista_id: z.string().optional(), limite: z.coerce.number().int().min(1).max(1000).default(300) }),
   );
+  const lst = lista_id ? await first<ReglaLista & { id: string }>(c.env.DB, 'SELECT id, base, porcentaje, redondeo, servicios_pct FROM listas_precios WHERE taller_id = ? AND id = ?', s.tallerId, lista_id) : null;
+  if (lista_id && !lst) throw badRequest('Lista de precios inexistente');
   const cond = ['a.taller_id = ?', 'a.activo = 1'];
   const params: unknown[] = [s.tallerId];
   if (q) (cond.push('(a.nombre LIKE ? OR a.codigo LIKE ? OR a.marca LIKE ?)'), params.push(like(q), like(q), like(q)));
   if (categoria_id) (cond.push('a.categoria_id = ?'), params.push(categoria_id));
   if (bajo_stock) cond.push('a.stock <= a.stock_minimo');
-  return c.json(
-    await all(
-      c.env.DB,
-      `SELECT a.*, ca.nombre AS categoria, p.nombre AS proveedor FROM articulos a
+  const filas = await all<{ costo: number; precio: number; precio_fijo?: number | null }>(
+    c.env.DB,
+    `SELECT a.*, ca.nombre AS categoria, p.nombre AS proveedor${lst ? ', li.precio AS precio_fijo' : ''} FROM articulos a
          LEFT JOIN categorias_articulo ca ON ca.taller_id = a.taller_id AND ca.id = a.categoria_id
          LEFT JOIN proveedores p ON p.taller_id = a.taller_id AND p.id = a.proveedor_id
+         ${lst ? 'LEFT JOIN lista_precio_items li ON li.taller_id = a.taller_id AND li.articulo_id = a.id AND li.lista_id = ?' : ''}
         WHERE ${cond.join(' AND ')} ORDER BY a.nombre COLLATE NOCASE LIMIT ?`,
-      ...params,
-      limite,
-    ),
+    ...(lst ? [lst.id] : []),
+    ...params,
+    limite,
   );
+  if (!lst) return c.json(filas);
+  // La lista no modifica el artículo: agrega `precio_lista` (fijo de la lista o calculado por su regla).
+  return c.json(filas.map((a) => ({ ...a, precio_lista: precioArticuloEnLista(lst, a, a.precio_fijo ?? null).precio })));
 });
 
 catalogo.get('/articulos/:id', requirePerm('catalogo.ver'), async (c) => {
@@ -269,9 +279,9 @@ catalogo.post('/articulos', requirePerm('catalogo.editar'), async (c) => {
   const id = uid();
   const stmts = [
     c.env.DB.prepare(
-      `INSERT INTO articulos (id, taller_id, codigo, nombre, marca, categoria_id, proveedor_id, costo, precio, alicuota_iva, stock, stock_minimo, unidad, ubicacion)
-       VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
-    ).bind(id, s.tallerId, d.codigo, d.nombre, d.marca, d.categoria_id ?? null, d.proveedor_id ?? null, d.costo, d.precio, d.alicuota_iva, d.stock_minimo, d.unidad, d.ubicacion),
+      `INSERT INTO articulos (id, taller_id, codigo, nombre, marca, categoria_id, proveedor_id, costo, precio, alicuota_iva, stock, stock_minimo, stock_objetivo, unidad, ubicacion)
+       VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)`,
+    ).bind(id, s.tallerId, d.codigo, d.nombre, d.marca, d.categoria_id ?? null, d.proveedor_id ?? null, d.costo, d.precio, d.alicuota_iva, redondearCantidad(d.stock_minimo), d.stock_objetivo ?? null, d.unidad, d.ubicacion),
   ];
   // El stock inicial queda registrado como movimiento (trazabilidad completa del inventario).
   if (d.stock_inicial > 0) {
@@ -291,7 +301,7 @@ catalogo.put('/articulos/:id', requirePerm('catalogo.editar'), async (c) => {
   const datos: Record<string, unknown> = { ...d };
   if (d.activo !== undefined) datos.activo = d.activo ? 1 : 0;
   // El stock NO se edita directamente: solo mediante movimientos.
-  const st = updateParcial(c.env.DB, 'articulos', s.tallerId, id, datos, ['codigo', 'nombre', 'marca', 'categoria_id', 'proveedor_id', 'costo', 'precio', 'alicuota_iva', 'stock_minimo', 'unidad', 'ubicacion', 'activo']);
+  const st = updateParcial(c.env.DB, 'articulos', s.tallerId, id, datos, ['codigo', 'nombre', 'marca', 'categoria_id', 'proveedor_id', 'costo', 'precio', 'alicuota_iva', 'stock_minimo', 'stock_objetivo', 'unidad', 'ubicacion', 'activo']);
   if (st) await c.env.DB.batch([st, auditar(c.env.DB, s.tallerId, s.usuarioId, 'articulo', id, 'modificar')]);
   return c.json({ ok: true });
 });
@@ -325,18 +335,18 @@ catalogo.post('/stock/movimientos', requirePerm('stock.ajustar'), async (c) => {
     z.object({
       articulo_id: zId,
       tipo: z.enum(['entrada', 'salida', 'ajuste']),
-      cantidad: z.number().min(0).max(1e9), // entrada/salida: cantidad; ajuste: stock final contado
+      cantidad: z.number().min(0).max(1e9).refine(esCantidadValida, 'admite hasta 3 decimales'), // entrada/salida: cantidad; ajuste: stock final contado
       notas: zTextoOpt(300),
       idem_key: z.string().min(8).max(80),
     }),
   );
   const a = await delTaller<{ stock: number; costo: number }>(c.env.DB, 'articulos', s.tallerId, d.articulo_id, 'stock, costo');
   if (!a) throw notFound('Artículo');
-  let delta = d.tipo === 'entrada' ? d.cantidad : d.tipo === 'salida' ? -d.cantidad : d.cantidad - a.stock;
+  const delta = redondearCantidad(d.tipo === 'entrada' ? d.cantidad : d.tipo === 'salida' ? -d.cantidad : d.cantidad - a.stock);
   if (d.tipo !== 'ajuste' && d.cantidad <= 0) throw badRequest('La cantidad debe ser mayor a cero');
   if (delta === 0) throw badRequest('El movimiento no modifica el stock');
   const negativo = await permiteNegativo(c.env.DB, s.tallerId);
-  if (!negativo && a.stock + delta < 0) throw conflict(`Stock insuficiente (disponible ${a.stock})`, 'stock_insuficiente');
+  if (!negativo && redondearCantidad(a.stock + delta) < 0) throw conflict(`Stock insuficiente (disponible ${a.stock})`, 'stock_insuficiente');
   const stmts = [];
   if (d.tipo === 'ajuste') {
     // El ajuste fija el stock contado: si otro movimiento ocurrió entre la lectura y la escritura, se aborta.

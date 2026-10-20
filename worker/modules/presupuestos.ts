@@ -3,8 +3,10 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zFecha, zId, zTextoOpt } from '../lib/http';
-import { all, auditar, first, guard, hoy, like, SEQ_VALOR, seqIncrementar, uid } from '../lib/db';
+import { all, auditar, first, guard, like, SEQ_VALOR, seqIncrementar, uid } from '../lib/db';
 import { requirePerm } from '../lib/auth';
+import { fechaComercial } from '../lib/fechas';
+import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
 import { normalizarPatente } from '../../shared/dominio';
 
@@ -16,6 +18,7 @@ const zPresupuesto = zParametrosTotales.extend({
   vehiculo_id: zId,
   fecha: zFecha.optional(),
   valido_hasta: zFecha.nullish(),
+  lista_precio_id: zId.nullish(),
   km: z.number().int().min(0).max(5_000_000).nullish(),
   observaciones: zTextoOpt(2000),
   items: z.array(zItem).min(1, 'el presupuesto debe tener al menos un ítem').max(200),
@@ -65,7 +68,8 @@ presupuestos.post('/', async (c) => {
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
   const t = totales(items, d);
   const cfg = await first<{ validez_presupuesto_dias: number }>(c.env.DB, 'SELECT validez_presupuesto_dias FROM taller_config WHERE taller_id = ?', s.tallerId);
-  const fecha = d.fecha ?? hoy();
+  const fecha = fechaComercial(s, d.fecha);
+  const lista = await resolverLista(c.env.DB, s.tallerId, d.lista_precio_id);
   const valido = d.valido_hasta ?? new Date(Date.parse(fecha) + (cfg?.validez_presupuesto_dias ?? 15) * 86400_000).toISOString().slice(0, 10);
   const id = uid();
   await c.env.DB.batch([
@@ -75,6 +79,7 @@ presupuestos.post('/', async (c) => {
        VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ${COLS_TOTALES.split(',').map(() => '?').join(',')})`,
     ).bind(id, s.tallerId, s.tallerId, 'presupuesto', d.cliente_id, d.vehiculo_id, fecha, valido, d.km ?? null, d.observaciones, s.usuarioId, ...valoresTotales(d, t)),
     ...sentenciasItems(c.env.DB, 'presupuesto_items', 'presupuesto_id', s.tallerId, id, items, t.subtotales),
+    ...(lista ? [sentenciaListaEnDocumento(c.env.DB, 'presupuestos', s.tallerId, id, lista)] : []),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'presupuesto', id, 'crear', { total: t.total }),
   ]);
   return c.json(await first(c.env.DB, `${SELECT} WHERE p.taller_id = ? AND p.id = ?`, s.tallerId, id), 201);
@@ -84,9 +89,12 @@ presupuestos.put('/:id', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const d = await body(c, zPresupuesto);
-  const p = await first<{ estado: string }>(c.env.DB, 'SELECT estado FROM presupuestos WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  const p = await first<{ estado: string; lista_precio_id: string | null; fecha: string }>(c.env.DB, 'SELECT estado, lista_precio_id, fecha FROM presupuestos WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!p) throw notFound('Presupuesto');
   if (p.estado !== 'pendiente') throw conflict('Solo se pueden editar presupuestos pendientes');
+  // Editar sin tocar la fecha la conserva; una fecha nueva se valida como cualquier fecha comercial.
+  const fechaNueva = d.fecha && d.fecha !== p.fecha ? fechaComercial(s, d.fecha) : null;
+  const lista = await resolverLista(c.env.DB, s.tallerId, d.lista_precio_id, p.lista_precio_id);
   await validarClienteVehiculo(c.env.DB, s.tallerId, d.cliente_id, d.vehiculo_id);
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
   const t = totales(items, d);
@@ -95,9 +103,10 @@ presupuestos.put('/:id', async (c) => {
     c.env.DB.prepare(
       `UPDATE presupuestos SET cliente_id = ?, vehiculo_id = ?, fecha = COALESCE(?, fecha), valido_hasta = ?, km = ?, observaciones = ?, ${SET_TOTALES},
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id = ? AND id = ?`,
-    ).bind(d.cliente_id, d.vehiculo_id, d.fecha ?? null, d.valido_hasta ?? null, d.km ?? null, d.observaciones, ...valoresTotales(d, t), s.tallerId, id),
+    ).bind(d.cliente_id, d.vehiculo_id, fechaNueva, d.valido_hasta ?? null, d.km ?? null, d.observaciones, ...valoresTotales(d, t), s.tallerId, id),
     c.env.DB.prepare('DELETE FROM presupuesto_items WHERE taller_id = ? AND presupuesto_id = ?').bind(s.tallerId, id),
     ...sentenciasItems(c.env.DB, 'presupuesto_items', 'presupuesto_id', s.tallerId, id, items, t.subtotales),
+    sentenciaListaEnDocumento(c.env.DB, 'presupuestos', s.tallerId, id, lista),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'presupuesto', id, 'modificar', { total: t.total }),
   ]);
   return c.json({ ok: true });
@@ -152,6 +161,8 @@ presupuestos.post('/:id/convertir', async (c) => {
        SELECT ?, taller_id, ${SEQ_VALOR}, cliente_id, vehiculo_id, id, ?, ?, observaciones, ?, ?, ?, ${COLS_TOTALES}
          FROM presupuestos WHERE taller_id = ? AND id = ?`,
     ).bind(ordenId, s.tallerId, 'orden', d.mecanico_id ?? null, km, new Date().toISOString(), d.fecha_prometida ?? null, s.usuarioId, s.tallerId, id),
+    c.env.DB.prepare('UPDATE ordenes SET lista_precio_id = (SELECT lista_precio_id FROM presupuestos WHERE taller_id = ? AND id = ?), lista_precio_nombre = (SELECT lista_precio_nombre FROM presupuestos WHERE taller_id = ? AND id = ?) WHERE taller_id = ? AND id = ?')
+      .bind(s.tallerId, id, s.tallerId, id, s.tallerId, ordenId),
     c.env.DB.prepare(
       `INSERT INTO orden_items (id, taller_id, orden_id, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, subtotal)
        SELECT lower(hex(randomblob(16))), taller_id, ?, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, subtotal

@@ -202,12 +202,12 @@ describe('flujo operativo completo', () => {
 describe('ventas de mostrador, compras y stock', () => {
   it('venta de mostrador descuenta stock, es idempotente y su anulación lo repone', async () => {
     const key = idem();
-    const venta = { items: [{ tipo: 'articulo', articulo_id: ctx.articulo, descripcion: 'Filtro', cantidad: 1, precio_unitario: 800000 }], idem_key: key };
+    const venta = { items: [{ tipo: 'articulo', articulo_id: ctx.articulo, descripcion: 'Filtro', cantidad: 1, precio_unitario: 800000 }], cliente_id: ctx.cliente.id, condicion: 'cuenta_corriente', idem_key: key };
     const [a, b] = await Promise.all([api.post('/api/ventas', venta), api.post('/api/ventas', venta)]);
     const ok = [a, b].filter((r) => r.status === 201 || r.status === 200);
     expect(new Set(ok.map((r) => r.body.id)).size).toBe(1);
     expect((await api.get(`/api/articulos/${ctx.articulo}`)).body.stock).toBe(2);
-    expect(ok[0].body.cliente).toBe('Consumidor final');
+    expect(ok[0].body.cliente_id).toBe(ctx.cliente.id);
     expect((await api.post(`/api/ventas/${ok[0].body.id}/anular`, { motivo: 'devolución' })).status).toBe(200);
     expect((await api.get(`/api/articulos/${ctx.articulo}`)).body.stock).toBe(3);
   });
@@ -220,7 +220,7 @@ describe('ventas de mostrador, compras y stock', () => {
   });
 
   it('impide vender más que el stock disponible', async () => {
-    const r = await api.post('/api/ventas', { items: [{ tipo: 'articulo', articulo_id: ctx.articulo, descripcion: 'Filtro', cantidad: 99, precio_unitario: 1 }], idem_key: idem() });
+    const r = await api.post('/api/ventas', { items: [{ tipo: 'articulo', articulo_id: ctx.articulo, descripcion: 'Filtro', cantidad: 99, precio_unitario: 1 }], cobro: { medio: 'efectivo' }, idem_key: idem() });
     expect(r.status).toBe(409);
     expect((await api.get(`/api/articulos/${ctx.articulo}`)).body.stock).toBe(3);
   });

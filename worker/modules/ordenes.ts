@@ -3,8 +3,12 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zFecha, zId, zTextoOpt } from '../lib/http';
-import { all, auditar, first, guard, like, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
+import { all, auditar, first, guard, hoy, like, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
 import { requirePerm } from '../lib/auth';
+import { sentenciasCobro } from '../lib/cobros';
+import { exigirCajaAbiertaSiCorresponde } from '../lib/caja';
+import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
+import { MEDIOS_PAGO } from '../../shared/dominio';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
 import { agrupar, permiteNegativo, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
@@ -33,6 +37,7 @@ const zOrden = zParametrosTotales.extend({
   diagnostico: zTextoOpt(2000),
   observaciones: zTextoOpt(2000),
   fecha_prometida: zFecha.nullish(),
+  lista_precio_id: zId.nullish(),
   turno_id: zId.nullish(),
   items: z.array(zItem).max(200).default([]),
 });
@@ -97,6 +102,7 @@ ordenes.post('/', async (c) => {
   }
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
   const t = totales(items, d);
+  const lista = await resolverLista(c.env.DB, s.tallerId, d.lista_precio_id);
   const id = uid();
   const stmts: Stmt[] = [
     ...seqIncrementar(c.env.DB, s.tallerId, 'orden'),
@@ -108,6 +114,7 @@ ordenes.post('/', async (c) => {
       new Date().toISOString(), d.fecha_prometida ?? null, s.usuarioId, ...valoresTotales(d, t),
     ),
     ...sentenciasItems(c.env.DB, 'orden_items', 'orden_id', s.tallerId, id, items, t.subtotales),
+    ...(lista ? [sentenciaListaEnDocumento(c.env.DB, 'ordenes', s.tallerId, id, lista)] : []),
     c.env.DB.prepare("INSERT INTO orden_eventos (id, taller_id, orden_id, estado_nuevo, usuario_id) VALUES (?, ?, ?, 'recibida', ?)").bind(uid(), s.tallerId, id, s.usuarioId),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'crear', { total: t.total }),
   ];
@@ -127,9 +134,9 @@ ordenes.put('/:id', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const d = await body(c, zOrden.omit({ turno_id: true }).extend({ version: z.number().int().min(1) }));
-  const o = await first<{ estado: EstadoOT; version: number; km_ingreso: number | null; vehiculo_id: string }>(
+  const o = await first<{ estado: EstadoOT; version: number; km_ingreso: number | null; vehiculo_id: string; lista_precio_id: string | null }>(
     c.env.DB,
-    'SELECT estado, version, km_ingreso, vehiculo_id FROM ordenes WHERE taller_id = ? AND id = ?',
+    'SELECT estado, version, km_ingreso, vehiculo_id, lista_precio_id FROM ordenes WHERE taller_id = ? AND id = ?',
     s.tallerId,
     id,
   );
@@ -139,6 +146,7 @@ ordenes.put('/:id', async (c) => {
   await validarCabecera(c.env.DB, s.tallerId, d, o.vehiculo_id === d.vehiculo_id ? o.km_ingreso : null);
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
   const t = totales(items, d);
+  const lista = await resolverLista(c.env.DB, s.tallerId, d.lista_precio_id, o.lista_precio_id);
   const stmts: Stmt[] = [
     guard(
       c.env.DB,
@@ -151,6 +159,7 @@ ordenes.put('/:id', async (c) => {
     ).bind(d.cliente_id, d.vehiculo_id, d.mecanico_id ?? null, d.km_ingreso ?? null, d.falla_reportada, d.diagnostico, d.observaciones, d.fecha_prometida ?? null, ...valoresTotales(d, t), s.tallerId, id),
     c.env.DB.prepare('DELETE FROM orden_items WHERE taller_id = ? AND orden_id = ?').bind(s.tallerId, id),
     ...sentenciasItems(c.env.DB, 'orden_items', 'orden_id', s.tallerId, id, items, t.subtotales),
+    sentenciaListaEnDocumento(c.env.DB, 'ordenes', s.tallerId, id, lista),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'modificar', { total: t.total }),
   ];
   if (d.km_ingreso != null) stmts.push(c.env.DB.prepare('UPDATE vehiculos SET km_actual = MAX(km_actual, ?) WHERE taller_id = ? AND id = ?').bind(d.km_ingreso, s.tallerId, d.vehiculo_id));
@@ -270,22 +279,42 @@ ordenes.put('/:id/checklist', async (c) => {
 ordenes.post('/:id/comprobante', requirePerm('ventas.emitir'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const d = await body(c, z.object({ condicion: z.enum(['contado', 'cuenta_corriente']).default('contado'), observaciones: zTextoOpt(500) }));
-  const o = await first<{ estado: EstadoOT; total: number; numero: number }>(c.env.DB, 'SELECT estado, total, numero FROM ordenes WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  const d = await body(
+    c,
+    z.object({
+      condicion: z.enum(['contado', 'cuenta_corriente']).default('cuenta_corriente'),
+      observaciones: zTextoOpt(500),
+      // Emitir y cobrar el total en el acto (contado): el cobro y su ingreso de caja van en la misma transacción.
+      cobro: z.object({ medio: z.enum(MEDIOS_PAGO), referencia: zTextoOpt(120) }).nullish(),
+    }),
+  );
+  const o = await first<{ estado: EstadoOT; total: number; numero: number; cliente_id: string }>(c.env.DB, 'SELECT estado, total, numero, cliente_id FROM ordenes WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!o) throw notFound('Orden de trabajo');
+  if (d.condicion === 'cuenta_corriente' && d.cobro) throw badRequest('Un comprobante a cuenta corriente no se cobra en el acto');
+  // "Contado" significa cobrado; la cuenta corriente exige un cliente identificado.
+  if (d.condicion === 'contado' && o.total > 0 && !d.cobro) throw badRequest('Un comprobante de contado se cobra en el momento: elegí el medio de pago o emitilo a cuenta corriente');
+  if (d.cobro?.medio === 'cheque' && !d.cobro.referencia) throw badRequest('Indicá el número de cheque en la referencia');
+  if (d.condicion === 'cuenta_corriente' && (await first(c.env.DB, 'SELECT 1 FROM clientes WHERE taller_id = ? AND id = ? AND codigo = 0', s.tallerId, o.cliente_id))) {
+    throw badRequest('La cuenta corriente requiere un cliente identificado (no "Consumidor final")');
+  }
+  const cobrar = d.condicion === 'contado' && !!d.cobro && o.total > 0;
+  if (cobrar) await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   if (!ESTADOS_OT_CON_STOCK.includes(o.estado)) throw conflict('El comprobante se genera cuando la OT está "Lista para entregar" o "Entregada"');
   if (await first(c.env.DB, "SELECT 1 FROM ventas WHERE taller_id = ? AND orden_id = ? AND estado = 'emitida'", s.tallerId, id)) throw conflict('La OT ya tiene un comprobante vigente', 'duplicado');
   const nItems = await first<{ n: number }>(c.env.DB, 'SELECT COUNT(*) AS n FROM orden_items WHERE taller_id = ? AND orden_id = ?', s.tallerId, id);
   if (!nItems?.n) throw conflict('La OT no tiene ítems para facturar');
   const ventaId = uid();
+  const fechaVenta = hoy();
   await c.env.DB.batch([
     guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM ordenes WHERE taller_id = ? AND id = ? AND estado IN ('lista','entregada'))", s.tallerId, id),
     ...seqIncrementar(c.env.DB, s.tallerId, 'venta'),
     // Copia los totales calculados de la OT: el comprobante refleja exactamente lo trabajado.
     c.env.DB.prepare(
       `INSERT INTO ventas (id, taller_id, numero, cliente_id, orden_id, fecha, condicion, observaciones, created_by, ${COLS_TOTALES})
-       SELECT ?, taller_id, ${SEQ_VALOR}, cliente_id, id, date('now', '-3 hours'), ?, ?, ?, ${COLS_TOTALES} FROM ordenes WHERE taller_id = ? AND id = ?`,
-    ).bind(ventaId, s.tallerId, 'venta', d.condicion, d.observaciones ?? `OT #${o.numero}`, s.usuarioId, s.tallerId, id),
+       SELECT ?, taller_id, ${SEQ_VALOR}, cliente_id, id, ?, ?, ?, ?, ${COLS_TOTALES} FROM ordenes WHERE taller_id = ? AND id = ?`,
+    ).bind(ventaId, s.tallerId, 'venta', fechaVenta, d.condicion, d.observaciones ?? `OT #${o.numero}`, s.usuarioId, s.tallerId, id),
+    c.env.DB.prepare('UPDATE ventas SET lista_precio_id = (SELECT lista_precio_id FROM ordenes WHERE taller_id = ? AND id = ?), lista_precio_nombre = (SELECT lista_precio_nombre FROM ordenes WHERE taller_id = ? AND id = ?) WHERE taller_id = ? AND id = ?')
+      .bind(s.tallerId, id, s.tallerId, id, s.tallerId, ventaId),
     c.env.DB.prepare(
       `INSERT INTO venta_items (id, taller_id, venta_id, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, alicuota_iva, subtotal)
        SELECT lower(hex(randomblob(16))), oi.taller_id, ?, oi.orden, oi.tipo, oi.articulo_id, oi.servicio_id, oi.descripcion, oi.cantidad, oi.precio_unitario, oi.desc_pct,
@@ -293,6 +322,13 @@ ordenes.post('/:id/comprobante', requirePerm('ventas.emitir'), async (c) => {
          FROM orden_items oi LEFT JOIN articulos a ON a.taller_id = oi.taller_id AND a.id = oi.articulo_id
         WHERE oi.taller_id = ? AND oi.orden_id = ?`,
     ).bind(ventaId, s.tallerId, id),
+    ...(cobrar
+      ? sentenciasCobro(c.env.DB, s, {
+          id: uid(), clienteId: o.cliente_id, fecha: fechaVenta, idemKey: `comprobante:${ventaId}`, notas: `Cobro del comprobante de OT #${o.numero}`,
+          medios: [{ medio: d.cobro!.medio, importe: o.total, referencia: d.cobro!.referencia }],
+          aplicaciones: [{ ventaId, importe: o.total }],
+        })
+      : []),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'venta', ventaId, 'crear_desde_ot', { orden_id: id }),
   ]);
   return c.json(await first(c.env.DB, 'SELECT id, numero, total FROM ventas WHERE taller_id = ? AND id = ?', s.tallerId, ventaId), 201);

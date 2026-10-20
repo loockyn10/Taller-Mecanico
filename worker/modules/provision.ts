@@ -58,6 +58,11 @@ const SERVICIOS: Array<[string, Array<[string, number, number | null, number | n
   ['Varios', [['Mano de obra por hora', 25000, null, null], ['Revisión general / pre-VTV', 30000, null, 12]]],
 ];
 
+export const CATEGORIAS_GASTO: Array<[string, 'operativo' | 'fijo' | 'impuestos' | 'otro']> = [
+  ['Alquiler', 'fijo'], ['Servicios (luz, agua, internet)', 'fijo'], ['Sueldos y jornales', 'fijo'], ['Impuestos y tasas', 'impuestos'], ['Insumos de taller', 'operativo'],
+  ['Herramientas y equipos', 'operativo'], ['Mantenimiento', 'operativo'], ['Limpieza', 'operativo'], ['Combustible y fletes', 'operativo'], ['Publicidad', 'fijo'], ['Varios', 'otro'],
+];
+
 const CATEGORIAS_ARTICULO = ['Aceites y lubricantes', 'Filtros', 'Frenos', 'Encendido', 'Suspensión', 'Refrigeración', 'Correas y distribución', 'Baterías', 'Varios'];
 
 export interface DatosTallerNuevo {
@@ -104,6 +109,7 @@ export function sentenciasAltaTaller(db: D1Database, d: DatosTallerNuevo): { tal
       );
     }
   });
+  for (const [nombre, tipo] of CATEGORIAS_GASTO) s.push(db.prepare('INSERT INTO categorias_gasto (id, taller_id, nombre, tipo) VALUES (?, ?, ?, ?)').bind(uid(), tallerId, nombre, tipo));
   for (const c of CATEGORIAS_ARTICULO) s.push(db.prepare('INSERT INTO categorias_articulo (id, taller_id, nombre) VALUES (?, ?, ?)').bind(uid(), tallerId, c));
   return { tallerId, propietarioId, stmts: s };
 }

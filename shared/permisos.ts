@@ -20,10 +20,15 @@ export const PERMISOS = [
   'usuarios.gestionar',
   'licencia.ver',
   'registros.eliminar',
+  'caja.operar', // abrir/cerrar caja, arqueo, ingresos y egresos manuales
+  'finanzas.ver', // historial de cajas, resúmenes y reportes financieros, listado de gastos
+  'gastos.gestionar', // categorías, gastos recurrentes, anulación de gastos y movimientos manuales
+  'precios.gestionar', // listas de precios y ajustes masivos
+  'fechas.retroactivas', // cargar comprobantes con fecha pasada
 ] as const;
 export type Permiso = (typeof PERMISOS)[number];
 
-const EMPLEADO: Permiso[] = ['operacion', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar'];
+const EMPLEADO: Permiso[] = ['operacion', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar'];
 
 export const PERMISOS_POR_ROL: Record<Rol, readonly Permiso[]> = {
   propietario: PERMISOS,

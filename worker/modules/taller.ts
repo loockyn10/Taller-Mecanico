@@ -40,6 +40,7 @@ taller.put('/config', requirePerm('config.editar'), async (c) => {
         margen_default: z.number().min(0).max(1000),
         pie_documentos: zTextoOpt(1000),
         permitir_stock_negativo: z.boolean(),
+        caja_obligatoria: z.boolean().default(false),
       }),
     }),
   );
@@ -50,8 +51,8 @@ taller.put('/config', requirePerm('config.editar'), async (c) => {
       .bind(t.nombre, t.razon_social, t.cuit, t.condicion_iva, t.direccion, t.localidad, t.telefono, t.email, s.tallerId),
     c.env.DB.prepare(
       `UPDATE taller_config SET iva_default=?, recargo_default=?, validez_presupuesto_dias=?, margen_default=?, pie_documentos=?,
-              permitir_stock_negativo=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id=?`,
-    ).bind(k.iva_default, k.recargo_default, k.validez_presupuesto_dias, k.margen_default, k.pie_documentos, k.permitir_stock_negativo ? 1 : 0, s.tallerId),
+              permitir_stock_negativo=?, caja_obligatoria=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id=?`,
+    ).bind(k.iva_default, k.recargo_default, k.validez_presupuesto_dias, k.margen_default, k.pie_documentos, k.permitir_stock_negativo ? 1 : 0, k.caja_obligatoria ? 1 : 0, s.tallerId),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'config', s.tallerId, 'actualizar'),
   ]);
   return c.json({ ok: true });
