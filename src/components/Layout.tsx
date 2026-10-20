@@ -1,64 +1,13 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  BarChart3, Banknote, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, LogOut, Menu, Package, PackageSearch, PiggyBank, Receipt, Scale, ScrollText, Search, Settings, ShoppingCart, Tags, Truck, Users, Wallet, Wrench, X,
-} from 'lucide-react';
+import { CalendarDays, ChevronDown, ChevronRight, Gauge, LogOut, Menu, Search, Users, Wrench, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
+import { buscarSecciones, gruposVisibles, resaltar, ubicar, type ItemNav } from '@/lib/navegacion';
 import type { Permiso } from '@shared/permisos';
 import { ROL_LABEL } from '@shared/permisos';
 import { Boton, cn, useDebounce } from './ui';
-
-interface ItemNav {
-  a: string;
-  texto: string;
-  icono: ReactNode;
-  permiso?: Permiso;
-}
-const SECCIONES: Array<{ titulo: string; items: ItemNav[] }> = [
-  {
-    titulo: 'Taller',
-    items: [
-      { a: '/', texto: 'Inicio', icono: <Gauge className="size-[18px]" /> },
-      { a: '/ordenes', texto: 'Órdenes de trabajo', icono: <Wrench className="size-[18px]" />, permiso: 'operacion' },
-      { a: '/presupuestos', texto: 'Presupuestos', icono: <FileText className="size-[18px]" />, permiso: 'operacion' },
-      { a: '/agenda', texto: 'Agenda', icono: <CalendarDays className="size-[18px]" />, permiso: 'operacion' },
-      { a: '/clientes', texto: 'Clientes', icono: <Users className="size-[18px]" />, permiso: 'operacion' },
-      { a: '/vehiculos', texto: 'Vehículos', icono: <Car className="size-[18px]" />, permiso: 'operacion' },
-      { a: '/recordatorios', texto: 'Recordatorios', icono: <Bell className="size-[18px]" />, permiso: 'operacion' },
-    ],
-  },
-  {
-    titulo: 'Comercial',
-    items: [
-      { a: '/ventas', texto: 'Ventas y comprobantes', icono: <Receipt className="size-[18px]" />, permiso: 'ventas.ver' },
-      { a: '/cobros', texto: 'Cobros', icono: <Wallet className="size-[18px]" />, permiso: 'ventas.ver' },
-      { a: '/cuentas', texto: 'Cuentas corrientes', icono: <ClipboardList className="size-[18px]" />, permiso: 'ventas.ver' },
-      { a: '/caja', texto: 'Caja', icono: <Banknote className="size-[18px]" />, permiso: 'caja.operar' },
-      { a: '/finanzas', texto: 'Gastos y finanzas', icono: <PiggyBank className="size-[18px]" />, permiso: 'finanzas.ver' },
-      { a: '/tesoreria', texto: 'Tesorería', icono: <Scale className="size-[18px]" />, permiso: 'tesoreria.ver' },
-      { a: '/bancos', texto: 'Bancos', icono: <Landmark className="size-[18px]" />, permiso: 'bancos.gestionar' },
-      { a: '/cheques', texto: 'Cheques y eCheq', icono: <ScrollText className="size-[18px]" />, permiso: 'cheques.gestionar' },
-      { a: '/articulos', texto: 'Artículos y stock', icono: <Package className="size-[18px]" />, permiso: 'catalogo.ver' },
-      { a: '/stock', texto: 'Movimientos de stock', icono: <Boxes className="size-[18px]" />, permiso: 'stock.ver' },
-      { a: '/reposicion', texto: 'Reposición', icono: <PackageSearch className="size-[18px]" />, permiso: 'stock.ver' },
-      { a: '/listas-precios', texto: 'Listas de precios', icono: <Tags className="size-[18px]" />, permiso: 'precios.gestionar' },
-      { a: '/inventario', texto: 'Inventario', icono: <ClipboardCheck className="size-[18px]" />, permiso: 'stock.ver' },
-      { a: '/ordenes-compra', texto: 'Órdenes de compra', icono: <ClipboardList className="size-[18px]" />, permiso: 'compras.gestionar' },
-      { a: '/compras', texto: 'Compras', icono: <ShoppingCart className="size-[18px]" />, permiso: 'compras.gestionar' },
-      { a: '/facturas-proveedor', texto: 'Facturas de proveedores', icono: <FileText className="size-[18px]" />, permiso: 'compras.gestionar' },
-      { a: '/proveedores', texto: 'Proveedores', icono: <Truck className="size-[18px]" />, permiso: 'catalogo.ver' },
-      { a: '/reportes', texto: 'Estadísticas', icono: <BarChart3 className="size-[18px]" />, permiso: 'reportes.ver' },
-      { a: '/informes', texto: 'Informes', icono: <FileSpreadsheet className="size-[18px]" />, permiso: 'reportes.ver' },
-      { a: '/contabilidad', texto: 'Registros contables', icono: <Calculator className="size-[18px]" />, permiso: 'contabilidad.ver' },
-    ],
-  },
-  {
-    titulo: 'Administración',
-    items: [{ a: '/configuracion', texto: 'Configuración', icono: <Settings className="size-[18px]" /> }],
-  },
-];
 
 function Marca() {
   return (
@@ -72,36 +21,172 @@ function Marca() {
   );
 }
 
+const CLAVE_MENU = 'fierro.menu.abierto';
+const leerAbierto = (): string | null => { try { return localStorage.getItem(CLAVE_MENU); } catch { return null; } };
+const guardarAbierto = (v: string | null) => { try { v ? localStorage.setItem(CLAVE_MENU, v) : localStorage.removeItem(CLAVE_MENU); } catch { /* sin almacenamiento */ } };
+
+function EnlaceItem({ it, activo, consulta, onNavegar }: { it: ItemNav; activo: boolean; consulta?: string; onNavegar?: () => void }) {
+  return (
+    <Link
+      to={it.a}
+      onClick={onNavegar}
+      aria-current={activo ? 'page' : undefined}
+      className={cn('flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors', activo ? 'bg-marca-50 text-marca-700' : 'text-slate-600 hover:bg-slate-100 hover:text-texto')}
+    >
+      {it.icono}
+      <span className="truncate">{consulta ? resaltar(it.texto, consulta) : it.texto}</span>
+    </Link>
+  );
+}
+
+/** Menú lateral: buscador de secciones fijo arriba y grupos desplegables (acordeón) que se desplazan solos. */
 function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
   const { puede } = useAuth();
+  const loc = useLocation();
+  const nav = useNavigate();
+  const grupos = gruposVisibles(puede);
+  const actual = ubicar(loc.pathname, loc.search);
+  const [abierto, setAbierto] = useState<string | null>(() => actual?.grupo.id ?? leerAbierto());
+  const [q, setQ] = useState('');
+  const entrada = useRef<HTMLInputElement>(null);
+  const grupoActual = actual?.grupo.id;
+
+  // La categoría de la pantalla actual se abre sola al navegar; después se puede cerrar a mano.
+  useEffect(() => {
+    if (grupoActual && grupoActual !== 'inicio') setAbierto(grupoActual);
+  }, [grupoActual]);
+  useEffect(() => guardarAbierto(abierto), [abierto]);
+
+  // Atajo "/" para enfocar el buscador cuando no se está escribiendo en otro campo.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const el = entrada.current;
+      if (!el || el.offsetParent === null) return; // instancia oculta (otra vista)
+      e.preventDefault();
+      el.focus();
+      el.select();
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+
+  const resultados = buscarSecciones(grupos, q);
+  const buscando = q.trim().length > 0;
+  const ir = (it: ItemNav) => {
+    setQ('');
+    entrada.current?.blur();
+    onNavegar?.();
+    nav(it.a);
+  };
+
   return (
-    <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
-      {SECCIONES.map((s) => {
-        const items = s.items.filter((i) => !i.permiso || puede(i.permiso));
-        if (!items.length) return null;
-        return (
-          <div key={s.titulo}>
-            <div className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{s.titulo}</div>
-            <ul className="space-y-0.5">
-              {items.map((i) => (
-                <li key={i.a}>
-                  <NavLink
-                    to={i.a}
-                    end={i.a === '/'}
-                    onClick={onNavegar}
-                    className={({ isActive }) =>
-                      cn('flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors', isActive ? 'bg-marca-50 text-marca-700' : 'text-slate-600 hover:bg-slate-100 hover:text-texto')
-                    }
+    <>
+      <div className="px-3 pb-2 pt-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <input
+            ref={entrada}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { setQ(''); e.currentTarget.blur(); }
+              if (e.key === 'Enter' && resultados[0]) ir(resultados[0].items[0]);
+            }}
+            placeholder="Buscar sección..."
+            aria-label="Buscar sección"
+            className="h-9 w-full rounded-lg border border-borde bg-slate-50 pl-8 pr-7 text-sm outline-none placeholder:text-slate-400 focus:border-marca-400 focus:bg-white focus:ring-2 focus:ring-marca-100"
+          />
+          {buscando ? (
+            <button type="button" onClick={() => { setQ(''); entrada.current?.focus(); }} aria-label="Limpiar búsqueda" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-texto">
+              <X className="size-3.5" />
+            </button>
+          ) : (
+            <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-borde bg-white px-1.5 text-[11px] text-tenue lg:block">/</kbd>
+          )}
+        </div>
+      </div>
+      <nav className="flex-1 overflow-y-auto px-3 pb-4" aria-label="Secciones">
+        {buscando ? (
+          resultados.length ? (
+            resultados.map((r) => (
+              <div key={r.grupo.id} className="mt-2">
+                <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{r.grupo.titulo}</div>
+                <ul className="space-y-0.5">
+                  {r.items.map((i) => (
+                    <li key={i.id}>
+                      <EnlaceItem it={i} activo={actual?.item.id === i.id} consulta={q} onNavegar={() => { setQ(''); onNavegar?.(); }} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          ) : (
+            <p className="px-2 py-6 text-center text-sm text-tenue">No se encontraron secciones</p>
+          )
+        ) : (
+          <ul className="space-y-0.5">
+            {grupos.map((g) => {
+              if (g.id === 'inicio') {
+                const it = g.items[0];
+                return (
+                  <li key={g.id}>
+                    <EnlaceItem it={{ ...it, texto: 'Inicio' }} activo={actual?.item.id === it.id} onNavegar={onNavegar} />
+                  </li>
+                );
+              }
+              const abre = abierto === g.id;
+              const contieneActivo = actual?.grupo.id === g.id;
+              return (
+                <li key={g.id}>
+                  <button
+                    type="button"
+                    onClick={() => setAbierto(abre ? null : g.id)}
+                    aria-expanded={abre}
+                    aria-controls={`menu-${g.id}`}
+                    className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-semibold transition-colors hover:bg-slate-100', contieneActivo ? 'text-marca-700' : 'text-slate-700')}
                   >
-                    {i.icono}
-                    {i.texto}
-                  </NavLink>
+                    {g.icono}
+                    <span className="flex-1 text-left">{g.titulo}</span>
+                    <ChevronDown className={cn('size-4 text-slate-400 transition-transform duration-200', abre && 'rotate-180')} />
+                  </button>
+                  <div id={`menu-${g.id}`} className={cn('grid transition-[grid-template-rows] duration-200 ease-out', abre ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+                    <ul className={cn('ml-4 min-h-0 space-y-0.5 overflow-hidden border-l border-borde pl-2', abre ? 'mt-0.5 pb-1' : 'invisible')}>
+                      {g.items.map((i) => (
+                        <li key={i.id}>
+                          <EnlaceItem it={i} activo={actual?.item.id === i.id} onNavegar={onNavegar} />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </li>
-              ))}
-            </ul>
-          </div>
-        );
-      })}
+              );
+            })}
+          </ul>
+        )}
+      </nav>
+    </>
+  );
+}
+
+/** Migas de pan: módulo › sección › pantalla. Sólo aparecen fuera del inicio. */
+function Migas() {
+  const loc = useLocation();
+  const u = ubicar(loc.pathname, loc.search);
+  if (!u || u.grupo.id === 'inicio') return null;
+  return (
+    <nav aria-label="Ubicación" className="no-print mb-3 flex flex-wrap items-center gap-1 text-xs text-tenue">
+      <span>{u.grupo.titulo}</span>
+      <ChevronRight className="size-3" />
+      {u.detalle ? <Link to={u.item.a} className="hover:text-marca-700 hover:underline">{u.item.texto}</Link> : <span className="font-medium text-texto">{u.item.texto}</span>}
+      {u.detalle && (
+        <>
+          <ChevronRight className="size-3" />
+          <span className="font-medium text-texto">{u.detalle}</span>
+        </>
+      )}
     </nav>
   );
 }
@@ -236,6 +321,7 @@ export function Layout() {
         )}
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-7xl px-3 py-5 pb-24 sm:px-6 lg:pb-8">
+            <Migas />
             <Outlet />
           </div>
         </main>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -488,7 +488,7 @@ type Tab = 'taller' | 'usuarios' | 'mecanicos' | 'servicios' | 'catalogos' | 'li
 
 export function Configuracion() {
   const { puede } = useAuth();
-  const [tab, setTab] = useState<Tab>('taller');
+  const [sp, setSp] = useSearchParams();
   const items: Array<{ clave: Tab; titulo: string; ok: boolean }> = [
     { clave: 'taller', titulo: 'Taller y preferencias', ok: true },
     { clave: 'usuarios', titulo: 'Usuarios y permisos', ok: puede('usuarios.gestionar') },
@@ -499,6 +499,10 @@ export function Configuracion() {
     { clave: 'auditoria', titulo: 'Actividad', ok: puede('config.editar') },
     { clave: 'cuenta', titulo: 'Mi cuenta', ok: true },
   ];
+  // La pestaña viaja en la dirección (?tab=…) para poder enlazarla desde el menú lateral.
+  const pedido = sp.get('tab');
+  const tab: Tab = items.some((i) => i.ok && i.clave === pedido) ? (pedido as Tab) : 'taller';
+  const setTab = (k: Tab) => setSp(k === 'taller' ? {} : { tab: k }, { replace: true });
   return (
     <>
       <Encabezado titulo="Configuración" />
