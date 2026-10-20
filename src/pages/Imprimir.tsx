@@ -9,10 +9,17 @@ import { useAuth } from '@/lib/auth';
 import { fecha, km, money, numero, cantidad } from '@/lib/format';
 import { Boton, Cargando, ErrorCaja } from '@/components/ui';
 import { CONDICION_IVA_LABEL, ESTADO_OT_LABEL, type CondicionIva, type EstadoOT } from '@shared/dominio';
+import { ImprimirDinero } from './ImprimirDinero';
 
 const RUTA: Record<string, string> = { presupuesto: '/presupuestos/', orden: '/ordenes/', 'orden-taller': '/ordenes/', venta: '/ventas/' };
 
+/** Recibos y estados de cuenta tienen su propia vista; el resto de los documentos comparte ésta. */
 export function Imprimir() {
+  const { tipo = '' } = useParams();
+  return tipo === 'recibo' || tipo === 'cuenta' ? <ImprimirDinero /> : <ImprimirDocumento />;
+}
+
+function ImprimirDocumento() {
   const { tipo = '', id } = useParams();
   const { me } = useAuth();
   const { data: d, isLoading, error } = useQuery({ queryKey: ['imprimir', tipo, id], queryFn: () => api.get(`${RUTA[tipo]}${id}`), enabled: !!RUTA[tipo] });

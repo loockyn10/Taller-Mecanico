@@ -32,7 +32,7 @@ describe('caja diaria', () => {
 
   it('dos aperturas simultáneas: sólo una prospera', async () => {
     const [a, b] = await Promise.all([api.post('/api/caja/abrir', { saldo_inicial: 50000 }), emp.post('/api/caja/abrir', { saldo_inicial: 50000 })]);
-    expect([a.status, b.status].sort()).toEqual([201, 409]);
+    expect([a.status, b.status].sort(), JSON.stringify([a.body, b.body])).toEqual([201, 409]);
     const e = await estado();
     expect(e.sesion.estado).toBe('abierta');
     expect(e.sesion.saldo_inicial).toBe(50000);

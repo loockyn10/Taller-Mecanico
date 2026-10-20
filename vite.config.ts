@@ -38,7 +38,8 @@ export default defineConfig({
     }),
   ],
   server: {
-    port: 5173,
-    proxy: { '/api': { target: 'http://127.0.0.1:8787', changeOrigin: false } },
+    // Puertos configurables (FIERRO_WEB_PORT / FIERRO_API_PORT) para correr una segunda instancia sin pisar la de siempre.
+    port: Number(process.env.FIERRO_WEB_PORT ?? 5173),
+    proxy: { '/api': { target: `http://127.0.0.1:${process.env.FIERRO_API_PORT ?? 8787}`, changeOrigin: false } },
   },
 });

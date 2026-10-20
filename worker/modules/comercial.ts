@@ -133,8 +133,9 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
 });
 
 async function alicuotasItems(db: D1Database, tallerId: string, items: Array<{ tipo: string; articulo_id?: string | null }>): Promise<number[]> {
-  const ids = items.map((i) => i.articulo_id).filter(Boolean) as string[];
-  const rows = ids.length ? await all<{ id: string; alicuota_iva: number }>(db, `SELECT id, alicuota_iva FROM articulos WHERE taller_id = ? AND id IN (${ids.map(() => '?').join(',')})`, tallerId, ...ids) : [];
+  const ids = [...new Set(items.map((i) => i.articulo_id).filter(Boolean) as string[])];
+  const rows: Array<{ id: string; alicuota_iva: number }> = [];
+  for (const lote of lotes(ids)) rows.push(...(await all<{ id: string; alicuota_iva: number }>(db, `SELECT id, alicuota_iva FROM articulos WHERE taller_id = ? AND id IN (${lote.map(() => '?').join(',')})`, tallerId, ...lote)));
   return items.map((i) => rows.find((r) => r.id === i.articulo_id)?.alicuota_iva ?? 21);
 }
 

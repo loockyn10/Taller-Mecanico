@@ -1,7 +1,7 @@
 // Ítems y totales compartidos por presupuestos, órdenes y ventas.
 import { z } from 'zod';
 import { calcularTotales, type ResultadoCalculo } from '../../shared/totals';
-import { all, uid, type Stmt } from './db';
+import { all, lotes, uid, type Stmt } from './db';
 import { badRequest, zCantidad, zCentavos, zId, zPct } from './http';
 
 export const zItem = z.object({
@@ -32,12 +32,14 @@ export async function validarItems(db: D1Database, tallerId: string, items: Item
     if (it.tipo === 'servicio' && !it.servicio_id) throw badRequest('Los ítems de tipo servicio requieren servicio_id');
   }
   if (artIds.length) {
-    const ok = await all<{ id: string }>(db, `SELECT id FROM articulos WHERE taller_id = ? AND id IN (${artIds.map(() => '?').join(',')})`, tallerId, ...artIds);
-    if (ok.length !== artIds.length) throw badRequest('Hay artículos inexistentes');
+    let ok = 0;
+    for (const lote of lotes(artIds)) ok += (await all(db, `SELECT id FROM articulos WHERE taller_id = ? AND id IN (${lote.map(() => '?').join(',')})`, tallerId, ...lote)).length;
+    if (ok !== artIds.length) throw badRequest('Hay artículos inexistentes');
   }
   if (srvIds.length) {
-    const ok = await all<{ id: string }>(db, `SELECT id FROM servicios WHERE taller_id = ? AND id IN (${srvIds.map(() => '?').join(',')})`, tallerId, ...srvIds);
-    if (ok.length !== srvIds.length) throw badRequest('Hay servicios inexistentes');
+    let ok = 0;
+    for (const lote of lotes(srvIds)) ok += (await all(db, `SELECT id FROM servicios WHERE taller_id = ? AND id IN (${lote.map(() => '?').join(',')})`, tallerId, ...lote)).length;
+    if (ok !== srvIds.length) throw badRequest('Hay servicios inexistentes');
   }
   return items.map((i) => ({
     ...i,

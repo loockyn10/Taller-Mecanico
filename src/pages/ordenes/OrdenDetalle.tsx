@@ -9,7 +9,8 @@ import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, ResumenTotales, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 import { useMecanicos } from '@/components/selectores';
-import { ModalCobro } from '@/components/Cobro';
+import { ModalCobro, ModalEmitirCobrar } from '@/components/Cobro';
+import { SelectorLista } from '@/components/SelectorLista';
 import { calcularTotales } from '@shared/totals';
 import { CHECKLIST_ITEMS, COMBUSTIBLE_NIVELES, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, type EstadoOT } from '@shared/dominio';
 
@@ -133,10 +134,13 @@ export function OrdenDetalle() {
   const [items, setItems] = useState<ItemUI[]>([]);
   const [params, setParams] = useState<ParamsUI>({ desc_global_pct: 0, desc_global_monto: 0, iva_pct: 0, recargo_pct: 0 });
   const [cab, setCab] = useState({ mecanico_id: '', km_ingreso: '', falla_reportada: '', diagnostico: '', observaciones: '', fecha_prometida: '' });
+  const [lista, setLista] = useState<string | null>(null);
+  const [emitirCobrar, setEmitirCobrar] = useState(false);
 
   useEffect(() => {
     if (!o) return;
     setItems(itemsDesdeApi(o.items));
+    setLista(o.lista_precio_id ?? null);
     setParams({ desc_global_pct: o.desc_global_pct, desc_global_monto: o.desc_global_monto, iva_pct: o.iva_pct, recargo_pct: o.recargo_pct });
     setCab({
       mecanico_id: o.mecanico_id ?? '',
@@ -159,6 +163,7 @@ export function OrdenDetalle() {
         diagnostico: cab.diagnostico,
         observaciones: cab.observaciones,
         fecha_prometida: cab.fecha_prometida || null,
+        lista_precio_id: lista,
         items: itemsParaApi(items),
         version: o.version,
         ...params,
@@ -173,10 +178,11 @@ export function OrdenDetalle() {
   });
 
   const comprobante = useMutation({
-    mutationFn: (condicion: string) => api.post(`/ordenes/${id}/comprobante`, { condicion }),
+    mutationFn: (datos: { condicion: string; cobro?: { medio: string; referencia: string | null } }) => api.post(`/ordenes/${id}/comprobante`, datos),
     onSuccess: (v) => {
-      ['orden', 'ventas', 'dashboard', 'cuentas'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+      ['orden', 'ventas', 'dashboard', 'cuentas', 'cobros', 'caja', 'finanzas'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       toast.ok(`Comprobante interno #${numero(v.numero)} generado`);
+      setEmitirCobrar(false);
       setTab('cobro');
     },
     onError: toast.error,
@@ -255,7 +261,8 @@ export function OrdenDetalle() {
                     <Campo label="Diagnóstico" className="sm:col-span-2"><Textarea value={cab.diagnostico} onChange={(e) => setCab({ ...cab, diagnostico: e.target.value })} rows={2} /></Campo>
                     <Campo label="Observaciones" className="sm:col-span-2"><Textarea value={cab.observaciones} onChange={(e) => setCab({ ...cab, observaciones: e.target.value })} rows={2} /></Campo>
                   </div>
-                  <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} />
+                  <SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} nombreActual={o.lista_precio_nombre} />
+                  <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} />
                 </div>
               ) : (
                 <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} soloLectura />
@@ -286,8 +293,8 @@ export function OrdenDetalle() {
                       <p className="text-sm text-tenue">Generá el comprobante interno con los ítems de la OT para registrar la deuda del cliente y cobrarla.</p>
                       <ResumenTotales t={calcularTotales(o.items, o)} params={o} />
                       <div className="flex flex-wrap gap-2">
-                        <Boton variante="primario" icono={<Receipt className="size-4" />} cargando={comprobante.isPending} onClick={() => comprobante.mutate('contado')}>Generar comprobante (contado)</Boton>
-                        <Boton icono={<Receipt className="size-4" />} cargando={comprobante.isPending} onClick={() => comprobante.mutate('cuenta_corriente')}>A cuenta corriente</Boton>
+                        {puede('cobros.registrar') && <Boton variante="primario" icono={<Wallet className="size-4" />} cargando={comprobante.isPending} onClick={() => setEmitirCobrar(true)}>Emitir y cobrar ({money(o.total)})</Boton>}
+                        <Boton icono={<Receipt className="size-4" />} disabled={o.cliente_codigo === 0} title={o.cliente_codigo === 0 ? 'La cuenta corriente requiere un cliente identificado' : undefined} cargando={comprobante.isPending} onClick={() => comprobante.mutate({ condicion: 'cuenta_corriente' })}>Emitir a cuenta corriente</Boton>
                       </div>
                       <p className="text-xs text-tenue">Comprobante interno, no fiscal. La facturación electrónica ARCA todavía no está integrada.</p>
                     </div>
@@ -328,6 +335,7 @@ export function OrdenDetalle() {
               <Dato etiqueta="Falla reportada" className="col-span-2">{o.falla_reportada}</Dato>
               <Dato etiqueta="Diagnóstico" className="col-span-2">{o.diagnostico}</Dato>
               <Dato etiqueta="Observaciones" className="col-span-2">{o.observaciones}</Dato>
+              {o.lista_precio_nombre && <Dato etiqueta="Lista de precios" className="col-span-2">{o.lista_precio_nombre}</Dato>}
             </dl>
           </Tarjeta>
           <Tarjeta titulo="Importe">
@@ -354,6 +362,7 @@ export function OrdenDetalle() {
 
       {estadoModal && <CambiarEstado orden={o} onCerrar={() => setEstadoModal(false)} />}
       {cobro && <ModalCobro abierto onCerrar={() => setCobro(false)} clienteId={o.cliente_id} ventaId={o.venta_id} />}
+      {emitirCobrar && <ModalEmitirCobrar total={o.total} cargando={comprobante.isPending} onCerrar={() => setEmitirCobrar(false)} onConfirmar={(cobro) => comprobante.mutate({ condicion: 'contado', cobro })} />}
     </>
   );
 }

@@ -171,3 +171,21 @@ describe('aislamiento de compras, proveedores y pagos', () => {
     expect((await B.api.get('/api/gastos')).body).toHaveLength(0);
   });
 });
+
+describe('documentos grandes (límite de 100 parámetros por consulta de D1)', () => {
+  it('compra y venta con más de 100 artículos distintos se procesan por lotes', async () => {
+    const T = await nuevoTaller('Taller Lotes');
+    const p = (await T.api.post('/api/proveedores', { nombre: 'Prov grande' })).body;
+    const ids: string[] = [];
+    for (let i = 0; i < 110; i++) ids.push((await T.api.post('/api/articulos', { nombre: `Artículo ${i}`, precio: 100, costo: 50, stock_inicial: 0 })).body.id);
+    const c = await T.api.post('/api/compras', { proveedor_id: p.id, items: ids.map((id) => ({ articulo_id: id, cantidad: 2, costo_unitario: 50 })), idem_key: idem() });
+    expect(c.status, JSON.stringify(c.body)).toBe(201);
+    const v = await T.api.post('/api/ventas', { items: ids.map((id, i) => ({ tipo: 'articulo', articulo_id: id, descripcion: `Artículo ${i}`, cantidad: 1, precio_unitario: 100 })), cobro: { medio: 'efectivo' }, idem_key: idem() });
+    expect(v.status, JSON.stringify(v.body)).toBe(201);
+    expect(v.body.total).toBe(11000);
+    const cobros = (await T.api.get('/api/cobros')).body;
+    expect(cobros).toHaveLength(1);
+    expect((await T.api.post(`/api/ventas/${v.body.id}/anular`, { motivo: 'prueba' })).status).toBe(409); // tiene cobro
+    expect((await T.api.post(`/api/compras/${c.body.id}/anular`, {})).status).toBe(409); // el stock ya se vendió
+  }, 60_000);
+});

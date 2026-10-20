@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { km } from '@/lib/format';
 import { Boton, Campo, Encabezado, Input, Select, Tarjeta, Textarea, useToast } from '@/components/ui';
 import { SelectorCliente, SelectorVehiculo, useMecanicos, type ClienteMin } from '@/components/selectores';
+import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
 import { EditorItems, itemsParaApi, paramsVacios, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 
 export function NuevaOrden() {
@@ -23,6 +24,8 @@ export function NuevaOrden() {
   const [obs, setObs] = useState('');
   const [items, setItems] = useState<ItemUI[]>([]);
   const [params, setParams] = useState<ParamsUI>(paramsVacios());
+  const [lista, setLista] = useState<string | null>(null);
+  useListaPorDefecto(true, lista, setLista);
   const turnoId = sp.get('turno');
 
   // Precarga desde un turno de la agenda o desde la ficha de un cliente/vehículo.
@@ -45,6 +48,7 @@ export function NuevaOrden() {
         observaciones: obs,
         fecha_prometida: prometida || null,
         turno_id: turnoId,
+        lista_precio_id: lista,
         items: itemsParaApi(items),
         ...params,
       }),
@@ -83,7 +87,8 @@ export function NuevaOrden() {
             </div>
           </Tarjeta>
           <Tarjeta titulo="Trabajos y repuestos" subtitulo="Podés completarlo ahora o después del diagnóstico">
-            <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} />
+            <div className="mb-4"><SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} /></div>
+            <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} />
           </Tarjeta>
         </div>
         <div className="space-y-5">

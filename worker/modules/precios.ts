@@ -204,7 +204,8 @@ function paramsAjuste(porcentaje: number, _paso: number): number[] {
 /** Precios resueltos de un conjunto de artículos/servicios en una lista (para recalcular los ítems de un documento al cambiar de lista). */
 precios.post('/listas-precios/:id/precios', requirePerm('catalogo.ver'), async (c) => {
   const s = c.get('sesion');
-  const l = await lista(c.env.DB, s.tallerId, c.req.param('id'));
+  // 'base' = sin lista: devuelve los precios base de artículos y servicios.
+  const l: Lista = c.req.param('id') === 'base' ? { id: 'base', nombre: 'Precio base', descripcion: null, base: 'precio', porcentaje: 0, redondeo: 0, servicios_pct: null, es_default: 0, activa: 1 } : await lista(c.env.DB, s.tallerId, c.req.param('id'));
   const d = await body(c, z.object({ articulos: z.array(zId).max(300).default([]), servicios: z.array(zId).max(300).default([]) }));
   const arts: Record<string, number> = {};
   for (const ids of lotes([...new Set(d.articulos)])) {

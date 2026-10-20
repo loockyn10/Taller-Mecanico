@@ -1,5 +1,5 @@
 // Movimientos de stock atómicos e idempotentes.
-import { all, first, guard, uid, type Stmt } from './db';
+import { all, first, guard, lotes, uid, type Stmt } from './db';
 import { conflict } from './http';
 import { redondearCantidad as r3 } from '../../shared/dominio';
 
@@ -31,12 +31,10 @@ export function agrupar(items: Array<{ articulo_id: string | null; cantidad: num
 export async function verificarDisponible(db: D1Database, tallerId: string, salidas: Map<string, number>) {
   if (!salidas.size) return;
   const ids = [...salidas.keys()];
-  const rows = await all<{ id: string; nombre: string; stock: number }>(
-    db,
-    `SELECT id, nombre, stock FROM articulos WHERE taller_id = ? AND id IN (${ids.map(() => '?').join(',')})`,
-    tallerId,
-    ...ids,
-  );
+  const rows: Array<{ id: string; nombre: string; stock: number }> = [];
+  for (const lote of lotes(ids)) {
+    rows.push(...(await all<{ id: string; nombre: string; stock: number }>(db, `SELECT id, nombre, stock FROM articulos WHERE taller_id = ? AND id IN (${lote.map(() => '?').join(',')})`, tallerId, ...lote)));
+  }
   const faltantes = rows.filter((r) => r3(r.stock) < r3(salidas.get(r.id) ?? 0)).map((r) => `${r.nombre} (disponible ${r.stock}, requerido ${salidas.get(r.id)})`);
   if (rows.length !== ids.length) throw conflict('Hay artículos inexistentes en el documento');
   if (faltantes.length) throw conflict(`Stock insuficiente: ${faltantes.join('; ')}`, 'stock_insuficiente');

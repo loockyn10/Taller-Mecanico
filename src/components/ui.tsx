@@ -232,10 +232,11 @@ export function Indicador({ titulo, valor, detalle, icono, tono = 'azul', onClic
       disabled={!onClick}
       className="flex w-full items-start gap-3 rounded-xl border border-borde bg-white p-4 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition enabled:hover:border-marca-200 enabled:hover:shadow-sm"
     >
-      {icono && <span className={cn('hidden size-10 shrink-0 place-items-center rounded-lg ring-1 ring-inset sm:grid', TONOS[tono])}>{icono}</span>}
+      {icono && <span className={cn('hidden size-10 shrink-0 place-items-center rounded-lg ring-1 ring-inset xl:grid', TONOS[tono])}>{icono}</span>}
       <span className="min-w-0">
         <span className="block text-xs font-medium uppercase tracking-wide text-tenue">{titulo}</span>
-        <span className="block break-words text-lg font-bold leading-tight tabular-nums sm:text-xl">{valor}</span>
+        {/* Los importes no se parten en dos líneas: se achican en pantallas angostas (hallazgo de la auditoría). */}
+        <span className="block whitespace-nowrap text-[17px] font-bold leading-tight tabular-nums xl:text-xl">{valor}</span>
         {detalle && <span className="block text-xs text-tenue">{detalle}</span>}
       </span>
     </button>

@@ -97,8 +97,9 @@ caja.post('/abrir', requirePerm('caja.operar'), async (c) => {
       auditar(c.env.DB, s.tallerId, s.usuarioId, 'caja', id, 'abrir', { saldo_inicial: d.saldo_inicial }),
     ]);
   } catch (e) {
-    // Dos usuarios abriendo a la vez: el índice único parcial deja pasar sólo a uno.
-    if (String(e).includes('caja_sesiones')) throw conflict('Ya hay una caja abierta', 'caja_abierta');
+    // Dos usuarios abriendo a la vez: el índice único parcial deja pasar sólo a uno. Si por cualquier motivo falló el alta
+    // y ya hay una caja abierta, es que otro usuario llegó primero.
+    if ((await estadoCaja(c.env.DB, s.tallerId)).sesionId) throw conflict('Ya hay una caja abierta', 'caja_abierta');
     throw e;
   }
   return c.json(await first(c.env.DB, `${SELECT_SESION} WHERE cs.taller_id = ? AND cs.id = ?`, s.tallerId, id), 201);

@@ -56,8 +56,8 @@ export function itemsParaApi(items: ItemUI[]) {
   }));
 }
 
-function AgregarServicio({ onAgregar }: { onAgregar: (i: ItemUI) => void }) {
-  const { data: servicios = [] } = useQuery({ queryKey: ['servicios'], queryFn: () => api.get<any[]>('/servicios'), staleTime: 60_000 });
+function AgregarServicio({ onAgregar, listaId }: { onAgregar: (i: ItemUI) => void; listaId?: string | null }) {
+  const { data: servicios = [] } = useQuery({ queryKey: ['servicios', { listaId: listaId ?? null }], queryFn: () => api.get<any[]>(`/servicios${listaId ? `?lista_id=${listaId}` : ''}`), staleTime: 60_000 });
   const [cat, setCat] = useState<string>('');
   const [q, setQ] = useState('');
   const categorias = useMemo(() => [...new Map(servicios.map((s) => [s.categoria_id ?? '', s.categoria ?? 'Sin categoría'])).entries()], [servicios]);
@@ -79,13 +79,13 @@ function AgregarServicio({ onAgregar }: { onAgregar: (i: ItemUI) => void }) {
             <button
               type="button"
               className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-marca-50"
-              onClick={() => onAgregar({ key: k(), tipo: 'servicio', servicio_id: s.id, descripcion: s.nombre, cantidad: 1, precio_unitario: s.precio, desc_pct: 0 })}
+              onClick={() => onAgregar({ key: k(), tipo: 'servicio', servicio_id: s.id, descripcion: s.nombre, cantidad: 1, precio_unitario: s.precio_lista ?? s.precio, desc_pct: 0 })}
             >
               <span className="min-w-0">
                 <span className="block truncate">{s.nombre}</span>
                 <span className="text-xs text-tenue">{s.categoria ?? 'Sin categoría'}</span>
               </span>
-              <span className="shrink-0 font-medium tabular-nums">{money(s.precio)}</span>
+              <span className="shrink-0 font-medium tabular-nums">{money(s.precio_lista ?? s.precio)}</span>
             </button>
           </li>
         ))}
@@ -95,10 +95,10 @@ function AgregarServicio({ onAgregar }: { onAgregar: (i: ItemUI) => void }) {
   );
 }
 
-function AgregarArticulo({ onAgregar }: { onAgregar: (i: ItemUI) => void }) {
+function AgregarArticulo({ onAgregar, listaId }: { onAgregar: (i: ItemUI) => void; listaId?: string | null }) {
   const [q, setQ] = useState('');
   const dq = useDebounce(q);
-  const { data = [] } = useQuery({ queryKey: ['articulos', { q: dq, sel: 1 }], queryFn: () => api.get<any[]>(`/articulos?limite=20&q=${encodeURIComponent(dq)}`), enabled: dq.length >= 1 });
+  const { data = [] } = useQuery({ queryKey: ['articulos', { q: dq, sel: 1, listaId: listaId ?? null }], queryFn: () => api.get<any[]>(`/articulos?limite=20&q=${encodeURIComponent(dq)}${listaId ? `&lista_id=${listaId}` : ''}`), enabled: dq.length >= 1 });
   return (
     <div className="space-y-2">
       <Buscador value={q} onChange={setQ} placeholder="Buscar repuesto por nombre, código o marca…" autoFocus />
@@ -110,7 +110,7 @@ function AgregarArticulo({ onAgregar }: { onAgregar: (i: ItemUI) => void }) {
                 type="button"
                 className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-marca-50"
                 onClick={() => {
-                  onAgregar({ key: k(), tipo: 'articulo', articulo_id: a.id, descripcion: a.nombre, cantidad: 1, precio_unitario: a.precio, desc_pct: 0, stock: a.stock });
+                  onAgregar({ key: k(), tipo: 'articulo', articulo_id: a.id, descripcion: a.nombre, cantidad: 1, precio_unitario: a.precio_lista ?? a.precio, desc_pct: 0, stock: a.stock });
                   setQ('');
                 }}
               >
@@ -119,7 +119,7 @@ function AgregarArticulo({ onAgregar }: { onAgregar: (i: ItemUI) => void }) {
                   <span className="text-xs text-tenue">{[a.codigo, a.marca].filter(Boolean).join(' · ')}</span>
                 </span>
                 <span className="shrink-0 text-right">
-                  <span className="block font-medium tabular-nums">{money(a.precio)}</span>
+                  <span className="block font-medium tabular-nums">{money(a.precio_lista ?? a.precio)}</span>
                   <span className={cn('text-xs', a.stock <= 0 ? 'text-red-600' : a.stock <= a.stock_minimo ? 'text-amber-700' : 'text-tenue')}>Stock: {a.stock} {a.unidad}</span>
                 </span>
               </button>
@@ -156,8 +156,8 @@ function AgregarLibre({ onAgregar }: { onAgregar: (i: ItemUI) => void }) {
 }
 
 export function EditorItems({
-  items, onItems, params, onParams, soloLectura, conArticulos = true,
-}: { items: ItemUI[]; onItems: (i: ItemUI[]) => void; params: ParamsUI; onParams: (p: ParamsUI) => void; soloLectura?: boolean; conArticulos?: boolean }) {
+  items, onItems, params, onParams, soloLectura, conArticulos = true, listaId,
+}: { items: ItemUI[]; onItems: (i: ItemUI[]) => void; params: ParamsUI; onParams: (p: ParamsUI) => void; soloLectura?: boolean; conArticulos?: boolean; listaId?: string | null }) {
   const [modo, setModo] = useState<'servicio' | 'articulo' | 'libre' | null>(null);
   const t = calcularTotales(items, params);
   const upd = (key: string, cambios: Partial<ItemUI>) => onItems(items.map((i) => (i.key === key ? { ...i, ...cambios } : i)));
@@ -179,8 +179,8 @@ export function EditorItems({
           </div>
           {modo && (
             <div className="mt-3 rounded-xl border border-borde bg-slate-50/60 p-3">
-              {modo === 'servicio' && <AgregarServicio onAgregar={agregar} />}
-              {modo === 'articulo' && <AgregarArticulo onAgregar={agregar} />}
+              {modo === 'servicio' && <AgregarServicio onAgregar={agregar} listaId={listaId} />}
+              {modo === 'articulo' && <AgregarArticulo onAgregar={agregar} listaId={listaId} />}
               {modo === 'libre' && <AgregarLibre onAgregar={agregar} />}
             </div>
           )}
@@ -222,7 +222,7 @@ export function EditorItems({
                   <>
                     <label className="flex items-center gap-1 text-xs text-tenue md:contents">
                       <span className="md:hidden">Cant.</span>
-                      <Input type="number" min={0.01} step="any" value={i.cantidad} onChange={(e) => upd(i.key, { cantidad: Math.max(0, Number(e.target.value)) })} className="h-9 text-right" aria-label="Cantidad" />
+                      <Input type="number" min={0.01} step="any" value={i.cantidad} onChange={(e) => upd(i.key, { cantidad: Math.max(0, Math.round(Number(e.target.value) * 1000) / 1000) })} className="h-9 text-right" aria-label="Cantidad" />
                     </label>
                     <InputMoneda value={i.precio_unitario} onChange={(v) => upd(i.key, { precio_unitario: v })} className="[&_input]:h-9" />
                     <label className="flex items-center gap-1 text-xs text-tenue md:contents">

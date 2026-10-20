@@ -57,3 +57,19 @@ describe('cantidades de stock', () => {
     expect(esCantidadValida(0.1 + 0.2)).toBe(true);
   });
 });
+
+describe('importe en letras (recibos)', () => {
+  it('convierte importes comunes', async () => {
+    const { importeEnLetras } = await import('../../shared/letras');
+    expect(importeEnLetras(0)).toBe('Cero con 00/100');
+    expect(importeEnLetras(100)).toBe('Uno con 00/100');
+    expect(importeEnLetras(2100)).toBe('Veintiuno con 00/100');
+    expect(importeEnLetras(10000)).toBe('Cien con 00/100');
+    expect(importeEnLetras(10150)).toBe('Ciento uno con 50/100');
+    expect(importeEnLetras(123456)).toBe('Mil doscientos treinta y cuatro con 56/100');
+    expect(importeEnLetras(2100000)).toBe('Veintiún mil con 00/100');
+    expect(importeEnLetras(100000000)).toBe('Un millón con 00/100');
+    expect(importeEnLetras(250000000)).toBe('Dos millones quinientos mil con 00/100');
+    expect(importeEnLetras(3100099)).toBe('Treinta y un mil con 99/100');
+  });
+});

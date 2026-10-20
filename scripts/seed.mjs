@@ -48,6 +48,8 @@ async function main() {
     await s.post('/taller/usuarios', { nombre: 'Empleado Demo', email: 'empleado@fierro.local', rol: 'empleado', password: 'demo1234' });
     const [m1, m2] = [await s.post('/mecanicos', { nombre: 'Carlos Gómez', especialidad: 'Motor y distribución' }), await s.post('/mecanicos', { nombre: 'Lucía Fernández', especialidad: 'Frenos y tren delantero' })];
     const prov = await s.post('/proveedores', { nombre: 'Repuestos del Sur SA', cuit: '30-11111111-1', telefono: '11 4555-1234' });
+    // Caja abierta para que los cobros de la demostración queden asentados en ella.
+    await s.post('/caja/abrir', { saldo_inicial: 5000000, notas: 'Fondo de cambio' });
     const cats = await s.get('/categorias-articulo');
     const cat = (n) => cats.find((c) => c.nombre === n)?.id;
     const arts = {};
@@ -91,8 +93,7 @@ async function main() {
     await s.req('PUT', `/ordenes/${o.id}/checklist`, { combustible: '1/2', km: 98500, datos: { danos: ['Rayones'], testigos: [], accesorios: ['Rueda de auxilio', 'Criquet / llave'], ingreso: 'Funcionando' }, recibido_por: 'Recepción' });
     await s.post(`/ordenes/${o.id}/estado`, { estado: 'en_reparacion' });
     await s.post(`/ordenes/${o.id}/estado`, { estado: 'lista' });
-    let v = await s.post(`/ordenes/${o.id}/comprobante`, { condicion: 'contado' });
-    await s.post('/cobros', { cliente_id: clientes[0].cli.id, medios: [{ medio: 'transferencia', importe: v.total, referencia: 'Op. 784512' }], aplicaciones: [{ venta_id: v.id, importe: v.total }], idem_key: clave() });
+    let v = await s.post(`/ordenes/${o.id}/comprobante`, { condicion: 'contado', cobro: { medio: 'transferencia', referencia: 'Op. 784512' } });
     await s.post(`/ordenes/${o.id}/estado`, { estado: 'entregada', nota: 'Retiró el titular' });
 
     // 2) Presupuesto aprobado → OT en reparación (Sofía)
@@ -123,8 +124,18 @@ async function main() {
     await s.post('/turnos', { fecha: dia(3), hora: '15:00', cliente_id: clientes[0].cli.id, vehiculo_id: clientes[0].veh.id, motivo: 'Alineación y balanceo' });
 
     // 6) Venta de mostrador y compra
-    await s.post('/ventas', { items: [item('articulo', arts.liquido, 'Líquido de frenos DOT4 500 ml', 480000)], idem_key: clave() });
+    await s.post('/ventas', { items: [item('articulo', arts.liquido, 'Líquido de frenos DOT4 500 ml', 480000)], cobro: { medio: 'efectivo' }, idem_key: clave() });
     await s.post('/compras', { proveedor_id: prov.id, numero_doc: 'A-0003-00012345', iva: 2184000, items: [{ articulo_id: arts.filtroAire, cantidad: 10, costo_unitario: 520000 }, { articulo_id: arts.liquido, cantidad: 6, costo_unitario: 300000 }], idem_key: clave() });
+    await s.post('/pagos-proveedor', { proveedor_id: prov.id, importe: 3000000, medio: 'transferencia', referencia: 'Transf. 99120', idem_key: clave() });
+
+    // 7) Gastos, gasto recurrente y listas de precios
+    const categorias = await s.get('/categorias-gasto');
+    const catGasto = (n) => categorias.find((c) => c.nombre.startsWith(n))?.id;
+    await s.post('/gastos', { categoria_id: catGasto('Insumos'), concepto: 'Trapos y desengrasante', importe: 1850000, medio: 'efectivo', idem_key: clave() });
+    await s.post('/gastos', { categoria_id: catGasto('Limpieza'), concepto: 'Limpieza del taller', importe: 900000, medio: 'efectivo', idem_key: clave() });
+    await s.post('/gastos-recurrentes', { categoria_id: catGasto('Alquiler'), concepto: 'Alquiler del local', importe: 45000000, medio: 'transferencia', frecuencia: 'mensual', dia: 5, proxima_fecha: dia(-2) });
+    await s.post('/listas-precios', { nombre: 'Mayorista', descripcion: 'Talleres y flotas: costo + 25 %', base: 'costo', porcentaje: 25, redondeo: 100, servicios_pct: -10 });
+    await s.post('/listas-precios', { nombre: 'Tarjeta de crédito', descripcion: 'Recargo por financiación', base: 'precio', porcentaje: 15, redondeo: 1000 });
   }
 
   console.log('Creando "Taller Norte" (segundo taller para verificar aislamiento)…');

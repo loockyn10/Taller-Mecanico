@@ -19,6 +19,8 @@ npm run dev
 - API en http://127.0.0.1:8787
 - Aplicación en http://localhost:5173 (Vite redirige `/api` a la API)
 
+Para una segunda instancia sin pisar la habitual: `FIERRO_STATE=<carpeta> FIERRO_API_PORT=8790 FIERRO_WEB_PORT=5180 npm run dev`.
+
 Con el entorno levantado, en otra terminal, cargá los datos de demostración (ficticios):
 ```bash
 npm run db:seed

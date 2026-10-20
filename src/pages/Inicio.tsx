@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarDays, CheckCircle2, FileText, Package, Plus, Receipt, Wallet, Wrench } from 'lucide-react';
+import { AlertTriangle, Banknote, CalendarDays, CheckCircle2, FileText, Package, Plus, Receipt, Wallet, Wrench } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { money, numero } from '@/lib/format';
+import { useEstadoCaja } from '@/lib/caja';
 import { Boton, Cargando, Encabezado, ErrorCaja, Indicador, Tarjeta, Vacio } from '@/components/ui';
 import { EstadoOTBadge, EstadoTurnoBadge } from '@/components/estados';
 import { ESTADOS_OT_ABIERTOS, ESTADO_OT_LABEL, type EstadoOT } from '@shared/dominio';
@@ -11,6 +12,7 @@ import { ESTADOS_OT_ABIERTOS, ESTADO_OT_LABEL, type EstadoOT } from '@shared/dom
 export function Inicio() {
   const { me, puede } = useAuth();
   const nav = useNavigate();
+  const { data: caja } = useEstadoCaja();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get('/dashboard'), refetchInterval: 60_000 });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
@@ -37,6 +39,16 @@ export function Inicio() {
         <Indicador titulo="Listas p/ entregar" valor={cant('lista')} icono={<CheckCircle2 className="size-5" />} tono="verde" onClick={() => nav('/ordenes?estado=lista')} />
         <Indicador titulo="Turnos hoy" valor={data.turnosHoy.length} icono={<CalendarDays className="size-5" />} tono="violeta" onClick={() => nav('/agenda')} />
         <Indicador titulo="Presupuestos" valor={data.presupuestos?.pendientes ?? 0} detalle={`${data.presupuestos?.aprobados ?? 0} aprobados`} icono={<FileText className="size-5" />} tono="ambar" onClick={() => nav('/presupuestos')} />
+        {caja && (
+          <Indicador
+            titulo="Caja"
+            valor={caja.sesion ? money(caja.sesion.resumen.efectivo_esperado) : 'Cerrada'}
+            detalle={caja.sesion ? `Abierta · efectivo esperado${caja.sesion.resumen.movimientos ? ` · ${caja.sesion.resumen.movimientos} mov.` : ''}` : caja.obligatoria ? 'Abrila para cobrar' : 'Tocá para abrirla'}
+            icono={<Banknote className="size-5" />}
+            tono={caja.sesion ? 'verde' : caja.obligatoria ? 'rojo' : 'gris'}
+            onClick={() => nav('/caja')}
+          />
+        )}
         {data.finanzas && (
           <>
             <Indicador titulo="Ventas del mes" valor={money(data.finanzas.ventas_mes)} icono={<Receipt className="size-5" />} tono="cian" onClick={() => nav('/reportes')} />

@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { hoyISO, sumarDias } from '@/lib/format';
 import { Boton, Campo, Cargando, Encabezado, Input, Tarjeta, Textarea, useToast } from '@/components/ui';
 import { SelectorCliente, SelectorVehiculo, type ClienteMin } from '@/components/selectores';
+import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
 import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 
 export function PresupuestoForm() {
@@ -22,6 +23,8 @@ export function PresupuestoForm() {
   const [obs, setObs] = useState('');
   const [items, setItems] = useState<ItemUI[]>([]);
   const [params, setParams] = useState<ParamsUI>(paramsVacios());
+  const [lista, setLista] = useState<string | null>(null);
+  useListaPorDefecto(!id, lista, setLista);
 
   useEffect(() => {
     if (cfg && !id && !valido) setValido(sumarDias(hoyISO(), cfg.config.validez_presupuesto_dias));
@@ -34,13 +37,14 @@ export function PresupuestoForm() {
     setFecha(existente.fecha);
     setValido(existente.valido_hasta ?? '');
     setObs(existente.observaciones ?? '');
+    setLista(existente.lista_precio_id ?? null);
     setItems(itemsDesdeApi(existente.items));
     setParams({ desc_global_pct: existente.desc_global_pct, desc_global_monto: existente.desc_global_monto, iva_pct: existente.iva_pct, recargo_pct: existente.recargo_pct });
   }, [existente]);
 
   const m = useMutation({
     mutationFn: () => {
-      const datos = { cliente_id: cliente!.id, vehiculo_id: vehiculoId, km: km ? Number(km) : null, fecha, valido_hasta: valido || null, observaciones: obs, items: itemsParaApi(items), ...params };
+      const datos = { cliente_id: cliente!.id, vehiculo_id: vehiculoId, km: km ? Number(km) : null, fecha, valido_hasta: valido || null, observaciones: obs, lista_precio_id: lista, items: itemsParaApi(items), ...params };
       return id ? api.put(`/presupuestos/${id}`, datos).then(() => ({ id })) : api.post('/presupuestos', datos);
     },
     onSuccess: (p) => {
@@ -69,7 +73,8 @@ export function PresupuestoForm() {
             </div>
           </Tarjeta>
           <Tarjeta titulo="Detalle">
-            <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} />
+            <div className="mb-4"><SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} nombreActual={existente?.lista_precio_nombre} /></div>
+            <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} />
           </Tarjeta>
         </div>
         <div className="space-y-5">

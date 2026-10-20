@@ -19,7 +19,7 @@ function DatosTaller() {
   useEffect(() => {
     if (data) {
       setT({ ...data.taller });
-      setC({ ...data.config, permitir_stock_negativo: !!data.config.permitir_stock_negativo });
+      setC({ ...data.config, permitir_stock_negativo: !!data.config.permitir_stock_negativo, caja_obligatoria: !!data.config.caja_obligatoria });
     }
   }, [data]);
   const m = useMutation({
@@ -61,6 +61,10 @@ function DatosTaller() {
           <Campo label="Recargo por defecto (%)"><Input type="number" min={0} value={c.recargo_default} onChange={(e) => setC({ ...c, recargo_default: Number(e.target.value) })} /></Campo>
           <Campo label="Pie de presupuestos y comprobantes" className="sm:col-span-2"><Textarea rows={2} value={c.pie_documentos ?? ''} onChange={(e) => setC({ ...c, pie_documentos: e.target.value })} placeholder="Ej.: Garantía de mano de obra 3 meses. Precios sujetos a disponibilidad." /></Campo>
           <Check className="sm:col-span-2" checked={c.permitir_stock_negativo} onChange={(v) => setC({ ...c, permitir_stock_negativo: v })} label="Permitir stock negativo (no recomendado)" />
+          <div className="sm:col-span-2">
+            <Check checked={c.caja_obligatoria} onChange={(v) => setC({ ...c, caja_obligatoria: v })} label="Exigir caja abierta para cobrar, pagar y registrar gastos" />
+            <p className="mt-1 pl-6 text-xs text-tenue">Con esta opción, los cobros y pagos sólo se registran con una caja abierta (así ninguno queda fuera del arqueo). Sin ella, los movimientos se registran igual y quedan marcados como “sin caja”.</p>
+          </div>
         </fieldset>
       </Tarjeta>
       {!ro && <div className="flex justify-end"><Boton variante="primario" cargando={m.isPending} onClick={() => m.mutate()}>Guardar configuración</Boton></div>}
@@ -141,7 +145,7 @@ function Usuarios() {
         <ul className="space-y-2 text-sm">
           <li><strong>{ROL_LABEL.propietario}:</strong> acceso total, incluida la licencia y los usuarios.</li>
           <li><strong>{ROL_LABEL.administrador}:</strong> acceso total a la operación, el catálogo, compras, reportes, configuración y usuarios (salvo el propietario).</li>
-          <li><strong>{ROL_LABEL.empleado}:</strong> clientes, vehículos, presupuestos, órdenes, agenda, check-list, emitir comprobantes y registrar cobros. No ve reportes ni compras, no modifica precios ni configuración y no anula.</li>
+          <li><strong>{ROL_LABEL.empleado}:</strong> clientes, vehículos, presupuestos, órdenes, agenda, check-list, emitir comprobantes, registrar cobros, operar la caja (abrir, cerrar, arquear, registrar gastos e ingresos) y consultar el stock. Sólo carga operaciones con la fecha de hoy. No ve reportes financieros ni compras, no modifica precios ni configuración y no anula.</li>
         </ul>
       </Tarjeta>
       <Modal abierto={nuevo} onCerrar={() => setNuevo(false)} titulo="Nuevo usuario" pie={<><Boton onClick={() => setNuevo(false)}>Cancelar</Boton><Boton variante="primario" cargando={crear.isPending} onClick={() => crear.mutate()}>Crear</Boton></>}>

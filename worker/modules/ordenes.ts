@@ -16,7 +16,7 @@ import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITA
 export const ordenes = new Hono<AppEnv>();
 ordenes.use('*', requirePerm('operacion'));
 
-const SELECT = `SELECT o.*, c.nombre AS cliente, c.telefono AS cliente_telefono, v.patente, v.anio, ma.nombre AS marca, mo.nombre AS modelo,
+const SELECT = `SELECT o.*, c.nombre AS cliente, c.codigo AS cliente_codigo, c.telefono AS cliente_telefono, v.patente, v.anio, ma.nombre AS marca, mo.nombre AS modelo,
     m.nombre AS mecanico, p.numero AS presupuesto_numero,
     ve.id AS venta_id, ve.numero AS venta_numero, ve.total AS venta_total, ve.cobrado AS venta_cobrado
   FROM ordenes o

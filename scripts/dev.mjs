@@ -15,7 +15,8 @@ console.log(`Base de datos local: ${estado}`);
 await migrar(estado);
 console.log('Migraciones aplicadas.');
 
-const api = wrangler(['dev', '--port', '8787', '--persist-to', estado, '--show-interactive-dev-session=false']);
+const puertoApi = process.env.FIERRO_API_PORT ?? '8787';
+const api = wrangler(['dev', '--port', puertoApi, '--persist-to', estado, '--show-interactive-dev-session=false']);
 const web = spawn(process.execPath, [path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js')], { cwd: ROOT, stdio: 'inherit' });
 
 const salir = () => {

@@ -5,20 +5,25 @@ import { Ban, Plus, Printer, Receipt, ShoppingBag, Wallet } from 'lucide-react';
 import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, money, numero } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, Check, Dato, Encabezado, ErrorCaja, Input, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useDebounce, useToast, Vacio } from '@/components/ui';
+import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Input, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useDebounce, useToast, Vacio } from '@/components/ui';
 import { EstadoCobroBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 import { SelectorCliente, type ClienteMin } from '@/components/selectores';
-import { ModalCobro } from '@/components/Cobro';
+import { AvisoCaja, ModalCobro, useCajaBloqueada } from '@/components/Cobro';
+import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
+import { invalidarDinero } from '@/lib/caja';
+import { calcularTotales } from '@shared/totals';
 import { MEDIOS_PAGO, MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
 
 export function Ventas() {
   const nav = useNavigate();
   const { puede } = useAuth();
   const [q, setQ] = useState('');
-  const [pendientes, setPendientes] = useState(false);
+  const [estado, setEstado] = useState('');
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
   const dq = useDebounce(q);
-  const { data = [], isLoading, error, refetch } = useQuery({ queryKey: ['ventas', { dq, pendientes }], queryFn: () => api.get<any[]>(`/ventas${qs({ q: dq, pendientes })}`) });
+  const { data = [], isLoading, error, refetch } = useQuery({ queryKey: ['ventas', { dq, estado, desde, hasta }], queryFn: () => api.get<any[]>(`/ventas${qs({ q: dq, estado, desde, hasta })}`) });
   return (
     <>
       <Encabezado
@@ -29,7 +34,15 @@ export function Ventas() {
       <Aviso className="mb-4">Los comprobantes son <strong>internos (no fiscales)</strong>. La facturación electrónica ARCA todavía no está integrada; el sistema está preparado para incorporarla sin rehacer ventas ni cobros.</Aviso>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Cliente o número" className="min-w-56 flex-1" />
-        <Check checked={pendientes} onChange={setPendientes} label="Solo pendientes de cobro" />
+        <Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto" aria-label="Estado de cobro">
+          <option value="">Todos los estados</option>
+          <option value="pendientes">Pendientes de cobro</option>
+          <option value="parciales">Con cobro parcial</option>
+          <option value="cobradas">Cobradas</option>
+          <option value="anuladas">Anuladas</option>
+        </Select>
+        <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-auto" aria-label="Desde" />
+        <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-auto" aria-label="Hasta" />
       </div>
       {isLoading ? <Cargando /> : error ? <ErrorCaja error={error} reintentar={refetch} /> : (
         <Tarjeta sinPadding>
@@ -66,7 +79,8 @@ export function VentaDetalle() {
   const m = useMutation({
     mutationFn: () => api.post(`/ventas/${id}/anular`, { motivo }),
     onSuccess: () => {
-      ['venta', 'ventas', 'orden', 'cuentas', 'cuenta', 'articulos', 'dashboard'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+      invalidarDinero(qc);
+      qc.invalidateQueries({ queryKey: ['articulos'] });
       toast.ok('Comprobante anulado');
       setAnular(false);
     },
@@ -102,6 +116,7 @@ export function VentaDetalle() {
               <Dato etiqueta="Saldo">{money(v.saldo)}</Dato>
               <Dato etiqueta="Tipo" className="col-span-2"><Insignia>Interno · no fiscal</Insignia></Dato>
               <Dato etiqueta="Observaciones" className="col-span-2">{v.observaciones}</Dato>
+              {v.lista_precio_nombre && <Dato etiqueta="Lista de precios" className="col-span-2">{v.lista_precio_nombre}</Dato>}
             </dl>
           </Tarjeta>
           <Tarjeta titulo="Cobros aplicados" sinPadding>
@@ -109,7 +124,7 @@ export function VentaDetalle() {
               <ul className="divide-y divide-borde text-sm">
                 {v.cobros.map((c: any) => (
                   <li key={c.id} className="flex justify-between px-4 py-2.5">
-                    <span>Cobro #{numero(c.numero)} · {fecha(c.fecha)} {c.estado === 'anulado' && <Insignia tono="gris">Anulado</Insignia>}</span>
+                    <span><Link className="text-marca-700" to={`/cobros?ver=${c.id}`}>Cobro #{numero(c.numero)}</Link> · {fecha(c.fecha)} {c.estado === 'anulado' && <Insignia tono="gris">Anulado</Insignia>}</span>
                     <span className="tabular-nums">{money(c.importe)}</span>
                   </li>
                 ))}
@@ -136,22 +151,30 @@ export function VentaMostrador() {
   const nav = useNavigate();
   const toast = useToast();
   const qc = useQueryClient();
+  const bloqueada = useCajaBloqueada();
   const [cliente, setCliente] = useState<ClienteMin | null>(null);
   const [items, setItems] = useState<ItemUI[]>([]);
   const [params, setParams] = useState<ParamsUI>(paramsVacios());
-  const [condicion, setCondicion] = useState('contado');
+  const [lista, setLista] = useState<string | null>(null);
+  useListaPorDefecto(true, lista, setLista);
+  const [condicion, setCondicion] = useState<'contado' | 'cuenta_corriente'>('contado');
   const [obs, setObs] = useState('');
-  const [cobrar, setCobrar] = useState(true);
   const [medio, setMedio] = useState<MedioPago>('efectivo');
+  const [ref, setRef] = useState('');
   const [clave] = useState(nuevaClave());
+  const total = calcularTotales(items, params).total;
+  const chequeSinNumero = condicion === 'contado' && medio === 'cheque' && !ref.trim();
+  // "Contado" se cobra en el acto; sin cliente identificado sólo se puede vender de contado.
+  const cuentaCorrienteSinCliente = condicion === 'cuenta_corriente' && !cliente;
   const m = useMutation({
     mutationFn: () =>
       api.post('/ventas', {
-        cliente_id: cliente?.id ?? null, condicion, observaciones: obs, items: itemsParaApi(items), idem_key: clave, ...params,
-        cobro: condicion === 'contado' && cobrar ? { medio } : null,
+        cliente_id: cliente?.id ?? null, condicion, observaciones: obs, items: itemsParaApi(items), idem_key: clave, lista_precio_id: lista, ...params,
+        cobro: condicion === 'contado' ? { medio, referencia: ref.trim() || null } : null,
       }),
     onSuccess: (v) => {
-      ['ventas', 'articulos', 'dashboard', 'cobros', 'cuentas'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+      invalidarDinero(qc);
+      qc.invalidateQueries({ queryKey: ['articulos'] });
       toast.ok(`Comprobante #${numero(v.numero)} emitido${v.cobrado ? ' y cobrado' : ''}`);
       nav(`/ventas/${v.id}`, { replace: true });
     },
@@ -162,37 +185,42 @@ export function VentaMostrador() {
       <Encabezado titulo="Venta de mostrador" subtitulo="Venta directa de repuestos o servicios sin orden de trabajo" volver="/ventas" />
       <div className="grid gap-5 xl:grid-cols-3">
         <Tarjeta titulo="Ítems" className="xl:col-span-2">
-          <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} />
+          <div className="mb-4"><SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} /></div>
+          <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} />
         </Tarjeta>
         <div className="space-y-5">
-          <Tarjeta titulo="Cliente">
+          <Tarjeta titulo="Cliente y cobro">
             <div className="space-y-3">
-              <SelectorCliente valor={cliente} onCambio={setCliente} />
-              {!cliente && <p className="text-xs text-tenue">Sin cliente se registra como “Consumidor final”.</p>}
-              <Campo label="Condición">
-                <Select value={condicion} onChange={(e) => setCondicion(e.target.value)}>
-                  <option value="contado">Contado</option>
-                  <option value="cuenta_corriente" disabled={!cliente}>Cuenta corriente</option>
+              <SelectorCliente valor={cliente} onCambio={(c) => { setCliente(c); if (!c && condicion === 'cuenta_corriente') setCondicion('contado'); }} />
+              {!cliente && <p className="text-xs text-tenue">Sin cliente se registra como “Consumidor final” (sólo contado).</p>}
+              <Campo label="Condición de venta">
+                <Select value={condicion} onChange={(e) => setCondicion(e.target.value as 'contado' | 'cuenta_corriente')}>
+                  <option value="contado">Contado (se cobra ahora)</option>
+                  <option value="cuenta_corriente" disabled={!cliente}>Cuenta corriente (queda como deuda del cliente)</option>
                 </Select>
               </Campo>
               {condicion === 'contado' && (
                 <div className="space-y-2 rounded-lg bg-slate-50 p-3">
-                  <Check checked={cobrar} onChange={setCobrar} label="Cobrar ahora el total" />
-                  {cobrar && (
+                  <Campo label="Medio de pago">
                     <Select value={medio} onChange={(e) => setMedio(e.target.value as MedioPago)}>
                       {MEDIOS_PAGO.map((x) => <option key={x} value={x}>{MEDIO_PAGO_LABEL[x]}</option>)}
                     </Select>
-                  )}
+                  </Campo>
+                  <Campo label={medio === 'cheque' ? 'N° de cheque' : 'Referencia (opcional)'} requerido={medio === 'cheque'}>
+                    <Input value={ref} onChange={(e) => setRef(e.target.value)} />
+                  </Campo>
                 </div>
               )}
               <Campo label="Observaciones"><Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} /></Campo>
             </div>
           </Tarjeta>
-          <Boton variante="primario" tam="lg" className="w-full" icono={<ShoppingBag className="size-5" />} disabled={!items.length} cargando={m.isPending} onClick={() => m.mutate()}>{condicion === 'contado' && cobrar ? 'Emitir y cobrar' : 'Emitir comprobante'}</Boton>
+          <AvisoCaja />
+          <Boton variante="primario" tam="lg" className="w-full" icono={<ShoppingBag className="size-5" />} disabled={!items.length || chequeSinNumero || cuentaCorrienteSinCliente || (condicion === 'contado' && bloqueada)} cargando={m.isPending} onClick={() => m.mutate()}>
+            {condicion === 'contado' ? `Emitir y cobrar ${money(total)}` : 'Emitir a cuenta corriente'}
+          </Boton>
           <p className="text-xs text-tenue">Comprobante interno (no fiscal).</p>
         </div>
       </div>
     </>
   );
 }
-

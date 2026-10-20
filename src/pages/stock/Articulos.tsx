@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowDownUp, Package, Pencil, Plus } from 'lucide-react';
+import { ArrowDownUp, Package, Pencil, Plus, ShoppingCart } from 'lucide-react';
 import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cantidad, fechaHora, money } from '@/lib/format';
@@ -33,13 +33,14 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
     alicuota_iva: inicial?.alicuota_iva ?? 21,
     stock_inicial: 0,
     stock_minimo: inicial?.stock_minimo ?? 0,
+    stock_objetivo: inicial?.stock_objetivo != null ? String(inicial.stock_objetivo) : '',
     unidad: inicial?.unidad ?? 'un',
     ubicacion: inicial?.ubicacion ?? '',
   });
   const set = (k: keyof typeof f, v: any) => setF({ ...f, [k]: v });
   const m = useMutation({
     mutationFn: () => {
-      const d: any = { ...f, categoria_id: f.categoria_id || null, proveedor_id: f.proveedor_id || null, stock_minimo: Number(f.stock_minimo), alicuota_iva: Number(f.alicuota_iva) };
+      const d: any = { ...f, categoria_id: f.categoria_id || null, proveedor_id: f.proveedor_id || null, stock_minimo: Number(f.stock_minimo), stock_objetivo: f.stock_objetivo === '' ? null : Number(f.stock_objetivo), alicuota_iva: Number(f.alicuota_iva) };
       if (inicial?.id) {
         delete d.stock_inicial;
         return api.put(`/articulos/${inicial.id}`, d).then(() => ({ id: inicial.id }));
@@ -89,6 +90,7 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
         </Campo>
         {!inicial?.id && <Campo label="Stock inicial" hint="Queda registrado como movimiento de entrada"><Input type="number" min={0} step="any" value={f.stock_inicial} onChange={(e) => set('stock_inicial', e.target.value)} /></Campo>}
         <Campo label="Stock mínimo (alerta)"><Input type="number" min={0} step="any" value={f.stock_minimo} onChange={(e) => set('stock_minimo', e.target.value)} /></Campo>
+        <Campo label="Stock ideal (opcional)" hint="Hasta cuánto reponer. Vacío = el doble del mínimo"><Input type="number" min={0} step="any" value={f.stock_objetivo} onChange={(e) => set('stock_objetivo', e.target.value)} /></Campo>
         <Campo label="Ubicación"><Input value={f.ubicacion} onChange={(e) => set('ubicacion', e.target.value)} placeholder="Estante A2" /></Campo>
       </div>
       {inicial?.id && <p className="mt-3 text-xs text-tenue">El stock no se edita directamente: usá “Movimiento de stock” para entradas, salidas o ajustes.</p>}
@@ -143,7 +145,7 @@ export function Articulos() {
   const { data = [], isLoading, error, refetch } = useQuery({ queryKey: ['articulos', { dq, cat, bajo }], queryFn: () => api.get<any[]>(`/articulos${qs({ q: dq, categoria_id: cat, bajo_stock: bajo })}`) });
   return (
     <>
-      <Encabezado titulo="Artículos y stock" subtitulo="Repuestos, lubricantes e insumos" acciones={puede('catalogo.editar') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setForm(true)}>Nuevo artículo</Boton>} />
+      <Encabezado titulo="Artículos y stock" subtitulo="Repuestos, lubricantes e insumos" acciones={<>{puede('stock.ver') && <Boton icono={<ShoppingCart className="size-4" />} onClick={() => nav('/reposicion')}>Reposición</Boton>}{puede('catalogo.editar') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setForm(true)}>Nuevo artículo</Boton>}</>} />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Nombre, código o marca" className="min-w-56 flex-1" />
         <Select value={cat} onChange={(e) => setCat(e.target.value)} className="w-auto">
@@ -185,6 +187,7 @@ export function ArticuloDetalle() {
   const [editar, setEditar] = useState(false);
   const [mov, setMov] = useState(false);
   const { data: a, isLoading, error, refetch } = useQuery({ queryKey: ['articulo', id], queryFn: () => api.get(`/articulos/${id}`) });
+  const { data: precios = [] } = useQuery({ queryKey: ['articulo', id, 'precios-lista'], queryFn: () => api.get<any[]>(`/articulos/${id}/precios-lista`) });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
   const margen = a.costo > 0 ? Math.round(((a.precio - a.costo) / a.costo) * 100) : null;
@@ -221,6 +224,7 @@ export function ArticuloDetalle() {
           <dl className="grid grid-cols-2 gap-4">
             <Dato etiqueta="Stock actual"><span className="text-xl font-bold">{cantidad(a.stock)} {a.unidad}</span></Dato>
             <Dato etiqueta="Stock mínimo">{cantidad(a.stock_minimo)}</Dato>
+            <Dato etiqueta="Stock ideal">{a.stock_objetivo != null ? cantidad(a.stock_objetivo) : `${cantidad(a.stock_minimo * 2)} (automático)`}</Dato>
             <Dato etiqueta="Costo">{money(a.costo)}</Dato>
             <Dato etiqueta="Precio">{money(a.precio)}</Dato>
             <Dato etiqueta="Margen">{margen != null ? `${margen}%` : '—'}</Dato>
@@ -229,6 +233,13 @@ export function ArticuloDetalle() {
             <Dato etiqueta="Ubicación">{a.ubicacion}</Dato>
           </dl>
         </Tarjeta>
+        {precios.length > 0 && (
+          <Tarjeta titulo="Precio por lista" className="lg:col-span-3" sinPadding>
+            <ul className="divide-y divide-borde text-sm">
+              {precios.map((p: any) => <li key={p.lista_id} className="flex justify-between px-4 py-2"><span>{p.nombre} {p.precio_origen === 'fijo' && <Insignia tono="ambar">Fijo</Insignia>}</span><span className="font-medium tabular-nums">{money(p.precio_lista)}</span></li>)}
+            </ul>
+          </Tarjeta>
+        )}
       </div>
       {editar && <FormArticulo inicial={a} onCerrar={() => setEditar(false)} />}
       {mov && <ModalMovimiento articulo={a} onCerrar={() => setMov(false)} />}

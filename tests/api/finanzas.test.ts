@@ -240,3 +240,29 @@ describe('precisión decimal del stock', () => {
     expect((await api.post('/api/ventas', { items: [{ tipo: 'articulo', articulo_id: a.id, descripcion: 'x', cantidad: 1.0005, precio_unitario: 100 }], cobro: { medio: 'efectivo' }, idem_key: idem() })).status).toBe(400);
   });
 });
+
+describe('aislamiento entre talleres (gastos y finanzas)', () => {
+  it('otro taller no ve ni usa categorías, gastos, recurrentes ni el resumen ajeno', async () => {
+    const B = await nuevoTaller('Taller Finanzas B');
+    const g = (await api.post('/api/gastos', { categoria_id: cat('Alquiler'), concepto: 'Gasto de A', importe: 1234, medio: 'transferencia', idem_key: idem() })).body;
+    const rec = (await api.post('/api/gastos-recurrentes', { categoria_id: cat('Alquiler'), concepto: 'Recurrente de A', importe: 5000, medio: 'transferencia', frecuencia: 'mensual', proxima_fecha: hoyAR() })).body;
+    expect((await B.api.get(`/api/gastos/${g.id}`)).status).toBe(404);
+    expect((await B.api.post(`/api/gastos/${g.id}/anular`, { motivo: 'intruso' })).status).toBe(404);
+    expect((await B.api.post(`/api/gastos-recurrentes/${rec.id}/registrar`, { ocurrencia: hoyAR(), idem_key: idem() })).status).toBe(404);
+    expect((await B.api.post(`/api/gastos-recurrentes/${rec.id}/saltear`, { ocurrencia: hoyAR() })).status).toBe(404);
+    expect((await B.api.put(`/api/categorias-gasto/${cat('Alquiler')}`, { nombre: 'Hackeada' })).status).toBe(404);
+    // B no puede imputar un gasto a una categoría de A
+    expect((await B.api.post('/api/gastos', { categoria_id: cat('Alquiler'), concepto: 'Cruzado', importe: 100, medio: 'efectivo', idem_key: idem() })).status).toBe(400);
+    expect((await B.api.get('/api/gastos')).body).toHaveLength(0);
+    expect((await B.api.get('/api/gastos-recurrentes')).body).toHaveLength(0);
+    const r = (await B.api.get(`/api/finanzas/resumen?desde=${hoyAR(-30)}&hasta=${hoyAR()}`)).body;
+    expect(r.ingresos.total + r.egresos.total).toBe(0);
+    // La misma clave de idempotencia en otro taller no choca con la de A
+    const k = idem();
+    const catB = (await B.api.get('/api/categorias-gasto')).body[0].id;
+    expect((await api.post('/api/gastos', { categoria_id: cat('Limpieza'), concepto: 'Misma clave A', importe: 100, medio: 'transferencia', idem_key: k })).status).toBe(201);
+    const rb = await B.api.post('/api/gastos', { categoria_id: catB, concepto: 'Misma clave B', importe: 100, medio: 'transferencia', idem_key: k });
+    expect(rb.status).toBe(201);
+    expect(rb.body.duplicado).toBeUndefined();
+  });
+});

@@ -165,14 +165,14 @@ maestros.get('/vehiculos/:id', requirePerm('operacion'), async (c) => {
     s.tallerId,
     v.id,
   );
-  const items = ordenes.length
-    ? await all<{ orden_id: string }>(
-        c.env.DB,
-        `SELECT orden_id, tipo, descripcion, cantidad FROM orden_items WHERE taller_id = ? AND orden_id IN (${ordenes.map(() => '?').join(',')}) ORDER BY orden`,
-        s.tallerId,
-        ...ordenes.map((o) => o.id),
-      )
-    : [];
+  // Los ítems se leen con una subconsulta (sin IN de ids): un vehículo con muchas OT superaría el límite de 100 parámetros de D1.
+  const items = await all<{ orden_id: string }>(
+    c.env.DB,
+    `SELECT oi.orden_id, oi.tipo, oi.descripcion, oi.cantidad FROM orden_items oi JOIN ordenes o ON o.taller_id = oi.taller_id AND o.id = oi.orden_id
+      WHERE oi.taller_id = ? AND o.vehiculo_id = ? ORDER BY oi.orden`,
+    s.tallerId,
+    v.id,
+  );
   const historial = ordenes.map((o) => ({ ...o, items: items.filter((i) => i.orden_id === o.id) }));
   const proximos = await proximosServices(c.env.DB, s.tallerId, String(v.id));
   return c.json({ ...v, historial, proximos });

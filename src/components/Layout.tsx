@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  BarChart3, Bell, Boxes, CalendarDays, Car, ClipboardList, FileText, Gauge, LogOut, Menu, Package, Receipt, Search, Settings, ShoppingCart, Truck, Users, Wallet, Wrench, X,
+  BarChart3, Banknote, Bell, Boxes, CalendarDays, Car, ClipboardList, FileText, Gauge, LogOut, Menu, Package, PackageSearch, PiggyBank, Receipt, Search, Settings, ShoppingCart, Tags, Truck, Users, Wallet, Wrench, X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
@@ -35,8 +35,12 @@ const SECCIONES: Array<{ titulo: string; items: ItemNav[] }> = [
       { a: '/ventas', texto: 'Ventas y comprobantes', icono: <Receipt className="size-[18px]" />, permiso: 'ventas.ver' },
       { a: '/cobros', texto: 'Cobros', icono: <Wallet className="size-[18px]" />, permiso: 'ventas.ver' },
       { a: '/cuentas', texto: 'Cuentas corrientes', icono: <ClipboardList className="size-[18px]" />, permiso: 'ventas.ver' },
+      { a: '/caja', texto: 'Caja', icono: <Banknote className="size-[18px]" />, permiso: 'caja.operar' },
+      { a: '/finanzas', texto: 'Gastos y finanzas', icono: <PiggyBank className="size-[18px]" />, permiso: 'finanzas.ver' },
       { a: '/articulos', texto: 'Artículos y stock', icono: <Package className="size-[18px]" />, permiso: 'catalogo.ver' },
       { a: '/stock', texto: 'Movimientos de stock', icono: <Boxes className="size-[18px]" />, permiso: 'stock.ver' },
+      { a: '/reposicion', texto: 'Reposición', icono: <PackageSearch className="size-[18px]" />, permiso: 'stock.ver' },
+      { a: '/listas-precios', texto: 'Listas de precios', icono: <Tags className="size-[18px]" />, permiso: 'precios.gestionar' },
       { a: '/compras', texto: 'Compras', icono: <ShoppingCart className="size-[18px]" />, permiso: 'compras.gestionar' },
       { a: '/proveedores', texto: 'Proveedores', icono: <Truck className="size-[18px]" />, permiso: 'catalogo.ver' },
       { a: '/reportes', texto: 'Estadísticas', icono: <BarChart3 className="size-[18px]" />, permiso: 'reportes.ver' },
