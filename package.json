@@ -11,6 +11,7 @@
     "db:migrate": "wrangler d1 migrations apply DB --local",
     "db:seed": "node scripts/seed.mjs",
     "db:reset": "node scripts/reset-local.mjs",
+    "demo": "node scripts/demo/index.mjs",
     "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit && vite build",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "test": "vitest run && vitest run --config vitest.api.config.ts",

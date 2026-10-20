@@ -35,6 +35,8 @@ Usuarios demo (contraseña `demo1234`):
 
 Para empezar de cero: detené `npm run dev` y ejecutá `npm run db:reset`.
 
+Para una cuenta de demostración completa ("Taller Demo Fierro", ~3 meses de actividad): ver `docs/DEMO.md` (`npm run demo -- simular`).
+
 > **Windows:** si el proyecto está en una ruta muy larga (más de unos 150 caracteres), la base local puede fallar con `SQLITE_CANTOPEN` por el límite de 260 caracteres. En ese caso definí `FIERRO_STATE` con una ruta corta (por ejemplo `set FIERRO_STATE=C:\fierro-state`).
 
 ## Pruebas

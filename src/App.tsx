@@ -1,7 +1,10 @@
+import { lazy, Suspense, type ReactElement } from 'react';
+import type { Permiso } from '@shared/permisos';
+import { Lock } from 'lucide-react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/auth';
 import { Layout } from './components/Layout';
-import { Cargando } from './components/ui';
+import { Cargando, Vacio } from './components/ui';
 import { Login } from './pages/Login';
 import { Inicio } from './pages/Inicio';
 import { Ordenes } from './pages/ordenes/Ordenes';
@@ -39,10 +42,6 @@ const FacturasProveedor = lazy(() => import('./pages/compras/FacturasProveedor')
 const Inventario = lazy(() => import('./pages/stock/Inventario').then((m) => ({ default: m.Inventario })));
 const Informes = lazy(() => import('./pages/Informes').then((m) => ({ default: m.Informes })));
 const Contabilidad = lazy(() => import('./pages/Contabilidad').then((m) => ({ default: m.Contabilidad })));
-import { lazy, Suspense, type ReactElement } from 'react';
-import type { Permiso } from '@shared/permisos';
-import { Vacio } from './components/ui';
-import { Lock } from 'lucide-react';
 
 /** Guarda de ruta: el menú ya oculta las opciones, pero quien escribe la dirección a mano ve un aviso claro (la API igual verifica en el servidor). */
 function Requiere({ permiso, children }: { permiso: Permiso; children: ReactElement }) {

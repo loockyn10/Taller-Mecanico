@@ -280,3 +280,21 @@ Es aditiva: no se pierden datos. Una consecuencia de comportamiento: **para los 
 2. Aplicá **sólo** la migración nueva a la base remota (lo hacés vos): `npx wrangler d1 migrations apply DB --remote` (aplica `0005_bancos_cheques_compras_inventario.sql`; las anteriores ya figuran como aplicadas). Conviene tomar antes un punto de Time Travel de D1.
 3. Recién después, `git push origin main` para que el despliegue automático publique el Worker y la SPA.
 4. Los datos de caja existentes se conservan (la tabla se reconstruye copiando todas las filas).
+
+---
+
+# Preparación de la demostración comercial
+
+Trabajo sobre `main`, sin ramas ni PR. **No se tocó ninguna base remota ni se desplegó nada.** Documentación completa en `docs/DEMO.md`.
+
+## 20. Qué se agregó
+- **Generador de datos de demostración** (`scripts/demo/`, `npm run demo -- simular|destino|cargar|cronologia|verificar|estado`): crea "Taller Demo Fierro" con ~3 meses de actividad (30 clientes, 35 vehículos, 4 mecánicos, 45 OT, 25 presupuestos, 30 turnos, 80 artículos, 8 proveedores, 26 compras + 5 órdenes de compra, 35 ventas de mostrador + 35 comprobantes de OT, cuentas corrientes, cajas diarias con cierres, gastos, 3 cuentas bancarias, cheques y eCheq, conteos, listas de precios).
+- Todo se carga **por la API real** (sin insertar directamente), jornada por jornada. La API no permite fechar OT, comprobantes de OT ni sus cobros en el pasado, así que un SQL auditable (`UPDATE` de columnas de fecha del taller, sin tocar importes ni vínculos) reubica cada jornada en su día. El generador es idempotente (manifiesto), reanudable, sólo carga en talleres sin datos propios y exige `--remoto --confirmo <id>` para cualquier API no local.
+- 90 comprobaciones de consistencia (`verificar`): stock exacto y sin negativos, cajas encadenadas, cobrado = suma de cobros, saldos de cuentas corrientes y bancos, libro de caja contra cobros/pagos/gastos, cronología sin fechas futuras, numeración sin saltos y 27 secciones/informes con datos.
+
+## 21. Cambio en código de la aplicación
+- `src/App.tsx`: el `import { lazy … }` estaba **después** de su primer uso (`const X = lazy(...)`). El build de producción lo toleraba, pero el servidor de desarrollo de Vite mostraba la pantalla en blanco ("Cannot access 'lazy' before initialization"). Se movieron los imports al principio; sin cambio funcional.
+
+## 22. Pruebas realizadas
+- Carga completa sobre una instancia aislada (puertos 8790/5180): 90/90 comprobaciones; reanudación tras cortar la carga a mitad (sin duplicados); recarga sobre cuenta ya cargada ("nada que hacer"); guardas de entorno remoto. `npm run typecheck` y `npm run test:unit` OK.
+- Recorrido en el navegador de: inicio, órdenes (tablero), presupuestos, agenda, cuentas corrientes, caja, tesorería, bancos, cheques, inventario, órdenes de compra, reposición, recordatorios, informes y estadísticas.

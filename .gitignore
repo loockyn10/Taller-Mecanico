@@ -4,3 +4,7 @@ dev-dist
 .wrangler
 .dev.vars
 *.log
+
+# Generador de datos de demostración: manifiestos y SQL generados
+scripts/demo/estado/
+scripts/demo/salida/
