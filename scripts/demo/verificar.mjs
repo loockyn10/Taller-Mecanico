@@ -68,7 +68,7 @@ export async function verificar({ opts, plan, m, log }) {
 
   // ───── 3. Caja ─────
   const cerradas = sesiones.filter((s) => s.estado === 'cerrada');
-  chk('Caja', `Jornadas de caja: ${sesiones.length} (${cerradas.length} cerradas, ${sesiones.length - cerradas.length} abierta)`, sesiones.length === plan.N && sesiones.filter((s) => s.estado === 'abierta').length === 1 && sesiones.at(-1).estado === 'abierta');
+  chk('Caja', `Jornadas de caja: ${sesiones.length} (${cerradas.length} cerradas, ${sesiones.length - cerradas.length} abierta)`, sesiones.length >= plan.N && sesiones.length <= plan.N + 1 && sesiones.filter((s) => s.estado === 'abierta').length === 1 && sesiones.at(-1).estado === 'abierta');
   let cadena = true, detCad = '';
   for (let i = 1; i < sesiones.length; i++) if (sesiones[i].saldo_inicial !== sesiones[i - 1].efectivo_declarado) { cadena = false; detCad ||= `caja #${sesiones[i].numero}`; }
   chk('Caja', 'El saldo inicial de cada caja es lo declarado al cerrar la anterior', cadena, detCad);

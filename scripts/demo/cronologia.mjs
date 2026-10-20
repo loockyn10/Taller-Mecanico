@@ -90,7 +90,7 @@ export function construirCronologia({ m, plan }) {
     L.push(`INSERT INTO _demo_w VALUES (${q(w.simDia)}, ${q(iso(w.b0))}, ${q(iso(w.b1))}, ${q(iso(w.t0))}, ${q(`${w.simDia}T${INICIO_UTC}`)}, ${w.k.toFixed(6)}, ${w.off});`);
   }
   L.push('');
-  const ts = (col) => `COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%fZ', w.sim_start, printf('%+.3f seconds', (julianday(t.${col}) - julianday(w.t0)) * 86400.0 * w.k)) FROM _demo_w w WHERE t.${col} >= w.b0 AND t.${col} < w.b1), t.${col})`;
+  const ts = (col) => `COALESCE((SELECT strftime('%Y-%m-%dT%H:%M:%fZ', w.sim_start, printf('%+.3f seconds', MAX(0.0, (julianday(t.${col}) - julianday(w.t0)) * 86400.0 * w.k))) FROM _demo_w w WHERE t.${col} >= w.b0 AND t.${col} < w.b1), t.${col})`;
   const dt = (col, ref) => `COALESCE((SELECT date(t.${col}, w.off || ' days') FROM _demo_w w WHERE t.${ref} >= w.b0 AND t.${ref} < w.b1), t.${col})`;
   for (const T of TABLAS) {
     const ref = T.ref ?? 'created_at';

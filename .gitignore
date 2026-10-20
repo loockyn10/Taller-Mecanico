@@ -8,3 +8,5 @@ dev-dist
 # Generador de datos de demostración: manifiestos y SQL generados
 scripts/demo/estado/
 scripts/demo/salida/
+respaldos/
+.env.demo-remoto

@@ -73,8 +73,10 @@ export async function ejecutar({ plan, opts, m, guardar, log }) {
     ctx.catGasto = await ow.get('/categorias-gasto');
     ctx.catArt = await ow.get('/categorias-articulo');
     await refrescarArticulos();
-    if (!ad) ad = await new Sesion(opts.api, 'administrador').login(USUARIOS[0].email, opts.passwordUsuarios);
-    if (!em) em = await new Sesion(opts.api, 'empleado').login(USUARIOS[1].email, opts.passwordUsuarios);
+    if (opts.passwordUsuarios) {
+      if (!ad || ad === ow) ad = await new Sesion(opts.api, 'administrador').login(USUARIOS[0].email, opts.passwordUsuarios);
+      if (!em || em === ow) em = await new Sesion(opts.api, 'empleado').login(USUARIOS[1].email, opts.passwordUsuarios);
+    } else { ad = ow; em = ow; }
   }
   async function refrescarArticulos() {
     for (const a of await ow.get('/articulos?limite=1000')) ctx.arts.set(a.codigo, a);
@@ -83,18 +85,26 @@ export async function ejecutar({ plan, opts, m, guardar, log }) {
   async function configurarTaller() {
     const pre = await ow.get('/clientes?limite=500&inactivos=1');
     const ajenos = pre.filter((c) => c.codigo !== 0);
+    const arts = await ow.get('/articulos?limite=5');
+    if (arts.length && Object.keys(ids.cli).length === 0) throw new Error('El taller ya tiene artículos que no cargó este generador. Para no mezclar datos, usá un taller sin datos operativos.');
+    const caja0 = await ow.get('/caja/estado');
+    if (caja0.sesion && Object.keys(ids.cli).length === 0) {
+      if (caja0.sesion.resumen.movimientos > 0) throw new Error('El taller tiene una caja abierta con movimientos: no se toca. Cerrala vos antes de cargar la demostración.');
+      log('Se cierra la caja de prueba vacía que había abierta (sin movimientos).');
+      await ow.post('/caja/cerrar', { declarados: [{ medio: 'efectivo', importe: caja0.sesion.resumen.efectivo_esperado }], esperado_visto: caja0.sesion.resumen.efectivo_esperado, notas: 'Caja de prueba previa a la carga de la demostración (sin movimientos)' });
+    }
     if (ajenos.length && Object.keys(ids.cli).length === 0) {
       throw new Error(`El taller "${me.taller.nombre}" ya tiene ${ajenos.length} clientes que no cargó este generador. Para no mezclar datos, usá un taller vacío (el generador no borra nada).`);
     }
     log('Configuración del taller…');
     await ow.put('/taller/config', { taller: { ...TALLER }, config: { ...CONFIG } });
     // Usuarios del taller (cupo de licencia: 1 + adicionales)
-    const existentes = (await ow.get('/taller/usuarios')).usuarios;
-    for (const u of USUARIOS) {
-      if (!existentes.some((x) => x.email === u.email)) await ow.post('/taller/usuarios', { ...u, password: opts.passwordUsuarios });
-    }
-    ad = await new Sesion(opts.api, 'administrador').login(USUARIOS[0].email, opts.passwordUsuarios);
-    em = await new Sesion(opts.api, 'empleado').login(USUARIOS[1].email, opts.passwordUsuarios);
+    if (opts.passwordUsuarios) {
+      const existentes = (await ow.get('/taller/usuarios')).usuarios;
+      for (const u of USUARIOS) {
+        if (!existentes.some((x) => x.email === u.email)) await ow.post('/taller/usuarios', { ...u, password: opts.passwordUsuarios });
+      }
+    } else log('Sin FIERRO_DEMO_PASSWORD_USUARIOS: no se crean el administrador ni el empleado de ejemplo (todo se registra con el propietario).');
     await cargarCatalogos();
 
     log('Mecánicos y proveedores…');

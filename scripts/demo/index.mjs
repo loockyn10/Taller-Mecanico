@@ -37,6 +37,17 @@ function opciones(argv) {
   return o;
 }
 
+/** Credenciales: variables de entorno o el archivo local .env.demo-remoto (ignorado por git; ver .env.demo-remoto.example). Nunca se imprimen. */
+function cargarArchivoEnv() {
+  const f = path.join(ROOT, '.env.demo-remoto');
+  if (!fs.existsSync(f)) return;
+  for (const linea of fs.readFileSync(f, 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(linea);
+    if (m && !linea.trim().startsWith('#') && m[2] !== '' && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+}
+cargarArchivoEnv();
+
 function leerDevVars(nombre) {
   const f = path.join(ROOT, '.dev.vars');
   return fs.existsSync(f) ? new RegExp(`${nombre}=(.+)`).exec(fs.readFileSync(f, 'utf8'))?.[1]?.trim() : undefined;
@@ -52,7 +63,7 @@ const opts = {
   remoto: !esLocal,
   email: o.email ?? process.env.FIERRO_DEMO_EMAIL ?? 'demo@fierro.local',
   password: o.password ?? process.env.FIERRO_DEMO_PASSWORD ?? (esLocal ? 'demo1234' : undefined),
-  passwordUsuarios: o['password-usuarios'] ?? process.env.FIERRO_DEMO_PASSWORD_USUARIOS ?? 'demo1234',
+  passwordUsuarios: o['password-usuarios'] ?? process.env.FIERRO_DEMO_PASSWORD_USUARIOS ?? (esLocal ? 'demo1234' : undefined),
   platformToken: o['plataforma-token'] ?? process.env.PLATFORM_ADMIN_TOKEN ?? (esLocal ? leerDevVars('PLATFORM_ADMIN_TOKEN') : undefined),
   pausaMs: o['pausa-ms'] ? Number(o['pausa-ms']) : undefined,
 };
@@ -211,13 +222,77 @@ async function cmdVerificar() {
   if (fallas.length) process.exitCode = 1;
 }
 
+const PRUEBAS = { nombre: 'Taller de Pruebas', email: process.env.FIERRO_PRUEBAS_EMAIL ?? 'pruebas@fierro.local' };
+
+async function cmdPruebas() {
+  const pass = process.env.FIERRO_PRUEBAS_PASSWORD;
+  if (!pass) throw new Error('Definí FIERRO_PRUEBAS_PASSWORD (variable de entorno o .env.demo-remoto).');
+  if (!opts.platformToken) throw new Error('Definí PLATFORM_ADMIN_TOKEN (variable de entorno o .env.demo-remoto): es el token de administración de plataforma.');
+  if (opts.remoto && !o.remoto) throw new Error('La API no es local: agregá --remoto para crear el taller en ese entorno.');
+  const r = await fetch(`${api}/api/platform/talleres`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${opts.platformToken}` },
+    body: JSON.stringify({ nombre: PRUEBAS.nombre, usuarios_adicionales: 2, propietario: { nombre: 'Propietario de Pruebas', email: PRUEBAS.email, password: pass } }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 409) log(`El usuario ${PRUEBAS.email} ya existe: no se crea otro taller.`);
+  else if (!r.ok) throw new Error(`No se pudo crear el taller: ${r.status} ${j?.error?.message ?? ''}`);
+  else log(`Taller "${PRUEBAS.nombre}" creado (id ${j.tallerId}).`);
+  const s = await new Sesion(api, 'pruebas').login(PRUEBAS.email, pass);
+  const me = await s.get('/auth/me');
+  log(`Ingreso correcto: ${me.usuario.email} (${me.usuario.rol}) · taller "${me.taller.nombre}" · id ${me.taller.id}`);
+}
+
+async function cmdAislamiento() {
+  if (!opts.password || !process.env.FIERRO_PRUEBAS_PASSWORD) throw new Error('Definí FIERRO_DEMO_PASSWORD y FIERRO_PRUEBAS_PASSWORD.');
+  const d = await new Sesion(api, 'demo').login(opts.email, opts.password);
+  const p = await new Sesion(api, 'pruebas').login(PRUEBAS.email, process.env.FIERRO_PRUEBAS_PASSWORD);
+  const [md, mp] = [await d.get('/auth/me'), await p.get('/auth/me')];
+  const filas = [];
+  const chk = (n, ok, det = '') => { filas.push(ok); log(`  ${ok ? '✔' : '✖'} ${n}${det ? '  → ' + det : ''}`); };
+  chk(`Dos talleres distintos: "${md.taller.nombre}" (${md.taller.id}) y "${mp.taller.nombre}" (${mp.taller.id})`, md.taller.id !== mp.taller.id);
+  const rubros = [
+    ['Clientes (sin Consumidor final)', '/clientes?limite=500', (r) => r.filter((c) => c.codigo !== 0).length], ['Vehículos', '/vehiculos', (r) => r.length],
+    ['Órdenes de trabajo', '/ordenes?estado=todas&limite=500', (r) => r.length], ['Presupuestos', '/presupuestos', (r) => r.length], ['Ventas', '/ventas', (r) => r.length],
+    ['Cobros', '/cobros?limite=500', (r) => r.length], ['Compras', '/compras', (r) => r.length], ['Artículos', '/articulos?limite=1000', (r) => r.length],
+    ['Proveedores', '/proveedores', (r) => r.length], ['Cajas', '/caja/sesiones?limite=200', (r) => r.length], ['Cuentas bancarias', '/bancos/cuentas?todas=1', (r) => r.length],
+    ['Cheques', '/cheques?limite=1000', (r) => r.length], ['Gastos', '/gastos?limite=500', (r) => r.length],
+  ];
+  log('\n  ' + 'Rubro'.padEnd(34) + 'DEMO    PRUEBAS');
+  let ceroOk = true;
+  for (const [n, ruta, f] of rubros) {
+    const [a, b] = [f(await d.get(ruta)), f(await p.get(ruta))];
+    if (b !== 0) ceroOk = false;
+    log(`  ${n.padEnd(34)}${String(a).padEnd(8)}${b}`);
+  }
+  log('');
+  chk('El taller de pruebas no tiene información operativa', ceroOk);
+  const cat = [(await p.get('/servicios')).length, (await p.get('/marcas')).length, (await p.get('/categorias-gasto')).length];
+  chk(`Conserva sus catálogos iniciales (${cat[0]} servicios, ${cat[1]} marcas, ${cat[2]} categorías de gasto)`, cat.every((n) => n > 0));
+  const ot = (await d.get('/ordenes?estado=todas&limite=5'))[0];
+  const cli = (await d.get('/clientes?limite=5')).find((c) => c.codigo !== 0);
+  const veh = (await d.get('/vehiculos'))[0];
+  const venta = (await d.get('/ventas'))[0];
+  for (const [n, ruta] of [['una OT', ot && `/ordenes/${ot.id}`], ['un cliente', cli && `/clientes/${cli.id}`], ['un vehículo', veh && `/vehiculos/${veh.id}`], ['una venta', venta && `/ventas/${venta.id}`]]) {
+    if (!ruta) continue;
+    const codigo = await p.get(ruta).then(() => 200, (e) => e.status);
+    chk(`Pruebas no puede leer ${n} de la demostración (respuesta ${codigo})`, codigo === 404);
+  }
+  if (cli && veh) {
+    const codigo = await p.post('/presupuestos', { cliente_id: cli.id, vehiculo_id: veh.id, items: [{ tipo: 'libre', descripcion: 'x', cantidad: 1, precio_unitario: 100 }] }).then(() => 201, (e) => e.status);
+    chk(`Pruebas no puede crear un presupuesto sobre cliente/vehículo de la demostración (respuesta ${codigo})`, codigo === 400);
+  }
+  log(filas.every(Boolean) ? '\nAislamiento correcto.' : '\nHAY DIFERENCIAS DE AISLAMIENTO.');
+  if (!filas.every(Boolean)) process.exitCode = 1;
+}
+
 function cmdEstado() {
   const m = leerManifiesto();
   if (!m) return log('Sin manifiesto para esta cuenta.');
   log(JSON.stringify({ taller: m.taller, estado: m.estado, hoy: m.hoy, hechas: m.hechas, jornadas: m.ventanas?.length, cronologia: m.cronologia, ultimoError: m.ultimoError }, null, 2));
 }
 
-const COMANDOS = { simular: cmdSimular, cargar: cmdCargar, cronologia: cmdCronologia, verificar: cmdVerificar, estado: cmdEstado, destino: cmdDestino };
+const COMANDOS = { simular: cmdSimular, cargar: cmdCargar, cronologia: cmdCronologia, verificar: cmdVerificar, estado: cmdEstado, destino: cmdDestino, pruebas: cmdPruebas, aislamiento: cmdAislamiento };
 if (!COMANDOS[comando]) {
   console.log(`Comandos: ${Object.keys(COMANDOS).join(' | ')}\nVer docs/DEMO.md`);
 } else {
