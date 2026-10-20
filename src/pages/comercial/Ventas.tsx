@@ -7,13 +7,14 @@ import { useAuth } from '@/lib/auth';
 import { fecha, money, numero } from '@/lib/format';
 import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Input, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useDebounce, useToast, Vacio } from '@/components/ui';
 import { EstadoCobroBadge } from '@/components/estados';
-import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, type ItemUI, type ParamsUI } from '@/components/EditorItems';
+import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, useDefectosEnParams, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 import { SelectorCliente, type ClienteMin } from '@/components/selectores';
 import { AvisoCaja, ModalCobro, useCajaBloqueada } from '@/components/Cobro';
 import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
 import { invalidarDinero } from '@/lib/caja';
 import { calcularTotales } from '@shared/totals';
-import { MEDIOS_PAGO, MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
+import { type MedioPago } from '@shared/dominio';
+import { CamposMedio, errorMedio, extraAPayload, extraVacio, SelectorMedio, type ExtraMedio } from '@/components/MedioPago';
 
 export function Ventas() {
   const nav = useNavigate();
@@ -157,20 +158,22 @@ export function VentaMostrador() {
   const [params, setParams] = useState<ParamsUI>(paramsVacios());
   const [lista, setLista] = useState<string | null>(null);
   useListaPorDefecto(true, lista, setLista);
+  useDefectosEnParams(true, setParams);
   const [condicion, setCondicion] = useState<'contado' | 'cuenta_corriente'>('contado');
   const [obs, setObs] = useState('');
   const [medio, setMedio] = useState<MedioPago>('efectivo');
   const [ref, setRef] = useState('');
+  const [extra, setExtra] = useState<ExtraMedio>(extraVacio());
   const [clave] = useState(nuevaClave());
   const total = calcularTotales(items, params).total;
-  const chequeSinNumero = condicion === 'contado' && medio === 'cheque' && !ref.trim();
+  const chequeSinNumero = condicion === 'contado' && !!errorMedio(medio, ref, extra, 'cobro');
   // "Contado" se cobra en el acto; sin cliente identificado sólo se puede vender de contado.
   const cuentaCorrienteSinCliente = condicion === 'cuenta_corriente' && !cliente;
   const m = useMutation({
     mutationFn: () =>
       api.post('/ventas', {
         cliente_id: cliente?.id ?? null, condicion, observaciones: obs, items: itemsParaApi(items), idem_key: clave, lista_precio_id: lista, ...params,
-        cobro: condicion === 'contado' ? { medio, referencia: ref.trim() || null } : null,
+        cobro: condicion === 'contado' ? { medio, referencia: ref.trim() || null, ...extraAPayload(medio, extra, 'cobro') } : null,
       }),
     onSuccess: (v) => {
       invalidarDinero(qc);
@@ -202,13 +205,12 @@ export function VentaMostrador() {
               {condicion === 'contado' && (
                 <div className="space-y-2 rounded-lg bg-slate-50 p-3">
                   <Campo label="Medio de pago">
-                    <Select value={medio} onChange={(e) => setMedio(e.target.value as MedioPago)}>
-                      {MEDIOS_PAGO.map((x) => <option key={x} value={x}>{MEDIO_PAGO_LABEL[x]}</option>)}
-                    </Select>
+                    <SelectorMedio value={medio} onChange={setMedio} />
                   </Campo>
                   <Campo label={medio === 'cheque' ? 'N° de cheque' : 'Referencia (opcional)'} requerido={medio === 'cheque'}>
                     <Input value={ref} onChange={(e) => setRef(e.target.value)} />
                   </Campo>
+                  <CamposMedio medio={medio} valor={extra} onChange={setExtra} ctx="cobro" importe={total} />
                 </div>
               )}
               <Campo label="Observaciones"><Textarea rows={2} value={obs} onChange={(e) => setObs(e.target.value)} /></Campo>

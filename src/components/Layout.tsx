@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  BarChart3, Banknote, Bell, Boxes, CalendarDays, Car, ClipboardList, FileText, Gauge, LogOut, Menu, Package, PackageSearch, PiggyBank, Receipt, Search, Settings, ShoppingCart, Tags, Truck, Users, Wallet, Wrench, X,
+  BarChart3, Banknote, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, LogOut, Menu, Package, PackageSearch, PiggyBank, Receipt, Scale, ScrollText, Search, Settings, ShoppingCart, Tags, Truck, Users, Wallet, Wrench, X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
@@ -37,13 +37,21 @@ const SECCIONES: Array<{ titulo: string; items: ItemNav[] }> = [
       { a: '/cuentas', texto: 'Cuentas corrientes', icono: <ClipboardList className="size-[18px]" />, permiso: 'ventas.ver' },
       { a: '/caja', texto: 'Caja', icono: <Banknote className="size-[18px]" />, permiso: 'caja.operar' },
       { a: '/finanzas', texto: 'Gastos y finanzas', icono: <PiggyBank className="size-[18px]" />, permiso: 'finanzas.ver' },
+      { a: '/tesoreria', texto: 'Tesorería', icono: <Scale className="size-[18px]" />, permiso: 'tesoreria.ver' },
+      { a: '/bancos', texto: 'Bancos', icono: <Landmark className="size-[18px]" />, permiso: 'bancos.gestionar' },
+      { a: '/cheques', texto: 'Cheques y eCheq', icono: <ScrollText className="size-[18px]" />, permiso: 'cheques.gestionar' },
       { a: '/articulos', texto: 'Artículos y stock', icono: <Package className="size-[18px]" />, permiso: 'catalogo.ver' },
       { a: '/stock', texto: 'Movimientos de stock', icono: <Boxes className="size-[18px]" />, permiso: 'stock.ver' },
       { a: '/reposicion', texto: 'Reposición', icono: <PackageSearch className="size-[18px]" />, permiso: 'stock.ver' },
       { a: '/listas-precios', texto: 'Listas de precios', icono: <Tags className="size-[18px]" />, permiso: 'precios.gestionar' },
+      { a: '/inventario', texto: 'Inventario', icono: <ClipboardCheck className="size-[18px]" />, permiso: 'stock.ver' },
+      { a: '/ordenes-compra', texto: 'Órdenes de compra', icono: <ClipboardList className="size-[18px]" />, permiso: 'compras.gestionar' },
       { a: '/compras', texto: 'Compras', icono: <ShoppingCart className="size-[18px]" />, permiso: 'compras.gestionar' },
+      { a: '/facturas-proveedor', texto: 'Facturas de proveedores', icono: <FileText className="size-[18px]" />, permiso: 'compras.gestionar' },
       { a: '/proveedores', texto: 'Proveedores', icono: <Truck className="size-[18px]" />, permiso: 'catalogo.ver' },
       { a: '/reportes', texto: 'Estadísticas', icono: <BarChart3 className="size-[18px]" />, permiso: 'reportes.ver' },
+      { a: '/informes', texto: 'Informes', icono: <FileSpreadsheet className="size-[18px]" />, permiso: 'reportes.ver' },
+      { a: '/contabilidad', texto: 'Registros contables', icono: <Calculator className="size-[18px]" />, permiso: 'contabilidad.ver' },
     ],
   },
   {

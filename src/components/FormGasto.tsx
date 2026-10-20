@@ -5,7 +5,8 @@ import { api, nuevaClave } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { invalidarDinero } from '@/lib/caja';
 import { hoyISO } from '@/lib/format';
-import { MEDIOS_PAGO, MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
+import { type MedioPago } from '@shared/dominio';
+import { CamposMedio, errorMedio, extraAPayload, extraVacio, SelectorMedio, type ExtraMedio } from './MedioPago';
 import { AvisoCaja, useCajaBloqueada } from './Cobro';
 import { Boton, Campo, Input, InputMoneda, Modal, Select, useToast } from './ui';
 
@@ -17,6 +18,7 @@ export function ModalGasto({ onCerrar, inicial }: { onCerrar: () => void; inicia
   const { data: cats = [] } = useQuery({ queryKey: ['gastos', 'categorias'], queryFn: () => api.get<any[]>('/categorias-gasto') });
   const { data: provs = [] } = useQuery({ queryKey: ['proveedores'], queryFn: () => api.get<any[]>('/proveedores'), enabled: puede('catalogo.ver') });
   const [f, setF] = useState({ categoria_id: inicial?.categoria_id ?? '', concepto: inicial?.concepto ?? '', importe: inicial?.importe ?? 0, medio: (inicial?.medio ?? 'efectivo') as MedioPago, referencia: '', proveedor_id: '', comprobante: '', fecha: hoyISO(), notas: '' });
+  const [extra, setExtra] = useState<ExtraMedio>(extraVacio());
   const [clave] = useState(nuevaClave());
   useEffect(() => {
     if (!f.categoria_id && cats.length) setF((x) => ({ ...x, categoria_id: cats[0].id }));
@@ -26,6 +28,7 @@ export function ModalGasto({ onCerrar, inicial }: { onCerrar: () => void; inicia
       api.post('/gastos', {
         categoria_id: f.categoria_id, concepto: f.concepto, importe: f.importe, medio: f.medio, fecha: f.fecha, idem_key: clave,
         referencia: f.referencia || null, proveedor_id: f.proveedor_id || null, comprobante: f.comprobante || null, notas: f.notas || null,
+        ...extraAPayload(f.medio, extra, 'gasto'),
       }),
     onSuccess: () => {
       invalidarDinero(qc);
@@ -34,7 +37,7 @@ export function ModalGasto({ onCerrar, inicial }: { onCerrar: () => void; inicia
     },
     onError: toast.error,
   });
-  const valido = f.categoria_id && f.concepto.trim().length >= 3 && f.importe > 0 && !bloqueada;
+  const valido = f.categoria_id && f.concepto.trim().length >= 3 && f.importe > 0 && !bloqueada && !errorMedio(f.medio, f.referencia, extra, 'gasto');
   return (
     <Modal abierto onCerrar={onCerrar} titulo="Registrar gasto" ancho="lg" pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="primario" disabled={!valido} cargando={m.isPending} onClick={() => m.mutate()}>Registrar gasto</Boton></>}>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -47,10 +50,9 @@ export function ModalGasto({ onCerrar, inicial }: { onCerrar: () => void; inicia
         </Campo>
         <Campo label="Importe" requerido><InputMoneda value={f.importe} onChange={(v) => setF({ ...f, importe: v })} /></Campo>
         <Campo label="Medio de pago" hint={f.medio === 'efectivo' ? 'Sale del efectivo de la caja' : 'No afecta al efectivo de la caja'}>
-          <Select value={f.medio} onChange={(e) => setF({ ...f, medio: e.target.value as MedioPago })}>
-            {MEDIOS_PAGO.map((x) => <option key={x} value={x}>{MEDIO_PAGO_LABEL[x]}</option>)}
-          </Select>
+          <SelectorMedio value={f.medio} onChange={(medio) => setF({ ...f, medio })} />
         </Campo>
+        <div className="sm:col-span-2"><CamposMedio medio={f.medio} valor={extra} onChange={setExtra} ctx="gasto" importe={f.importe} /></div>
         <Campo label="Fecha" hint={puede('fechas.retroactivas') ? undefined : 'Sólo hoy'}><Input type="date" value={f.fecha} max={hoyISO()} disabled={!puede('fechas.retroactivas')} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Campo>
         {puede('catalogo.ver') && (
           <Campo label="Proveedor (opcional)">
@@ -61,7 +63,7 @@ export function ModalGasto({ onCerrar, inicial }: { onCerrar: () => void; inicia
           </Campo>
         )}
         <Campo label="N° de comprobante"><Input value={f.comprobante} onChange={(e) => setF({ ...f, comprobante: e.target.value })} /></Campo>
-        <Campo label="Referencia de pago"><Input value={f.referencia} onChange={(e) => setF({ ...f, referencia: e.target.value })} /></Campo>
+        <Campo label={f.medio === 'cheque' ? 'N° de cheque' : 'Referencia de pago'} requerido={f.medio === 'cheque'}><Input value={f.referencia} onChange={(e) => setF({ ...f, referencia: e.target.value })} /></Campo>
         <Campo label="Notas"><Input value={f.notas} onChange={(e) => setF({ ...f, notas: e.target.value })} /></Campo>
       </div>
     </Modal>

@@ -248,7 +248,8 @@ caja.post('/cerrar', requirePerm('caja.operar'), async (c) => {
     throw conflict('Los movimientos de la caja cambiaron mientras contabas. Revisá los importes y volvé a confirmar.', 'caja_cambio');
   }
   const diferencia = efectivo.importe - res.efectivo_esperado;
-  if (diferencia !== 0 && (d.notas ?? '').length < 3) throw badRequest('Hay una diferencia de efectivo: explicala en las notas del cierre');
+  const tolerancia = (await first<{ t: number }>(c.env.DB, 'SELECT tolerancia_caja AS t FROM taller_config WHERE taller_id = ?', s.tallerId))?.t ?? 0;
+  if (Math.abs(diferencia) > tolerancia && (d.notas ?? '').length < 3) throw badRequest('Hay una diferencia de efectivo: explicala en las notas del cierre');
 
   // Medios con movimientos que no se declararon: se informa el esperado y queda sin diferencia (a conciliar con el extracto/posnet).
   const todos = new Set<string>([...medios, ...res.por_medio.map((m) => m.medio)]);
@@ -326,7 +327,7 @@ caja.get('/sesiones/:id', requirePerm('caja.operar'), async (c) => {
 caja.get('/reportes', requirePerm('finanzas.ver'), async (c) => {
   const s = c.get('sesion');
   const { desde, hasta } = query(c, z.object({ desde: zFecha, hasta: zFecha }));
-  const base = 'm.taller_id = ? AND m.fecha BETWEEN ? AND ?';
+  const base = "m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.rubro <> 'traspaso'";
   const p = [s.tallerId, desde, hasta];
   const [porMedio, porRubro, porDia, porUsuario, sesiones, totales] = await Promise.all([
     all(c.env.DB, `SELECT m.medio, COALESCE(SUM(CASE m.tipo WHEN 'ingreso' THEN m.importe END),0) AS ingresos, COALESCE(SUM(CASE m.tipo WHEN 'egreso' THEN m.importe END),0) AS egresos FROM caja_movimientos m WHERE ${base} GROUP BY m.medio ORDER BY ingresos DESC`, ...p),

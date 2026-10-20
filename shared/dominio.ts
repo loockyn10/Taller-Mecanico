@@ -130,13 +130,14 @@ export const FRECUENCIA_GASTO_LABEL: Record<FrecuenciaGasto, string> = {
   anual: 'Anual',
 };
 
-export const RUBROS_CAJA = ['cobro', 'pago_proveedor', 'gasto', 'otro_ingreso'] as const;
+export const RUBROS_CAJA = ['cobro', 'pago_proveedor', 'gasto', 'otro_ingreso', 'traspaso'] as const;
 export type RubroCaja = (typeof RUBROS_CAJA)[number];
 export const RUBRO_CAJA_LABEL: Record<RubroCaja, string> = {
   cobro: 'Cobros de clientes',
   pago_proveedor: 'Pagos a proveedores',
   gasto: 'Gastos',
   otro_ingreso: 'Otros ingresos',
+  traspaso: 'Traspasos con bancos',
 };
 
 export const DESTINOS_PRECIO_BASE = ['costo', 'precio'] as const;
@@ -146,3 +147,99 @@ export const REDONDEO_PRECIO_LABEL: Record<number, string> = { 0: 'Sin redondeo'
 /** Cantidades de stock: se operan siempre con 3 decimales (evita errores de coma flotante). */
 export const redondearCantidad = (n: number) => Math.round(n * 1000) / 1000;
 export const esCantidadValida = (n: number) => Number.isFinite(n) && Math.abs(n * 1000 - Math.round(n * 1000)) < 1e-6;
+
+// ───── Bancos, cheques y tesorería ─────
+export const TIPOS_CUENTA_BANCARIA = ['cuenta_corriente', 'caja_ahorro', 'billetera_virtual', 'otra'] as const;
+export const TIPO_CUENTA_LABEL: Record<(typeof TIPOS_CUENTA_BANCARIA)[number], string> = {
+  cuenta_corriente: 'Cuenta corriente',
+  caja_ahorro: 'Caja de ahorro',
+  billetera_virtual: 'Billetera virtual (CVU)',
+  otra: 'Otra',
+};
+export const MONEDAS = ['ARS', 'USD'] as const;
+/** Medios de pago que se acreditan en una cuenta bancaria (el efectivo va a caja; el cheque, a la cartera). */
+export const MEDIOS_BANCARIOS: readonly string[] = ['transferencia', 'debito', 'credito', 'otro'];
+
+export const CATEGORIA_BANCO_LABEL: Record<string, string> = {
+  cobro: 'Cobro',
+  pago_proveedor: 'Pago a proveedor',
+  gasto: 'Gasto',
+  deposito: 'Depósito de efectivo',
+  extraccion: 'Extracción de efectivo',
+  transferencia: 'Transferencia entre cuentas',
+  cheque: 'Cheque',
+  manual: 'Movimiento manual',
+  ajuste: 'Ajuste autorizado',
+  reverso: 'Anulación',
+};
+
+export const ESTADOS_CHEQUE = ['en_cartera', 'depositado', 'entregado', 'acreditado', 'rechazado', 'anulado'] as const;
+export type EstadoCheque = (typeof ESTADOS_CHEQUE)[number];
+export const ESTADO_CHEQUE_LABEL: Record<EstadoCheque, string> = {
+  en_cartera: 'En cartera',
+  depositado: 'Depositado',
+  entregado: 'Entregado',
+  acreditado: 'Acreditado',
+  rechazado: 'Rechazado',
+  anulado: 'Anulado',
+};
+/** Estados en los que un cheque ya salió de la cartera hacia un banco o un tercero (el cobro/pago que lo originó no se puede anular). */
+export const ESTADOS_CHEQUE_COMPROMETIDO: readonly EstadoCheque[] = ['depositado', 'entregado', 'acreditado'];
+/** Cheque con dinero todavía pendiente de acreditarse. */
+export const ESTADOS_CHEQUE_PENDIENTE: readonly EstadoCheque[] = ['en_cartera', 'depositado', 'entregado'];
+/** Días corridos de validez de un cheque común desde la fecha de pago (plazo para presentarlo al cobro). */
+export const DIAS_VALIDEZ_CHEQUE = 30;
+
+// ───── Compras ─────
+export const ESTADOS_ORDEN_COMPRA = ['borrador', 'pendiente', 'parcial', 'recibida', 'cancelada'] as const;
+export type EstadoOrdenCompra = (typeof ESTADOS_ORDEN_COMPRA)[number];
+export const ESTADO_OC_LABEL: Record<EstadoOrdenCompra, string> = {
+  borrador: 'Borrador',
+  pendiente: 'Pendiente',
+  parcial: 'Parcialmente recibida',
+  recibida: 'Recibida',
+  cancelada: 'Cancelada',
+};
+
+export const TIPOS_COMPROBANTE_PROVEEDOR = ['factura_a', 'factura_b', 'factura_c', 'factura_m', 'nota_credito_a', 'nota_credito_b', 'nota_credito_c', 'nota_debito_a', 'nota_debito_b', 'nota_debito_c', 'ticket', 'otro'] as const;
+export type TipoComprobanteProveedor = (typeof TIPOS_COMPROBANTE_PROVEEDOR)[number];
+export const TIPO_COMPROBANTE_LABEL: Record<TipoComprobanteProveedor, string> = {
+  factura_a: 'Factura A', factura_b: 'Factura B', factura_c: 'Factura C', factura_m: 'Factura M',
+  nota_credito_a: 'Nota de crédito A', nota_credito_b: 'Nota de crédito B', nota_credito_c: 'Nota de crédito C',
+  nota_debito_a: 'Nota de débito A', nota_debito_b: 'Nota de débito B', nota_debito_c: 'Nota de débito C',
+  ticket: 'Ticket', otro: 'Otro comprobante',
+};
+export const esNotaCredito = (t: string) => t.startsWith('nota_credito');
+
+/** Normaliza un número de comprobante a PPPP-NNNNNNNN (8 dígitos). Devuelve null si no tiene forma de comprobante. */
+export function normalizarNroComprobante(texto: string): string | null {
+  const m = texto.trim().match(/^(\d{1,5})\s*[-\s]\s*(\d{1,8})$/);
+  if (!m) return null;
+  return `${m[1].padStart(4, '0').slice(-4)}-${m[2].padStart(8, '0')}`;
+}
+
+/** Valida un CUIT/CUIL con su dígito verificador (acepta guiones). */
+export function cuitValido(texto: string): boolean {
+  const d = texto.replace(/\D/g, '');
+  if (d.length !== 11) return false;
+  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const suma = pesos.reduce((a, p, i) => a + p * Number(d[i]), 0);
+  let v = 11 - (suma % 11);
+  if (v === 11) v = 0;
+  if (v === 10) v = 9;
+  return v === Number(d[10]);
+}
+
+// ───── Inventario ─────
+export const MOTIVOS_AJUSTE = ['conteo', 'rotura', 'merma', 'robo', 'vencimiento', 'error_carga', 'uso_interno', 'otro'] as const;
+export type MotivoAjuste = (typeof MOTIVOS_AJUSTE)[number];
+export const MOTIVO_AJUSTE_LABEL: Record<MotivoAjuste, string> = {
+  conteo: 'Diferencia de conteo físico',
+  rotura: 'Rotura o daño',
+  merma: 'Merma',
+  robo: 'Robo o pérdida',
+  vencimiento: 'Vencimiento',
+  error_carga: 'Error de carga',
+  uso_interno: 'Uso interno del taller',
+  otro: 'Otro motivo',
+};

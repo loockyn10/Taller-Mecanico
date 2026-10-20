@@ -35,6 +35,21 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect({ ...uno('SELECT (SELECT COUNT(*) FROM ventas) AS ventas, (SELECT COUNT(*) FROM cobros) AS cobros, (SELECT SUM(total - cobrado) FROM ventas) AS saldo') }).toEqual({ ventas: 2, cobros: 2, saldo: 5000 });
     // La caja no es obligatoria por defecto: el comportamiento de los talleres existentes no cambia
     expect(uno("SELECT caja_obligatoria FROM taller_config WHERE taller_id = 't1'").caja_obligatoria).toBe(0);
+    // 0005: el libro de caja se reconstruyó sin perder filas, admite traspasos y conserva los índices antiduplicación
+    expect(uno('SELECT COUNT(*) AS n FROM caja_movimientos').n).toBe(3);
+    db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('tr1', 't1', 'egreso', 'traspaso', 'efectivo', 100, 'Depósito', 'banco', 'b1', '2026-05-01')");
+    expect(() => db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('tr2', 't1', 'egreso', 'traspaso', 'efectivo', 100, 'Depósito', 'banco', 'b1', '2026-05-01')")).toThrow(/UNIQUE/);
+    // 0005: el IVA por defecto de fábrica (nadie guardó la configuración) pasa a 0 para no cambiar importes de documentos nuevos
+    expect(uno("SELECT iva_default, medios_pago, tolerancia_caja, plazo_pago_dias FROM taller_config WHERE taller_id = 't1'")).toMatchObject({ iva_default: 0, medios_pago: null, tolerancia_caja: 0, plazo_pago_dias: 30 });
+    // 0005: el historial de costos arranca con el costo vigente de cada artículo y los triggers registran los cambios
+    expect(uno("SELECT costo_nuevo, origen FROM articulo_costos WHERE articulo_id = 'a1'")).toMatchObject({ costo_nuevo: 1000, origen: 'inicial' });
+    db.exec("UPDATE articulos SET costo = 1500 WHERE id = 'a1'");
+    expect(todos("SELECT costo_anterior, costo_nuevo FROM articulo_costos WHERE articulo_id = 'a1' ORDER BY id").map((r) => ({ ...r }))).toEqual([{ costo_anterior: null, costo_nuevo: 1000 }, { costo_anterior: 1000, costo_nuevo: 1500 }]);
+    // 0005: un cheque no puede repetirse (mismo banco + número + librador) salvo que el anterior esté anulado
+    db.exec("INSERT INTO cheques (id, taller_id, numero, direccion, banco, nro_cheque, importe, fecha_emision, fecha_pago, fecha_vencimiento) VALUES ('c1', 't1', 1, 'recibido', 'Banco X', '10', 100, '2026-05-01', '2026-05-01', '2026-05-31')");
+    expect(() => db.exec("INSERT INTO cheques (id, taller_id, numero, direccion, banco, nro_cheque, importe, fecha_emision, fecha_pago, fecha_vencimiento) VALUES ('c2', 't1', 2, 'recibido', 'banco x', '10', 100, '2026-05-01', '2026-05-01', '2026-05-31')")).toThrow(/UNIQUE/);
+    db.exec("UPDATE cheques SET estado = 'anulado' WHERE id = 'c1'");
+    db.exec("INSERT INTO cheques (id, taller_id, numero, direccion, banco, nro_cheque, importe, fecha_emision, fecha_pago, fecha_vencimiento) VALUES ('c2', 't1', 2, 'recibido', 'banco x', '10', 100, '2026-05-01', '2026-05-01', '2026-05-31')");
     // Integridad referencial intacta tras migrar
     expect(todos('PRAGMA foreign_key_check')).toEqual([]);
     // El libro impide registrar dos veces el mismo hecho de origen (antiduplicación a nivel base)

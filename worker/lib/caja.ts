@@ -52,7 +52,7 @@ export interface MovimientoManual {
   importe: number;
   concepto: string;
   referencia?: string | null;
-  origenTipo: 'pago_proveedor' | 'gasto' | 'manual';
+  origenTipo: 'pago_proveedor' | 'gasto' | 'manual' | 'banco';
   origenId: string;
   fecha: string;
   idemKey?: string | null;
@@ -104,5 +104,5 @@ export function sentenciaReversos(db: D1Database, tallerId: string, donde: strin
 
 export const reversoDeCobro = (db: D1Database, tallerId: string, cobroId: string, usuarioId: string) =>
   sentenciaReversos(db, tallerId, "m.origen_tipo = 'cobro' AND m.origen_id IN (SELECT id FROM cobro_medios WHERE taller_id = m.taller_id AND cobro_id = ?)", [cobroId], usuarioId);
-export const reversoDeOrigen = (db: D1Database, tallerId: string, origenTipo: 'pago_proveedor' | 'gasto' | 'manual', origenId: string, usuarioId: string) =>
+export const reversoDeOrigen = (db: D1Database, tallerId: string, origenTipo: 'pago_proveedor' | 'gasto' | 'manual' | 'banco', origenId: string, usuarioId: string) =>
   sentenciaReversos(db, tallerId, 'm.origen_tipo = ? AND m.origen_id = ?', [origenTipo, origenId], usuarioId);

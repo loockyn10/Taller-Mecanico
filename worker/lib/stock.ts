@@ -11,6 +11,7 @@ export interface Movimiento {
   origenId?: string | null;
   idemKey?: string | null; // único por taller: un segundo intento con la misma clave aborta el batch
   notas?: string | null;
+  motivo?: string | null;
   costoUnitario?: number | null;
   usuarioId?: string | null;
 }
@@ -56,11 +57,18 @@ export function sentenciasMovimiento(db: D1Database, tallerId: string, m: Movimi
   );
   s.push(
     db.prepare(
-      `INSERT INTO stock_movimientos (id, taller_id, articulo_id, tipo, cantidad, stock_resultante, costo_unitario, origen_tipo, origen_id, idem_key, notas, usuario_id)
-       SELECT ?, taller_id, id, ?, ?, stock, ?, ?, ?, ?, ?, ? FROM articulos WHERE taller_id = ? AND id = ?`,
-    ).bind(uid(), m.tipo, delta, m.costoUnitario ?? null, m.origenTipo ?? null, m.origenId ?? null, m.idemKey ?? null, m.notas ?? null, m.usuarioId ?? null, tallerId, m.articuloId),
+      `INSERT INTO stock_movimientos (id, taller_id, articulo_id, tipo, cantidad, stock_resultante, costo_unitario, origen_tipo, origen_id, idem_key, notas, motivo, usuario_id)
+       SELECT ?, taller_id, id, ?, ?, stock, ?, ?, ?, ?, ?, ?, ? FROM articulos WHERE taller_id = ? AND id = ?`,
+    ).bind(uid(), m.tipo, delta, m.costoUnitario ?? null, m.origenTipo ?? null, m.origenId ?? null, m.idemKey ?? null, m.notas ?? null, m.motivo ?? null, m.usuarioId ?? null, tallerId, m.articuloId),
   );
   // Si el artículo no existiera en el taller, el INSERT...SELECT no insertaría nada: lo detectamos.
   s.push(guard(db, 'NOT EXISTS (SELECT 1 FROM articulos WHERE taller_id = ? AND id = ?)', tallerId, m.articuloId));
   return s;
+}
+
+/** Etiqueta el último cambio de costo del artículo (el historial lo registran triggers): deja anotado qué operación lo provocó. */
+export function sentenciaOrigenCosto(db: D1Database, tallerId: string, articuloId: string, origen: string): Stmt {
+  return db
+    .prepare('UPDATE articulo_costos SET origen = ? WHERE id = (SELECT MAX(id) FROM articulo_costos WHERE taller_id = ? AND articulo_id = ?) AND origen IS NULL')
+    .bind(origen, tallerId, articuloId);
 }

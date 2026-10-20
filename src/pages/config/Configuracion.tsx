@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fechaHora, money } from '@/lib/format';
 import { Aviso, Boton, Campo, Cargando, Check, Encabezado, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { useMarcas } from '@/components/selectores';
-import { CONDICIONES_IVA, CONDICION_IVA_LABEL, TIPOS_VEHICULO, TIPO_VEHICULO_LABEL } from '@shared/dominio';
+import { CONDICIONES_IVA, CONDICION_IVA_LABEL, MEDIO_PAGO_LABEL, MEDIOS_PAGO, TIPOS_VEHICULO, TIPO_VEHICULO_LABEL } from '@shared/dominio';
 import { ROL_LABEL, type Rol } from '@shared/permisos';
 
 function DatosTaller() {
@@ -23,7 +24,7 @@ function DatosTaller() {
     }
   }, [data]);
   const m = useMutation({
-    mutationFn: () => api.put('/taller/config', { taller: t, config: c }),
+    mutationFn: () => api.put('/taller/config', { taller: { ...t, inicio_actividades: t.inicio_actividades || null }, config: c }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['config'] });
       recargar();
@@ -34,37 +35,86 @@ function DatosTaller() {
   if (!t || !c) return <Cargando />;
   const ro = !puede('config.editar');
   const st = (k: string) => (e: any) => setT({ ...t, [k]: e.target.value });
+  const sc = (k: string) => (e: any) => setC({ ...c, [k]: e.target.value });
+  const nc = (k: string) => (e: any) => setC({ ...c, [k]: Number(e.target.value) });
+  const habilitados: string[] = c.medios_pago ?? MEDIOS_PAGO;
+  const alternarMedio = (medio: string, on: boolean) => {
+    const actuales = new Set(habilitados);
+    on ? actuales.add(medio) : actuales.delete(medio);
+    actuales.add('efectivo');
+    setC({ ...c, medios_pago: MEDIOS_PAGO.every((x) => actuales.has(x)) ? null : MEDIOS_PAGO.filter((x) => actuales.has(x)) });
+  };
   return (
     <div className="space-y-5">
       {ro && <Aviso>Solo el propietario o un administrador pueden modificar la configuración.</Aviso>}
-      <Tarjeta titulo="Datos del taller" subtitulo="Aparecen en presupuestos, órdenes y comprobantes impresos">
+      <Tarjeta titulo="Datos comerciales" subtitulo="Aparecen en presupuestos, órdenes, recibos y demás documentos impresos">
         <fieldset disabled={ro} className="grid gap-3 sm:grid-cols-2">
           <Campo label="Nombre comercial" requerido><Input value={t.nombre ?? ''} onChange={st('nombre')} /></Campo>
           <Campo label="Razón social"><Input value={t.razon_social ?? ''} onChange={st('razon_social')} /></Campo>
-          <Campo label="CUIT"><Input value={t.cuit ?? ''} onChange={st('cuit')} /></Campo>
-          <Campo label="Condición IVA">
-            <Select value={t.condicion_iva} onChange={st('condicion_iva')}>
-              {CONDICIONES_IVA.filter((x) => x !== 'consumidor_final').map((x) => <option key={x} value={x}>{CONDICION_IVA_LABEL[x]}</option>)}
-            </Select>
-          </Campo>
           <Campo label="Dirección"><Input value={t.direccion ?? ''} onChange={st('direccion')} /></Campo>
           <Campo label="Localidad"><Input value={t.localidad ?? ''} onChange={st('localidad')} /></Campo>
           <Campo label="Teléfono / WhatsApp"><Input value={t.telefono ?? ''} onChange={st('telefono')} /></Campo>
           <Campo label="Email"><Input value={t.email ?? ''} onChange={st('email')} /></Campo>
+          <Campo label="Sitio web"><Input value={t.sitio_web ?? ''} onChange={st('sitio_web')} /></Campo>
         </fieldset>
       </Tarjeta>
-      <Tarjeta titulo="Preferencias">
+      <Tarjeta titulo="Datos fiscales" subtitulo="Se imprimen en los documentos. La facturación electrónica con ARCA se incorpora en una etapa posterior.">
         <fieldset disabled={ro} className="grid gap-3 sm:grid-cols-2">
-          <Campo label="Validez de presupuestos (días)"><Input type="number" min={1} value={c.validez_presupuesto_dias} onChange={(e) => setC({ ...c, validez_presupuesto_dias: Number(e.target.value) })} /></Campo>
-          <Campo label="Margen sugerido sobre costo (%)"><Input type="number" min={0} value={c.margen_default} onChange={(e) => setC({ ...c, margen_default: Number(e.target.value) })} /></Campo>
-          <Campo label="IVA por defecto (%)"><Input type="number" min={0} value={c.iva_default} onChange={(e) => setC({ ...c, iva_default: Number(e.target.value) })} /></Campo>
-          <Campo label="Recargo por defecto (%)"><Input type="number" min={0} value={c.recargo_default} onChange={(e) => setC({ ...c, recargo_default: Number(e.target.value) })} /></Campo>
-          <Campo label="Pie de presupuestos y comprobantes" className="sm:col-span-2"><Textarea rows={2} value={c.pie_documentos ?? ''} onChange={(e) => setC({ ...c, pie_documentos: e.target.value })} placeholder="Ej.: Garantía de mano de obra 3 meses. Precios sujetos a disponibilidad." /></Campo>
-          <Check className="sm:col-span-2" checked={c.permitir_stock_negativo} onChange={(v) => setC({ ...c, permitir_stock_negativo: v })} label="Permitir stock negativo (no recomendado)" />
-          <div className="sm:col-span-2">
+          <Campo label="CUIT" hint="Se valida el dígito verificador"><Input value={t.cuit ?? ''} onChange={st('cuit')} placeholder="30-12345678-9" /></Campo>
+          <Campo label="Condición frente al IVA">
+            <Select value={t.condicion_iva} onChange={st('condicion_iva')}>
+              {CONDICIONES_IVA.filter((x) => x !== 'consumidor_final').map((x) => <option key={x} value={x}>{CONDICION_IVA_LABEL[x]}</option>)}
+            </Select>
+          </Campo>
+          <Campo label="Ingresos Brutos (N° de inscripción)"><Input value={t.ingresos_brutos ?? ''} onChange={st('ingresos_brutos')} /></Campo>
+          <Campo label="Inicio de actividades"><Input type="date" value={t.inicio_actividades ?? ''} onChange={st('inicio_actividades')} /></Campo>
+        </fieldset>
+      </Tarjeta>
+      <Tarjeta titulo="Precios e impuestos" subtitulo="Se aplican como valores iniciales al crear presupuestos, órdenes de trabajo y ventas; en cada documento se pueden cambiar">
+        <fieldset disabled={ro} className="grid gap-3 sm:grid-cols-2">
+          <Campo label="IVA por defecto" hint="Los talleres que no discriminan IVA lo dejan en “Sin IVA”">
+            <Select value={c.iva_default} onChange={nc('iva_default')}>{[0, 10.5, 21, 27].map((v) => <option key={v} value={v}>{v ? `${String(v).replace('.', ',')} %` : 'Sin IVA'}</option>)}</Select>
+          </Campo>
+          <Campo label="Recargo por defecto (%)" hint="Por ejemplo, recargo por pago con tarjeta"><Input type="number" min={0} max={100} step="any" value={c.recargo_default} onChange={nc('recargo_default')} /></Campo>
+          <Campo label="Margen sugerido sobre costo (%)"><Input type="number" min={0} value={c.margen_default} onChange={nc('margen_default')} /></Campo>
+          <Campo label="Validez de presupuestos (días)"><Input type="number" min={1} value={c.validez_presupuesto_dias} onChange={nc('validez_presupuesto_dias')} /></Campo>
+        </fieldset>
+      </Tarjeta>
+      <Tarjeta titulo="Preferencias de documentos" subtitulo="Texto al pie de cada tipo de documento. Si dejás uno vacío se usa el pie general.">
+        <fieldset disabled={ro} className="grid gap-3">
+          <Campo label="Pie general"><Textarea rows={2} value={c.pie_documentos ?? ''} onChange={sc('pie_documentos')} placeholder="Ej.: Garantía de mano de obra 3 meses. Precios sujetos a disponibilidad." /></Campo>
+          <Campo label="Pie de presupuestos"><Textarea rows={2} value={c.pie_presupuesto ?? ''} onChange={sc('pie_presupuesto')} /></Campo>
+          <Campo label="Pie de recibos y estados de cuenta"><Textarea rows={2} value={c.pie_recibo ?? ''} onChange={sc('pie_recibo')} /></Campo>
+          <Campo label="Pie de órdenes de compra"><Textarea rows={2} value={c.pie_orden_compra ?? ''} onChange={sc('pie_orden_compra')} placeholder="Ej.: Entregar en horario de 8 a 17. Enviar remito con la mercadería." /></Campo>
+        </fieldset>
+      </Tarjeta>
+      <Tarjeta titulo="Caja, medios de pago y cheques">
+        <fieldset disabled={ro} className="space-y-4">
+          <div>
+            <p className="mb-2 text-[13px] font-medium">Medios de pago habilitados</p>
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
+              {MEDIOS_PAGO.map((x) => <Check key={x} checked={habilitados.includes(x)} onChange={(v) => alternarMedio(x, v)} label={x === 'efectivo' ? 'Efectivo (siempre)' : MEDIO_PAGO_LABEL[x]} className={x === 'efectivo' ? 'pointer-events-none opacity-70' : ''} />)}
+            </div>
+            <p className="mt-1 text-xs text-tenue">Los medios deshabilitados no se ofrecen al cobrar, pagar ni registrar gastos, y el servidor los rechaza.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Campo label="Tolerancia de diferencia en el cierre de caja" hint="Diferencias de efectivo hasta este importe no exigen justificación"><InputMoneda value={c.tolerancia_caja} onChange={(v) => setC({ ...c, tolerancia_caja: v })} /></Campo>
+            <Campo label="Alerta de cheques (días antes)" hint="Para avisar de cheques a depositar, vencer o debitar"><Input type="number" min={0} max={60} value={c.alerta_cheques_dias} onChange={nc('alerta_cheques_dias')} /></Campo>
+            <Campo label="Plazo de pago a proveedores (días)" hint="Vencimiento por defecto de compras y facturas"><Input type="number" min={0} max={365} value={c.plazo_pago_dias} onChange={nc('plazo_pago_dias')} /></Campo>
+          </div>
+          <div>
             <Check checked={c.caja_obligatoria} onChange={(v) => setC({ ...c, caja_obligatoria: v })} label="Exigir caja abierta para cobrar, pagar y registrar gastos" />
             <p className="mt-1 pl-6 text-xs text-tenue">Con esta opción, los cobros y pagos sólo se registran con una caja abierta (así ninguno queda fuera del arqueo). Sin ella, los movimientos se registran igual y quedan marcados como “sin caja”.</p>
           </div>
+          <div className="flex flex-wrap gap-2 border-t border-borde pt-3 no-print">
+            {puede('bancos.gestionar') && <Link to="/bancos"><Boton tam="sm" type="button">Cuentas bancarias</Boton></Link>}
+            {puede('gastos.gestionar') && <Link to="/finanzas?tab=categorias"><Boton tam="sm" type="button">Categorías de gastos</Boton></Link>}
+          </div>
+        </fieldset>
+      </Tarjeta>
+      <Tarjeta titulo="Preferencias generales">
+        <fieldset disabled={ro}>
+          <Check checked={c.permitir_stock_negativo} onChange={(v) => setC({ ...c, permitir_stock_negativo: v })} label="Permitir stock negativo (no recomendado)" />
         </fieldset>
       </Tarjeta>
       {!ro && <div className="flex justify-end"><Boton variante="primario" cargando={m.isPending} onClick={() => m.mutate()}>Guardar configuración</Boton></div>}

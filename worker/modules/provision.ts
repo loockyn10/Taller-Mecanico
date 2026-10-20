@@ -87,7 +87,8 @@ export function sentenciasAltaTaller(db: D1Database, d: DatosTallerNuevo): { tal
       .bind(tallerId, d.plan ?? 'base', d.usuarios_incluidos ?? 1, d.usuarios_adicionales ?? 0),
     db.prepare('INSERT INTO licencia_eventos (id, taller_id, tipo, detalle) VALUES (?, ?, ?, ?)')
       .bind(uid(), tallerId, 'alta', JSON.stringify({ usuarios_incluidos: d.usuarios_incluidos ?? 1, usuarios_adicionales: d.usuarios_adicionales ?? 0, fecha: ahora() })),
-    db.prepare('INSERT INTO taller_config (taller_id) VALUES (?)').bind(tallerId),
+    // IVA por defecto de los documentos nuevos: sólo los responsables inscriptos discriminan IVA.
+    db.prepare('INSERT INTO taller_config (taller_id, iva_default) VALUES (?, ?)').bind(tallerId, d.condicion_iva === 'responsable_inscripto' ? 21 : 0),
     db.prepare("INSERT INTO usuarios (id, taller_id, email, nombre, rol, password_hash) VALUES (?, ?, ?, ?, 'propietario', ?)")
       .bind(propietarioId, tallerId, d.propietario.email, d.propietario.nombre, d.propietario.password_hash),
     // Cliente genérico para ventas de mostrador

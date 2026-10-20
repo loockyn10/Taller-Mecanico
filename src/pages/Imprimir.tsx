@@ -10,12 +10,14 @@ import { fecha, km, money, numero, cantidad } from '@/lib/format';
 import { Boton, Cargando, ErrorCaja } from '@/components/ui';
 import { CONDICION_IVA_LABEL, ESTADO_OT_LABEL, type CondicionIva, type EstadoOT } from '@shared/dominio';
 import { ImprimirDinero } from './ImprimirDinero';
+import { ImprimirCompras } from './ImprimirCompras';
 
 const RUTA: Record<string, string> = { presupuesto: '/presupuestos/', orden: '/ordenes/', 'orden-taller': '/ordenes/', venta: '/ventas/' };
 
 /** Recibos y estados de cuenta tienen su propia vista; el resto de los documentos comparte ésta. */
 export function Imprimir() {
   const { tipo = '' } = useParams();
+  if (tipo === 'orden-compra' || tipo === 'cuenta-proveedor') return <ImprimirCompras />;
   return tipo === 'recibo' || tipo === 'cuenta' ? <ImprimirDinero /> : <ImprimirDocumento />;
 }
 
@@ -52,6 +54,7 @@ function ImprimirDocumento() {
           <div>{[t.direccion, t.localidad].filter(Boolean).join(', ')}</div>
           <div>{[t.telefono, t.email].filter(Boolean).join(' · ')}</div>
           {t.cuit && <div>CUIT {t.cuit} · {CONDICION_IVA_LABEL[t.condicion_iva as CondicionIva]}</div>}
+          {(t.ingresos_brutos || t.inicio_actividades) && <div>{[t.ingresos_brutos ? `IIBB ${t.ingresos_brutos}` : null, t.inicio_actividades ? `Inicio de actividades ${fecha(t.inicio_actividades)}` : null].filter(Boolean).join(' · ')}</div>}
         </div>
         <div className="text-right">
           <div className="text-lg font-bold">{titulo}</div>
@@ -128,7 +131,7 @@ function ImprimirDocumento() {
         </section>
       )}
       {d.observaciones && <p className="mt-4"><strong>Observaciones:</strong> {d.observaciones}</p>}
-      {cfg.config.pie_documentos && !sinPrecios && <p className="mt-6 border-t border-slate-300 pt-2 text-xs text-slate-600">{cfg.config.pie_documentos}</p>}
+      {!sinPrecios && (tipo === 'presupuesto' ? cfg.config.pie_presupuesto || cfg.config.pie_documentos : cfg.config.pie_documentos) && <p className="mt-6 border-t border-slate-300 pt-2 text-xs text-slate-600">{tipo === 'presupuesto' ? cfg.config.pie_presupuesto || cfg.config.pie_documentos : cfg.config.pie_documentos}</p>}
       {tipo === 'orden' && (
         <div className="mt-16 grid grid-cols-2 gap-10 text-center text-xs">
           <div className="border-t border-black pt-1">Firma del cliente</div>

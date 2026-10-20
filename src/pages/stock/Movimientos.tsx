@@ -6,14 +6,17 @@ import { api, qs } from '@/lib/api';
 import { cantidad, fechaHora } from '@/lib/format';
 import { descargarCSV } from '@/lib/csv';
 import { Boton, Buscador, Cargando, Encabezado, ErrorCaja, Input, Select, Tabla, Tarjeta, useDebounce, Vacio } from '@/components/ui';
-import { TIPOS_MOVIMIENTO_STOCK_LABEL } from '@shared/dominio';
+import { MOTIVO_AJUSTE_LABEL, TIPOS_MOVIMIENTO_STOCK_LABEL } from '@shared/dominio';
 
 function origen(m: any) {
   if (m.origen_tipo === 'orden') return <Link className="text-marca-700" to={`/ordenes/${m.origen_id}`}>{m.notas ?? 'OT'}</Link>;
   if (m.origen_tipo === 'venta') return <Link className="text-marca-700" to={`/ventas/${m.origen_id}`}>Venta</Link>;
   if (m.origen_tipo === 'compra') return <Link className="text-marca-700" to={`/compras?ver=${m.origen_id}`}>{m.notas ?? 'Compra'}</Link>;
+  if (m.origen_tipo === 'recepcion') return <Link className="text-marca-700" to="/ordenes-compra">{m.notas ?? 'Recepción'}</Link>;
+  if (m.origen_tipo === 'conteo') return <Link className="text-marca-700" to={`/inventario?tab=conteos&conteo=${m.origen_id}`}>{m.notas ?? 'Conteo físico'}</Link>;
   return m.notas ?? '—';
 }
+const motivo = (m: any) => (m.motivo ? MOTIVO_AJUSTE_LABEL[m.motivo as keyof typeof MOTIVO_AJUSTE_LABEL] ?? m.motivo : '');
 
 export function Movimientos() {
   const [tipo, setTipo] = useState('');
@@ -30,7 +33,7 @@ export function Movimientos() {
       <Encabezado
         titulo="Movimientos de stock"
         subtitulo="Cada entrada y salida queda registrada con su origen; el stock solo cambia mediante movimientos"
-        acciones={data.length > 0 && <Boton icono={<Download className="size-4" />} onClick={() => descargarCSV('movimientos-stock', ['Fecha', 'Artículo', 'Tipo', 'Cantidad', 'Stock resultante', 'Detalle'], data.map((m) => [m.created_at, m.articulo, TIPOS_MOVIMIENTO_STOCK_LABEL[m.tipo] ?? m.tipo, m.cantidad, m.stock_resultante, m.notas ?? '']))}>CSV</Boton>}
+        acciones={data.length > 0 && <Boton icono={<Download className="size-4" />} onClick={() => descargarCSV('movimientos-stock', ['Fecha', 'Artículo', 'Tipo', 'Motivo', 'Cantidad', 'Stock resultante', 'Detalle', 'Usuario'], data.map((m) => [m.created_at, m.articulo, TIPOS_MOVIMIENTO_STOCK_LABEL[m.tipo] ?? m.tipo, motivo(m), String(m.cantidad).replace('.', ','), String(m.stock_resultante).replace('.', ','), m.notas ?? '', m.usuario ?? '']))}>CSV</Boton>}
       />
       <div className="mb-4 flex flex-wrap items-start gap-3">
         <div className="relative min-w-56 flex-1">
@@ -64,6 +67,7 @@ export function Movimientos() {
               { clave: 'f', titulo: 'Fecha', render: (m) => fechaHora(m.created_at), movil: 'meta' },
               { clave: 'a', titulo: 'Artículo', render: (m) => <Link to={`/articulos/${m.articulo_id}`} className="font-medium text-marca-700">{m.articulo}</Link>, movil: 'titulo' },
               { clave: 't', titulo: 'Tipo', render: (m) => TIPOS_MOVIMIENTO_STOCK_LABEL[m.tipo] ?? m.tipo, movil: 'subtitulo' },
+              { clave: 'm', titulo: 'Motivo', render: (m) => motivo(m) || '—', movil: 'meta' },
               { clave: 'o', titulo: 'Origen', render: origen, movil: 'meta' },
               { clave: 'u', titulo: 'Usuario', render: (m) => m.usuario ?? '—', movil: 'oculta' },
               { clave: 'c', titulo: 'Cantidad', alinear: 'derecha', render: (m) => <span className={m.cantidad < 0 ? 'text-red-600' : 'text-emerald-700'}>{m.cantidad > 0 ? '+' : ''}{cantidad(m.cantidad)}</span>, movil: 'derecha' },

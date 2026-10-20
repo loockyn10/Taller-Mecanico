@@ -1,9 +1,10 @@
 // Editor de ítems y totales compartido por presupuestos, órdenes de trabajo y ventas.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Package, Plus, Trash2, Wrench } from 'lucide-react';
 import { api } from '@/lib/api';
 import { money } from '@/lib/format';
+import { useDefectosDocumento } from '@/lib/config';
 import { calcularTotales } from '@shared/totals';
 import { Boton, Buscador, Campo, cn, Input, InputMoneda, Insignia, Select, useDebounce } from './ui';
 
@@ -27,6 +28,21 @@ export interface ParamsUI {
 }
 
 export const paramsVacios = (iva = 0, recargo = 0): ParamsUI => ({ desc_global_pct: 0, desc_global_monto: 0, iva_pct: iva, recargo_pct: recargo });
+
+/**
+ * Aplica una sola vez el IVA y el recargo por defecto de la configuración del taller a un documento nuevo.
+ * (Antes esos parámetros se guardaban pero ningún formulario los usaba.)
+ */
+export function useDefectosEnParams(aplicar: boolean, setParams: (f: (p: ParamsUI) => ParamsUI) => void) {
+  const { listo, iva, recargo } = useDefectosDocumento();
+  const hecho = useRef(false);
+  useEffect(() => {
+    if (aplicar && listo && !hecho.current) {
+      hecho.current = true;
+      setParams((p) => ({ ...p, iva_pct: iva, recargo_pct: recargo }));
+    }
+  }, [aplicar, listo, iva, recargo, setParams]);
+}
 
 const k = () => Math.random().toString(36).slice(2);
 

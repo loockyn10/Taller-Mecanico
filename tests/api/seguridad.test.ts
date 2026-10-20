@@ -40,7 +40,7 @@ describe('aislamiento entre talleres', () => {
     expect((await B.api.post(`/api/presupuestos/${a.presupuesto.id}/convertir`, {})).status).toBe(404);
     expect((await B.api.post(`/api/ordenes/${a.orden.id}/estado`, { estado: 'entregada' })).status).toBe(404);
     expect((await B.api.put(`/api/ordenes/${a.orden.id}/checklist`, { datos: {} })).status).toBe(404);
-    expect((await B.api.post('/api/stock/movimientos', { articulo_id: a.articulo.id, tipo: 'salida', cantidad: 1, idem_key: idem() })).status).toBe(404);
+    expect((await B.api.post('/api/stock/movimientos', { articulo_id: a.articulo.id, tipo: 'salida', motivo: 'merma', cantidad: 1, idem_key: idem() })).status).toBe(404);
     expect((await B.api.post(`/api/ventas/${a.venta.id}/anular`, { motivo: 'xxx' })).status).toBe(404);
     // Verificación del lado de A: nada cambió
     expect((await A.api.get(`/api/clientes/${a.cliente.id}`)).body.nombre).toBe('Cliente secreto de A');

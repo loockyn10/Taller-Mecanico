@@ -2,20 +2,21 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
-import { ApiError, body, forbidden, notFound, zTextoOpt } from '../lib/http';
+import { ApiError, badRequest, body, forbidden, notFound, zCentavos, zFecha, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, uid } from '../lib/db';
 import { requirePerm } from '../lib/auth';
 import { hashPassword } from '../lib/crypto';
-import { CONDICIONES_IVA } from '../../shared/dominio';
+import { CONDICIONES_IVA, cuitValido, MEDIOS_PAGO } from '../../shared/dominio';
 
 export const taller = new Hono<AppEnv>();
 
 // ───── Configuración ─────
 taller.get('/config', async (c) => {
   const s = c.get('sesion');
-  const t = await first(c.env.DB, 'SELECT id, nombre, razon_social, cuit, condicion_iva, direccion, localidad, telefono, email FROM talleres WHERE id = ?', s.tallerId);
-  const cfg = await first(c.env.DB, 'SELECT * FROM taller_config WHERE taller_id = ?', s.tallerId);
-  return c.json({ taller: t, config: cfg });
+  const t = await first(c.env.DB, 'SELECT id, nombre, razon_social, cuit, condicion_iva, direccion, localidad, telefono, email, ingresos_brutos, inicio_actividades, sitio_web FROM talleres WHERE id = ?', s.tallerId);
+  const cfg = await first<{ medios_pago: string | null }>(c.env.DB, 'SELECT * FROM taller_config WHERE taller_id = ?', s.tallerId);
+  // medios_pago se entrega como lista (null = todos habilitados).
+  return c.json({ taller: t, config: cfg && { ...cfg, medios_pago: cfg.medios_pago ? JSON.parse(cfg.medios_pago) : null } });
 });
 
 taller.put('/config', requirePerm('config.editar'), async (c) => {
@@ -32,27 +33,40 @@ taller.put('/config', requirePerm('config.editar'), async (c) => {
         localidad: zTextoOpt(120),
         telefono: zTextoOpt(40),
         email: zTextoOpt(120),
+        ingresos_brutos: zTextoOpt(40),
+        inicio_actividades: zFecha.nullish().transform((v) => v ?? null),
+        sitio_web: zTextoOpt(120),
       }),
       config: z.object({
-        iva_default: z.number().min(0).max(100),
+        iva_default: z.number().refine((v) => [0, 10.5, 21, 27].includes(v), 'IVA inválido'),
         recargo_default: z.number().min(0).max(100),
         validez_presupuesto_dias: z.number().int().min(1).max(365),
         margen_default: z.number().min(0).max(1000),
         pie_documentos: zTextoOpt(1000),
+        pie_presupuesto: zTextoOpt(1000),
+        pie_recibo: zTextoOpt(1000),
+        pie_orden_compra: zTextoOpt(1000),
         permitir_stock_negativo: z.boolean(),
         caja_obligatoria: z.boolean().default(false),
+        tolerancia_caja: zCentavos.default(0),
+        alerta_cheques_dias: z.number().int().min(0).max(60).default(7),
+        plazo_pago_dias: z.number().int().min(0).max(365).default(30),
+        // Lista de medios habilitados (null = todos). El efectivo siempre está habilitado.
+        medios_pago: z.array(z.enum(MEDIOS_PAGO)).nullish(),
       }),
     }),
   );
   const t = d.taller;
   const k = d.config;
+  if (t.cuit && !cuitValido(t.cuit)) throw badRequest('El CUIT del taller no es válido');
+  const medios = k.medios_pago ? MEDIOS_PAGO.filter((m) => m === 'efectivo' || k.medios_pago!.includes(m)) : null;
   await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE talleres SET nombre=?, razon_social=?, cuit=?, condicion_iva=?, direccion=?, localidad=?, telefono=?, email=? WHERE id=?')
-      .bind(t.nombre, t.razon_social, t.cuit, t.condicion_iva, t.direccion, t.localidad, t.telefono, t.email, s.tallerId),
+    c.env.DB.prepare('UPDATE talleres SET nombre=?, razon_social=?, cuit=?, condicion_iva=?, direccion=?, localidad=?, telefono=?, email=?, ingresos_brutos=?, inicio_actividades=?, sitio_web=? WHERE id=?')
+      .bind(t.nombre, t.razon_social, t.cuit, t.condicion_iva, t.direccion, t.localidad, t.telefono, t.email, t.ingresos_brutos, t.inicio_actividades, t.sitio_web, s.tallerId),
     c.env.DB.prepare(
-      `UPDATE taller_config SET iva_default=?, recargo_default=?, validez_presupuesto_dias=?, margen_default=?, pie_documentos=?,
-              permitir_stock_negativo=?, caja_obligatoria=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id=?`,
-    ).bind(k.iva_default, k.recargo_default, k.validez_presupuesto_dias, k.margen_default, k.pie_documentos, k.permitir_stock_negativo ? 1 : 0, k.caja_obligatoria ? 1 : 0, s.tallerId),
+      `UPDATE taller_config SET iva_default=?, recargo_default=?, validez_presupuesto_dias=?, margen_default=?, pie_documentos=?, pie_presupuesto=?, pie_recibo=?, pie_orden_compra=?,
+              permitir_stock_negativo=?, caja_obligatoria=?, tolerancia_caja=?, alerta_cheques_dias=?, plazo_pago_dias=?, medios_pago=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id=?`,
+    ).bind(k.iva_default, k.recargo_default, k.validez_presupuesto_dias, k.margen_default, k.pie_documentos, k.pie_presupuesto, k.pie_recibo, k.pie_orden_compra, k.permitir_stock_negativo ? 1 : 0, k.caja_obligatoria ? 1 : 0, k.tolerancia_caja, k.alerta_cheques_dias, k.plazo_pago_dias, medios ? JSON.stringify(medios) : null, s.tallerId),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'config', s.tallerId, 'actualizar'),
   ]);
   return c.json({ ok: true });

@@ -1,17 +1,21 @@
 // Reposición: artículos en o bajo el stock mínimo, agrupados por proveedor, con la cantidad sugerida para comprar.
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Download, PackageCheck, ShoppingCart } from 'lucide-react';
-import { api } from '@/lib/api';
+import { ClipboardList, Download, PackageCheck, ShoppingCart } from 'lucide-react';
+import { api, nuevaClave } from '@/lib/api';
+import { invalidarDinero } from '@/lib/caja';
 import { useAuth } from '@/lib/auth';
 import { descargarCSV, pesosCSV } from '@/lib/csv';
 import { cantidad, money } from '@/lib/format';
-import { Aviso, Boton, Cargando, Check, Encabezado, ErrorCaja, Input, Insignia, Tarjeta, Vacio } from '@/components/ui';
+import { Aviso, Boton, Cargando, Check, Encabezado, ErrorCaja, Input, Insignia, Tarjeta, useToast, Vacio } from '@/components/ui';
 
 export function Reposicion() {
   const nav = useNavigate();
+  const qc = useQueryClient();
+  const toast = useToast();
   const { puede } = useAuth();
+  const [clave, setClave] = useState(nuevaClave());
   const { data = [], isLoading, error, refetch } = useQuery({ queryKey: ['reposicion'], queryFn: () => api.get<any[]>('/reposicion') });
   const [sel, setSel] = useState<Record<string, number>>({});
   const [cant, setCant] = useState<Record<string, number>>({});
@@ -28,6 +32,17 @@ export function Reposicion() {
   const seleccionados = data.filter((a) => a.id in sel);
   const sinStock = data.filter((a) => a.stock <= 0).length;
 
+  const generarOrden = useMutation({
+    mutationFn: (items: any[]) => api.post('/reposicion/ordenes', { items: items.filter((a) => cantidadDe(a) > 0).map((a) => ({ articulo_id: a.id, cantidad: cantidadDe(a) })), emitir: false, idem_key: clave }),
+    onSuccess: (r: any) => {
+      invalidarDinero(qc);
+      setClave(nuevaClave());
+      toast.ok(r.ordenes.length === 1 ? `Orden de compra #${r.ordenes[0].numero} creada en borrador` : `${r.ordenes.length} órdenes de compra creadas en borrador`);
+      nav(r.ordenes.length === 1 ? `/ordenes-compra/${r.ordenes[0].id}` : '/ordenes-compra');
+    },
+    onError: toast.error,
+  });
+
   const armarCompra = (items: any[], proveedorId: string | null) =>
     nav('/compras/nueva', { state: { precarga: { proveedor_id: proveedorId, items: items.map((a) => ({ articulo: { id: a.id, nombre: a.nombre, codigo: a.codigo, costo: a.costo, stock: a.stock }, cantidad: cantidadDe(a), costo: a.costo })) } } });
 
@@ -40,6 +55,7 @@ export function Reposicion() {
           <Boton icono={<Download className="size-4" />} onClick={() => descargarCSV('reposicion', ['Artículo', 'Código', 'Proveedor', 'Stock', 'Mínimo', 'Sugerido', 'Costo unitario'], data.map((a) => [a.nombre, a.codigo ?? '', a.proveedor ?? '', a.stock, a.stock_minimo, cantidadDe(a), pesosCSV(a.costo)]))}>Exportar CSV</Boton>
         )}
       />
+      <Aviso className="mb-4">La cantidad sugerida llega hasta el stock ideal descontando lo que ya está pedido en órdenes de compra abiertas. “Generar orden de compra” crea una orden en borrador por proveedor; “Registrar compra” carga directamente la compra con su comprobante.</Aviso>
       {isLoading ? <Cargando /> : error ? <ErrorCaja error={error} reintentar={refetch} /> : data.length === 0 ? (
         <Tarjeta><Vacio icono={<PackageCheck className="size-5" />} titulo="Todo el stock está por encima del mínimo" texto="Definí el stock mínimo de cada artículo para que aparezca acá cuando haya que reponer." /></Tarjeta>
       ) : (
@@ -56,8 +72,9 @@ export function Reposicion() {
                 acciones={puede('compras.gestionar') && (
                   <>
                     <Check checked={marcados.length === g.items.length} onChange={(v) => setSel((s) => { const n = { ...s }; g.items.forEach((a) => (v ? (n[a.id] = 1) : delete n[a.id])); return n; })} label="Todos" />
-                    <Boton variante="primario" tam="sm" icono={<ShoppingCart className="size-4" />} onClick={() => armarCompra(marcados.length ? marcados : g.items, g.id)}>
-                      Armar compra{marcados.length ? ` (${marcados.length})` : ''}
+                    {g.id && <Boton variante="primario" tam="sm" icono={<ClipboardList className="size-4" />} cargando={generarOrden.isPending} onClick={() => generarOrden.mutate(marcados.length ? marcados : g.items)}>Generar orden de compra{marcados.length ? ` (${marcados.length})` : ''}</Boton>}
+                    <Boton tam="sm" icono={<ShoppingCart className="size-4" />} onClick={() => armarCompra(marcados.length ? marcados : g.items, g.id)}>
+                      Registrar compra{marcados.length ? ` (${marcados.length})` : ''}
                     </Boton>
                   </>
                 )}
@@ -73,7 +90,7 @@ export function Reposicion() {
                       <div className="flex items-center gap-3 text-right">
                         <div>
                           <div className={a.stock <= 0 ? 'font-semibold text-red-600' : 'font-semibold text-amber-700'}>{cantidad(a.stock)} {a.unidad}</div>
-                          <div className="text-xs text-tenue">mín. {cantidad(a.stock_minimo)} · ideal {cantidad(a.objetivo)}</div>
+                          <div className="text-xs text-tenue">mín. {cantidad(a.stock_minimo)} · ideal {cantidad(a.objetivo)}{a.en_camino > 0 ? <span className="text-marca-700"> · pedido {cantidad(a.en_camino)}</span> : null}</div>
                         </div>
                         <label className="flex flex-col items-end text-xs text-tenue">Reponer
                           <Input type="number" min={0} step="any" value={cantidadDe(a)} onChange={(e) => setCant({ ...cant, [a.id]: Math.max(0, Math.round(Number(e.target.value) * 1000) / 1000) })} className="h-8 w-20 text-right" />

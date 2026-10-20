@@ -42,7 +42,7 @@ async function main() {
   const s = await crearTaller('Taller Demo', 'demo@fierro.local', 2);
   if (s) {
     await s.req('PUT', '/taller/config', {
-      taller: { nombre: 'Taller Demo', razon_social: 'Demo Mecánica SRL', cuit: '30-00000000-0', condicion_iva: 'responsable_inscripto', direccion: 'Av. Siempre Viva 742', localidad: 'Ciudad', telefono: '11 4000-0000', email: 'contacto@tallerdemo.local' },
+      taller: { nombre: 'Taller Demo', razon_social: 'Demo Mecánica SRL', cuit: '30-71234567-1', condicion_iva: 'responsable_inscripto', direccion: 'Av. Siempre Viva 742', localidad: 'Ciudad', telefono: '11 4000-0000', email: 'contacto@tallerdemo.local' },
       config: { iva_default: 21, recargo_default: 0, validez_presupuesto_dias: 15, margen_default: 40, pie_documentos: 'Garantía de mano de obra: 3 meses o 5.000 km. Precios sujetos a disponibilidad de repuestos.', permitir_stock_negativo: false },
     });
     await s.post('/taller/usuarios', { nombre: 'Empleado Demo', email: 'empleado@fierro.local', rol: 'empleado', password: 'demo1234' });
@@ -136,6 +136,19 @@ async function main() {
     await s.post('/gastos-recurrentes', { categoria_id: catGasto('Alquiler'), concepto: 'Alquiler del local', importe: 45000000, medio: 'transferencia', frecuencia: 'mensual', dia: 5, proxima_fecha: dia(-2) });
     await s.post('/listas-precios', { nombre: 'Mayorista', descripcion: 'Talleres y flotas: costo + 25 %', base: 'costo', porcentaje: 25, redondeo: 100, servicios_pct: -10 });
     await s.post('/listas-precios', { nombre: 'Tarjeta de crédito', descripcion: 'Recargo por financiación', base: 'precio', porcentaje: 15, redondeo: 1000 });
+
+    // 8) Bancos, cheques, orden de compra con recepción parcial y factura de proveedor
+    const galicia = await s.post('/bancos/cuentas', { nombre: 'Galicia CC $', banco: 'Banco Galicia', alias: 'taller.demo.galicia', titular: 'Taller Demo SRL', saldo_inicial: 120000000 });
+    const mp = await s.post('/bancos/cuentas', { nombre: 'Mercado Pago', banco: 'Mercado Pago', tipo: 'billetera_virtual', saldo_inicial: 0 });
+    await s.post('/bancos/depositos', { cuenta_id: galicia.id, importe: 2000000, concepto: 'Depósito de recaudación', idem_key: clave() });
+    await s.post('/bancos/transferencias', { origen_id: galicia.id, destino_id: mp.id, importe: 5000000, concepto: 'Fondeo de billetera', idem_key: clave() });
+    await s.post('/bancos/movimientos', { cuenta_id: galicia.id, tipo: 'egreso', importe: 450000, concepto: 'Comisión de mantenimiento de cuenta', idem_key: clave() });
+    await s.post('/cheques', { direccion: 'recibido', banco: 'Banco Nación', nro_cheque: '00458812', importe: 7500000, fecha_emision: dia(-10), fecha_pago: dia(5), librador: 'Transportes del Sur SA', cuit: '30-71234567-1' });
+    await s.post('/cheques', { direccion: 'recibido', modalidad: 'echeq', echeq_id: 'ECHEQ-2026-8841', banco: 'Banco Santander', nro_cheque: '9927310', importe: 3200000, fecha_emision: dia(-3), fecha_pago: dia(0), librador: 'Flota Express SRL' });
+    const oc = await s.post('/ordenes-compra', { proveedor_id: prov.id, emitir: true, fecha_prevista: dia(4), iva_pct: 21, items: [{ articulo_id: arts.filtroAire, cantidad: 20, costo_unitario: 520000 }, { articulo_id: arts.liquido, cantidad: 12, costo_unitario: 300000 }], idem_key: clave() });
+    const ocDet = await s.get(`/ordenes-compra/${oc.id}`);
+    await s.post(`/ordenes-compra/${oc.id}/recepciones`, { remito: '0003-00044120', items: [{ orden_item_id: ocDet.items[0].id, cantidad: 12 }], idem_key: clave() });
+    await s.post('/facturas-proveedor', { proveedor_id: prov.id, tipo: 'factura_a', nro_comprobante: '3-45001', fecha: dia(0), orden_compra_id: oc.id, neto_gravado: 6240000, iva_21: 1310400, total: 7550400, condicion_pago: 'plazo', dias_plazo: 15, idem_key: clave() });
   }
 
   console.log('Creando "Taller Norte" (segundo taller para verificar aislamiento)…');

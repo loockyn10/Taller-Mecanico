@@ -25,6 +25,12 @@ export const PERMISOS = [
   'gastos.gestionar', // categorías, gastos recurrentes, anulación de gastos y movimientos manuales
   'precios.gestionar', // listas de precios y ajustes masivos
   'fechas.retroactivas', // cargar comprobantes con fecha pasada
+  'bancos.gestionar', // cuentas bancarias, movimientos, transferencias y conciliación
+  'bancos.ajustar', // ajustes manuales de saldo bancario (sólo propietario)
+  'cheques.gestionar', // cartera de cheques y eCheq
+  'tesoreria.ver', // tablero de tesorería
+  'contabilidad.ver', // registros internos, libros de ventas y compras
+  'stock.valorizar', // inventario valorizado e historial de costos
 ] as const;
 export type Permiso = (typeof PERMISOS)[number];
 
@@ -32,7 +38,7 @@ const EMPLEADO: Permiso[] = ['operacion', 'catalogo.ver', 'stock.ver', 'ventas.v
 
 export const PERMISOS_POR_ROL: Record<Rol, readonly Permiso[]> = {
   propietario: PERMISOS,
-  administrador: PERMISOS,
+  administrador: PERMISOS.filter((p) => p !== 'bancos.ajustar'),
   empleado: EMPLEADO,
 };
 

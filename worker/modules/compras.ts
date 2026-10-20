@@ -6,11 +6,15 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCantidad, zCentavos, zFecha, zId, zTextoOpt } from '../lib/http';
-import { all, auditar, first, guard, like, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
+import { all, auditar, first, guard, hoy, like, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
 import { requirePerm } from '../lib/auth';
-import { agrupar, permiteNegativo, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
+import { agrupar, permiteNegativo, sentenciaOrigenCosto, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
+import { sentenciasMedioEgreso, validarMedioEgreso, zMedioEgreso } from '../lib/pagos';
+import { reversoBancoDeOrigen, sentenciaReversosBanco } from '../lib/banco';
+import { chequesBloqueanAnulacion, sentenciasAnularChequesDePago } from '../lib/cheques';
 import { exigirCajaAbiertaSiCorresponde, guardCajaObligatoria, reversoDeOrigen, sentenciaMovimiento, sentenciaReversos } from '../lib/caja';
 import { fechaComercial } from '../lib/fechas';
+import { deudaProveedores, paramsSaldoProveedor, SALDO_PROVEEDOR_SQL } from '../lib/proveedores';
 import { MEDIOS_PAGO, redondearCantidad } from '../../shared/dominio';
 
 export const compras = new Hono<AppEnv>();
@@ -48,10 +52,6 @@ compras.get('/compras/:id', async (c) => {
   return c.json({ ...co, items, pagos });
 });
 
-/** Saldo con el proveedor en SQL (compras vigentes − pagos vigentes). Parámetros: taller, proveedor, taller, proveedor. */
-const SALDO_PROVEEDOR_SQL = `((SELECT COALESCE(SUM(total),0) FROM compras WHERE taller_id = ? AND proveedor_id = ? AND estado = 'registrada')
-  - (SELECT COALESCE(SUM(importe),0) FROM pagos_proveedor WHERE taller_id = ? AND proveedor_id = ? AND estado = 'registrado'))`;
-
 compras.post('/compras', async (c) => {
   const s = c.get('sesion');
   const d = await body(
@@ -68,7 +68,8 @@ compras.post('/compras', async (c) => {
       items: z.array(z.object({ articulo_id: zId, cantidad: zCantidad, costo_unitario: zCentavos })).min(1).max(200),
       idem_key: z.string().min(8).max(80),
       // Compra de contado: se paga en el acto (total o parcialmente) y sale de la caja si es en efectivo.
-      pago: z.object({ medio: z.enum(MEDIOS_PAGO), importe: zCentavos.optional(), referencia: zTextoOpt(120) }).nullish(),
+      pago: z.object({ medio: z.enum(MEDIOS_PAGO), importe: zCentavos.optional(), referencia: zTextoOpt(120), ...zMedioEgreso }).nullish(),
+      vencimiento: zFecha.nullish(),
     }),
   );
   const prov = await first<{ activo: number }>(c.env.DB, 'SELECT activo FROM proveedores WHERE taller_id = ? AND id = ?', s.tallerId, d.proveedor_id);
@@ -84,19 +85,20 @@ compras.post('/compras', async (c) => {
   const neto = subtotales.reduce((a, b) => a + b, 0);
   const total = neto + d.iva + d.otros;
   const pagoImporte = d.pago ? (d.pago.importe ?? total) : 0;
+  let medioEgreso: Awaited<ReturnType<typeof validarMedioEgreso>> = {};
   if (d.pago) {
     if (pagoImporte <= 0) throw badRequest('El importe del pago debe ser mayor a 0');
     if (pagoImporte > total) throw badRequest('El pago no puede superar el total de la compra');
-    if (d.pago.medio === 'cheque' && !d.pago.referencia) throw badRequest('Indicá el número de cheque en la referencia');
+    medioEgreso = await validarMedioEgreso(c.env.DB, s.tallerId, { origenTipo: 'pago_proveedor', medio: d.pago.medio, importe: pagoImporte, referencia: d.pago.referencia }, d.pago);
     await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   }
   const id = uid();
   const stmts: Stmt[] = [
     ...seqIncrementar(c.env.DB, s.tallerId, 'compra'),
     c.env.DB.prepare(
-      `INSERT INTO compras (id, taller_id, numero, proveedor_id, fecha, tipo_doc, numero_doc, neto, iva, otros, total, actualizar_costos, notas, created_by)
-       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, s.tallerId, s.tallerId, 'compra', d.proveedor_id, fecha, d.tipo_doc, d.numero_doc, neto, d.iva, d.otros, total, d.actualizar_costos ? 1 : 0, d.notas, s.usuarioId),
+      `INSERT INTO compras (id, taller_id, numero, proveedor_id, fecha, tipo_doc, numero_doc, neto, iva, otros, total, actualizar_costos, notas, created_by, vencimiento)
+       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, s.tallerId, s.tallerId, 'compra', d.proveedor_id, fecha, d.tipo_doc, d.numero_doc, neto, d.iva, d.otros, total, d.actualizar_costos ? 1 : 0, d.notas, s.usuarioId, d.vencimiento ?? null),
   ];
   d.items.forEach((it, i) => {
     // Se conserva el costo previo para poder revertirlo si la compra se anula.
@@ -118,7 +120,7 @@ compras.post('/compras', async (c) => {
         true,
       ),
     );
-    if (d.actualizar_costos) stmts.push(c.env.DB.prepare('UPDATE articulos SET costo = ? WHERE taller_id = ? AND id = ?').bind(costo, s.tallerId, articuloId));
+    if (d.actualizar_costos) stmts.push(c.env.DB.prepare('UPDATE articulos SET costo = ? WHERE taller_id = ? AND id = ?').bind(costo, s.tallerId, articuloId), sentenciaOrigenCosto(c.env.DB, s.tallerId, articuloId, `compra:${id}`));
   }
   if (d.pago) {
     const pagoId = uid();
@@ -133,6 +135,7 @@ compras.post('/compras', async (c) => {
         tipo: 'egreso', rubro: 'pago_proveedor', medio: d.pago.medio, importe: pagoImporte, concepto: 'Pago de contado de compra', referencia: d.pago.referencia,
         origenTipo: 'pago_proveedor', origenId: pagoId, fecha, usuarioId: s.usuarioId,
       }),
+      ...sentenciasMedioEgreso(c.env.DB, s.tallerId, { origenTipo: 'pago_proveedor', origenId: pagoId, medio: d.pago.medio, importe: pagoImporte, referencia: d.pago.referencia, fecha, concepto: 'Pago de contado de compra', proveedorId: d.proveedor_id, usuarioId: s.usuarioId }, medioEgreso),
     );
   }
   stmts.push(auditar(c.env.DB, s.tallerId, s.usuarioId, 'compra', id, 'crear', { total, pagado: pagoImporte }));
@@ -152,6 +155,12 @@ compras.post('/compras/:id/anular', async (c) => {
   if (!negativo) await verificarDisponible(c.env.DB, s.tallerId, porArticulo);
   const conPago = !!(await first(c.env.DB, "SELECT 1 FROM pagos_proveedor WHERE taller_id = ? AND compra_id = ? AND estado = 'registrado'", s.tallerId, id));
   if (conPago) await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
+  const pagosContado = await all<{ id: string }>(c.env.DB, "SELECT id FROM pagos_proveedor WHERE taller_id = ? AND compra_id = ? AND estado = 'registrado'", s.tallerId, id);
+  for (const pg of pagosContado) {
+    const bloqueo = await chequesBloqueanAnulacion(c.env.DB, s.tallerId, "origen_tipo = 'pago_proveedor' AND origen_id = ?", [pg.id], ['acreditado']);
+    if (bloqueo) throw conflict(bloqueo, 'cheque_comprometido');
+  }
+  if (await first(c.env.DB, "SELECT 1 FROM facturas_proveedor WHERE taller_id = ? AND compra_id = ? AND estado = 'registrada'", s.tallerId, id)) throw conflict('La compra tiene una factura de proveedor asociada: anulá la factura primero', 'factura_asociada');
   const stmts: Stmt[] = [
     guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM compras WHERE taller_id = ? AND id = ? AND estado = 'registrada')", s.tallerId, id),
     c.env.DB.prepare("UPDATE compras SET estado = 'anulada' WHERE taller_id = ? AND id = ?").bind(s.tallerId, id),
@@ -181,6 +190,8 @@ compras.post('/compras/:id/anular', async (c) => {
       guardCajaObligatoria(c.env.DB, s.tallerId),
       // Se anula el pago de contado junto con la compra y su egreso de caja se revierte.
       sentenciaReversos(c.env.DB, s.tallerId, "m.origen_tipo = 'pago_proveedor' AND m.origen_id IN (SELECT id FROM pagos_proveedor WHERE taller_id = m.taller_id AND compra_id = ? AND estado = 'registrado')", [id], s.usuarioId),
+      sentenciaReversosBanco(c.env.DB, s.tallerId, "m.origen_tipo = 'pago_proveedor' AND m.origen_id IN (SELECT id FROM pagos_proveedor WHERE taller_id = m.taller_id AND compra_id = ? AND estado = 'registrado')", [id], s.usuarioId),
+      ...pagosContado.flatMap((pg) => sentenciasAnularChequesDePago(c.env.DB, s.tallerId, 'pago_proveedor', pg.id, s.usuarioId, hoy())),
       c.env.DB.prepare("UPDATE pagos_proveedor SET estado = 'anulado' WHERE taller_id = ? AND compra_id = ? AND estado = 'registrado'").bind(s.tallerId, id),
     );
   }
@@ -224,15 +235,16 @@ compras.post('/pagos-proveedor', async (c) => {
       idem_key: z.string().min(8).max(80),
       // Por defecto no se paga más que la deuda; el anticipo (saldo a favor) debe pedirse explícitamente.
       permitir_anticipo: z.boolean().default(false),
+      ...zMedioEgreso,
     }),
   );
   const previo = await first(c.env.DB, 'SELECT id, numero FROM pagos_proveedor WHERE taller_id = ? AND idem_key = ?', s.tallerId, d.idem_key);
   if (previo) return c.json({ ...previo, duplicado: true });
   if (!(await first(c.env.DB, 'SELECT 1 FROM proveedores WHERE taller_id = ? AND id = ?', s.tallerId, d.proveedor_id))) throw badRequest('Proveedor inexistente');
-  if (d.medio === 'cheque' && !d.referencia) throw badRequest('Indicá el número de cheque en la referencia');
+  const medioEgreso = await validarMedioEgreso(c.env.DB, s.tallerId, { origenTipo: 'pago_proveedor', medio: d.medio, importe: d.importe, referencia: d.referencia }, d);
   const fecha = fechaComercial(s, d.fecha);
   if (!d.permitir_anticipo) {
-    const saldo = (await first<{ v: number }>(c.env.DB, `SELECT ${SALDO_PROVEEDOR_SQL} AS v`, s.tallerId, d.proveedor_id, s.tallerId, d.proveedor_id))?.v ?? 0;
+    const saldo = (await first<{ v: number }>(c.env.DB, `SELECT ${SALDO_PROVEEDOR_SQL} AS v`, ...paramsSaldoProveedor(s.tallerId, d.proveedor_id)))?.v ?? 0;
     if (d.importe > saldo) throw conflict(`El pago supera la deuda con el proveedor (saldo ${(saldo / 100).toLocaleString('es-AR')}). Para registrar un anticipo, confirmalo expresamente.`, 'saldo_excedido');
   }
   await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
@@ -241,15 +253,16 @@ compras.post('/pagos-proveedor', async (c) => {
     await c.env.DB.batch([
       guardCajaObligatoria(c.env.DB, s.tallerId),
       // Con concurrencia, otro pago pudo agotar la deuda entre la lectura y la escritura.
-      ...(d.permitir_anticipo ? [] : [guard(c.env.DB, `${SALDO_PROVEEDOR_SQL} < ?`, s.tallerId, d.proveedor_id, s.tallerId, d.proveedor_id, d.importe)]),
+      ...(d.permitir_anticipo ? [] : [guard(c.env.DB, `${SALDO_PROVEEDOR_SQL} < ?`, ...paramsSaldoProveedor(s.tallerId, d.proveedor_id), d.importe)]),
       ...seqIncrementar(c.env.DB, s.tallerId, 'pago_proveedor'),
       c.env.DB.prepare(
-        `INSERT INTO pagos_proveedor (id, taller_id, numero, proveedor_id, fecha, importe, medio, referencia, idem_key, notas, usuario_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(id, s.tallerId, s.tallerId, 'pago_proveedor', d.proveedor_id, fecha, d.importe, d.medio, d.referencia, d.idem_key, d.notas, s.usuarioId),
+        `INSERT INTO pagos_proveedor (id, taller_id, numero, proveedor_id, fecha, importe, medio, referencia, idem_key, notas, usuario_id, cuenta_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(id, s.tallerId, s.tallerId, 'pago_proveedor', d.proveedor_id, fecha, d.importe, d.medio, d.referencia, d.idem_key, d.notas, s.usuarioId, d.cuenta_id ?? null),
       sentenciaMovimiento(c.env.DB, s.tallerId, {
         tipo: 'egreso', rubro: 'pago_proveedor', medio: d.medio, importe: d.importe, concepto: 'Pago a proveedor', referencia: d.referencia,
         origenTipo: 'pago_proveedor', origenId: id, fecha, usuarioId: s.usuarioId,
       }),
+      ...sentenciasMedioEgreso(c.env.DB, s.tallerId, { origenTipo: 'pago_proveedor', origenId: id, medio: d.medio, importe: d.importe, referencia: d.referencia, fecha, concepto: 'Pago a proveedor', proveedorId: d.proveedor_id, usuarioId: s.usuarioId }, medioEgreso),
       auditar(c.env.DB, s.tallerId, s.usuarioId, 'pago_proveedor', id, 'crear', { importe: d.importe }),
     ]);
   } catch (e) {
@@ -270,11 +283,15 @@ compras.post('/pagos-proveedor/:id/anular', async (c) => {
   if (!p) throw notFound('Pago');
   if (p.estado !== 'registrado') throw conflict('El pago ya está anulado');
   await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
+  const bloqueo = await chequesBloqueanAnulacion(c.env.DB, s.tallerId, "origen_tipo = 'pago_proveedor' AND origen_id = ?", [id], ['acreditado']);
+  if (bloqueo) throw conflict(bloqueo, 'cheque_comprometido');
   await c.env.DB.batch([
     guardCajaObligatoria(c.env.DB, s.tallerId),
     guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM pagos_proveedor WHERE taller_id = ? AND id = ? AND estado = 'registrado')", s.tallerId, id),
     c.env.DB.prepare("UPDATE pagos_proveedor SET estado = 'anulado', notas = COALESCE(notas || ' · ', '') || ? WHERE taller_id = ? AND id = ?").bind(`Anulado: ${motivo}`, s.tallerId, id),
     reversoDeOrigen(c.env.DB, s.tallerId, 'pago_proveedor', id, s.usuarioId),
+    reversoBancoDeOrigen(c.env.DB, s.tallerId, 'pago_proveedor', id, s.usuarioId),
+    ...sentenciasAnularChequesDePago(c.env.DB, s.tallerId, 'pago_proveedor', id, s.usuarioId, hoy()),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'pago_proveedor', id, 'anular', { motivo }),
   ]);
   return c.json({ ok: true });
@@ -291,9 +308,15 @@ compras.get('/proveedores/:id/cuenta', async (c) => {
     `SELECT fecha, created_at, 'compra' AS tipo, id, numero, numero_doc AS detalle, 0 AS debe, total AS haber, (estado = 'anulada') AS anulado FROM compras WHERE taller_id = ? AND proveedor_id = ?
      UNION ALL
      SELECT fecha, created_at, 'pago' AS tipo, id, numero, medio AS detalle, importe AS debe, 0 AS haber, (estado = 'anulado') AS anulado FROM pagos_proveedor WHERE taller_id = ? AND proveedor_id = ?
+     UNION ALL
+     SELECT fecha, created_at, 'factura' AS tipo, id, numero, nro_comprobante AS detalle,
+            CASE WHEN tipo LIKE 'nota_credito%' THEN total ELSE 0 END AS debe,
+            CASE WHEN tipo LIKE 'nota_credito%' OR compra_id IS NOT NULL THEN 0 ELSE total END AS haber, (estado = 'anulada') AS anulado
+       FROM facturas_proveedor WHERE taller_id = ? AND proveedor_id = ?
      ORDER BY fecha, created_at`,
-    s.tallerId, id, s.tallerId, id,
+    s.tallerId, id, s.tallerId, id, s.tallerId, id,
   );
+  const [deuda] = await deudaProveedores(c.env.DB, s.tallerId, id);
   let saldo = 0;
   return c.json({
     proveedor: p,
@@ -302,29 +325,31 @@ compras.get('/proveedores/:id/cuenta', async (c) => {
       return { ...m, saldo };
     }),
     saldo,
+    deuda: deuda ?? { proveedor_id: id, saldo: 0, vencido: 0, por_vencer: 0, docs: [] },
   });
 });
 
 // ───────────── Reposición ─────────────
-/** Artículos en o por debajo del stock mínimo, con la cantidad sugerida para reponer y su proveedor habitual. */
+/** Artículos en o por debajo del stock mínimo, con lo que ya está pedido (órdenes abiertas) y la cantidad sugerida para reponer. */
 compras.get('/reposicion', requirePerm('stock.ver'), async (c) => {
   const s = c.get('sesion');
   const { proveedor_id } = query(c, z.object({ proveedor_id: z.string().optional() }));
-  const filas = await all<{ stock: number; stock_minimo: number; stock_objetivo: number | null }>(
+  const filas = await all<{ stock: number; stock_minimo: number; stock_objetivo: number | null; en_camino: number }>(
     c.env.DB,
-    `SELECT a.id, a.codigo, a.nombre, a.marca, a.unidad, a.stock, a.stock_minimo, a.stock_objetivo, a.costo, a.proveedor_id, p.nombre AS proveedor
+    `SELECT a.id, a.codigo, a.nombre, a.marca, a.unidad, a.stock, a.stock_minimo, a.stock_objetivo, a.costo, a.proveedor_id, p.nombre AS proveedor,
+            COALESCE((SELECT SUM(ROUND(i.cantidad - i.cantidad_recibida, 3)) FROM orden_compra_items i JOIN ordenes_compra oc ON oc.taller_id = i.taller_id AND oc.id = i.orden_id
+                       WHERE i.taller_id = a.taller_id AND i.articulo_id = a.id AND oc.estado IN ('pendiente','parcial')), 0) AS en_camino
        FROM articulos a LEFT JOIN proveedores p ON p.taller_id = a.taller_id AND p.id = a.proveedor_id
-      WHERE a.taller_id = ? AND a.activo = 1 AND a.stock_minimo > 0 AND a.stock <= a.stock_minimo ${proveedor_id ? 'AND a.proveedor_id = ?' : ''}
+      WHERE a.taller_id = ? AND a.activo = 1 AND a.stock_minimo > 0 AND ROUND(a.stock, 3) <= ROUND(a.stock_minimo, 3) ${proveedor_id ? 'AND a.proveedor_id = ?' : ''}
       ORDER BY p.nombre COLLATE NOCASE, a.nombre COLLATE NOCASE LIMIT 500`,
     s.tallerId,
     ...(proveedor_id ? [proveedor_id] : []),
   );
-  // Cantidad sugerida: hasta el stock ideal (si está definido) o hasta el doble del mínimo.
+  // Cantidad sugerida: hasta el stock objetivo (o el doble del mínimo) descontando lo que ya está pedido y no llegó.
   return c.json(
-    filas.map((a) => ({
-      ...a,
-      objetivo: a.stock_objetivo ?? redondearCantidad(a.stock_minimo * 2),
-      sugerido: Math.max(0, redondearCantidad((a.stock_objetivo ?? a.stock_minimo * 2) - a.stock)),
-    })),
+    filas.map((a) => {
+      const objetivo = a.stock_objetivo ?? redondearCantidad(a.stock_minimo * 2);
+      return { ...a, en_camino: redondearCantidad(a.en_camino), objetivo, sugerido: Math.max(0, redondearCantidad(objetivo - a.stock - a.en_camino)) };
+    }),
   );
 });

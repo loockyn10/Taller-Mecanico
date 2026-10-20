@@ -5,10 +5,9 @@ import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zFecha, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, like, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
 import { requirePerm } from '../lib/auth';
-import { sentenciasCobro } from '../lib/cobros';
+import { medioDeCobroInmediato, sentenciasCobro, validarMediosCobro, zCobroInmediato } from '../lib/cobros';
 import { exigirCajaAbiertaSiCorresponde } from '../lib/caja';
 import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
-import { MEDIOS_PAGO } from '../../shared/dominio';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
 import { agrupar, permiteNegativo, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
@@ -285,7 +284,7 @@ ordenes.post('/:id/comprobante', requirePerm('ventas.emitir'), async (c) => {
       condicion: z.enum(['contado', 'cuenta_corriente']).default('cuenta_corriente'),
       observaciones: zTextoOpt(500),
       // Emitir y cobrar el total en el acto (contado): el cobro y su ingreso de caja van en la misma transacción.
-      cobro: z.object({ medio: z.enum(MEDIOS_PAGO), referencia: zTextoOpt(120) }).nullish(),
+      cobro: zCobroInmediato.nullish(),
     }),
   );
   const o = await first<{ estado: EstadoOT; total: number; numero: number; cliente_id: string }>(c.env.DB, 'SELECT estado, total, numero, cliente_id FROM ordenes WHERE taller_id = ? AND id = ?', s.tallerId, id);
@@ -293,7 +292,7 @@ ordenes.post('/:id/comprobante', requirePerm('ventas.emitir'), async (c) => {
   if (d.condicion === 'cuenta_corriente' && d.cobro) throw badRequest('Un comprobante a cuenta corriente no se cobra en el acto');
   // "Contado" significa cobrado; la cuenta corriente exige un cliente identificado.
   if (d.condicion === 'contado' && o.total > 0 && !d.cobro) throw badRequest('Un comprobante de contado se cobra en el momento: elegí el medio de pago o emitilo a cuenta corriente');
-  if (d.cobro?.medio === 'cheque' && !d.cobro.referencia) throw badRequest('Indicá el número de cheque en la referencia');
+  if (d.cobro) await validarMediosCobro(c.env.DB, s.tallerId, [medioDeCobroInmediato(d.cobro, o.total)]);
   if (d.condicion === 'cuenta_corriente' && (await first(c.env.DB, 'SELECT 1 FROM clientes WHERE taller_id = ? AND id = ? AND codigo = 0', s.tallerId, o.cliente_id))) {
     throw badRequest('La cuenta corriente requiere un cliente identificado (no "Consumidor final")');
   }
@@ -325,7 +324,7 @@ ordenes.post('/:id/comprobante', requirePerm('ventas.emitir'), async (c) => {
     ...(cobrar
       ? sentenciasCobro(c.env.DB, s, {
           id: uid(), clienteId: o.cliente_id, fecha: fechaVenta, idemKey: `comprobante:${ventaId}`, notas: `Cobro del comprobante de OT #${o.numero}`,
-          medios: [{ medio: d.cobro!.medio, importe: o.total, referencia: d.cobro!.referencia }],
+          medios: [medioDeCobroInmediato(d.cobro!, o.total)],
           aplicaciones: [{ ventaId, importe: o.total }],
         })
       : []),

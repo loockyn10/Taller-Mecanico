@@ -10,7 +10,7 @@ import { Boton, Cargando, ErrorCaja } from '@/components/ui';
 import { importeEnLetras } from '@shared/letras';
 import { CONDICION_IVA_LABEL, MEDIO_PAGO_LABEL, type CondicionIva, type MedioPago } from '@shared/dominio';
 
-function Cabecera({ cfg, titulo, children }: { cfg: any; titulo: string; children?: React.ReactNode }) {
+export function Cabecera({ cfg, titulo, children, aviso = 'DOCUMENTO NO VÁLIDO COMO FACTURA' }: { cfg: any; titulo: string; children?: React.ReactNode; aviso?: string }) {
   const t = cfg.taller;
   return (
     <header className="flex items-start justify-between border-b-2 border-black pb-4">
@@ -20,11 +20,12 @@ function Cabecera({ cfg, titulo, children }: { cfg: any; titulo: string; childre
         <div>{[t.direccion, t.localidad].filter(Boolean).join(', ')}</div>
         <div>{[t.telefono, t.email].filter(Boolean).join(' · ')}</div>
         {t.cuit && <div>CUIT {t.cuit} · {CONDICION_IVA_LABEL[t.condicion_iva as CondicionIva]}</div>}
+        {(t.ingresos_brutos || t.inicio_actividades) && <div>{[t.ingresos_brutos ? `IIBB ${t.ingresos_brutos}` : null, t.inicio_actividades ? `Inicio de actividades ${fecha(t.inicio_actividades)}` : null].filter(Boolean).join(' · ')}</div>}
       </div>
       <div className="text-right">
         <div className="text-lg font-bold">{titulo}</div>
         {children}
-        <div className="mt-1 border border-black px-2 py-0.5 text-xs font-semibold">DOCUMENTO NO VÁLIDO COMO FACTURA</div>
+        <div className="mt-1 border border-black px-2 py-0.5 text-xs font-semibold">{aviso}</div>
       </div>
     </header>
   );
@@ -94,6 +95,7 @@ export function ImprimirDinero() {
           </section>
           <div className="ml-auto mt-3 w-64"><div className="flex justify-between border-t border-black pt-1 text-base font-bold"><span>Total recibido</span><span>{money(d.total)}</span></div></div>
           {d.notas && <p className="mt-4"><strong>Notas:</strong> {d.notas}</p>}
+          {(cfg.config.pie_recibo || cfg.config.pie_documentos) && <p className="mt-4 border-t border-slate-300 pt-2 text-xs text-slate-600">{cfg.config.pie_recibo || cfg.config.pie_documentos}</p>}
           <div className="mt-16 grid grid-cols-2 gap-10 text-center text-xs">
             <div className="border-t border-black pt-1">Firma del cliente</div>
             <div className="border-t border-black pt-1">Recibió: {d.usuario ?? me?.taller.nombre}</div>
@@ -129,7 +131,7 @@ export function ImprimirDinero() {
               <ul className="text-xs">{d.pendientes.map((p: any) => <li key={p.id}>N° {numero(p.numero)} del {fecha(p.fecha)} — saldo {money(p.saldo)}</li>)}</ul>
             </section>
           )}
-          {cfg.config.pie_documentos && <p className="mt-6 border-t border-slate-300 pt-2 text-xs text-slate-600">{cfg.config.pie_documentos}</p>}
+          {(cfg.config.pie_recibo || cfg.config.pie_documentos) && <p className="mt-6 border-t border-slate-300 pt-2 text-xs text-slate-600">{cfg.config.pie_recibo || cfg.config.pie_documentos}</p>}
         </>
       )}
     </div>

@@ -6,9 +6,11 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCentavos, zFecha, zId, zTextoOpt } from '../lib/http';
-import { all, auditar, first, guard, like, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
+import { all, auditar, first, guard, hoy, like, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
 import { requirePerm } from '../lib/auth';
-import { sentenciasCobro } from '../lib/cobros';
+import { medioDeCobroInmediato, sentenciasCobro, validarMediosCobro, zCobroInmediato } from '../lib/cobros';
+import { reversoBancoDeCobro } from '../lib/banco';
+import { chequesBloqueanAnulacion, sentenciasAnularChequesDeCobro, zChequeDatos } from '../lib/cheques';
 import { exigirCajaAbiertaSiCorresponde, guardCajaObligatoria, reversoDeCobro } from '../lib/caja';
 import { fechaComercial } from '../lib/fechas';
 import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
@@ -74,7 +76,7 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
       idem_key: z.string().min(8).max(80),
       lista_precio_id: zId.nullish(),
       // Cobro inmediato del total (venta de contado): se registra en la misma transacción.
-      cobro: z.object({ medio: z.enum(MEDIOS_PAGO), referencia: zTextoOpt(120) }).nullish(),
+      cobro: zCobroInmediato.nullish(),
     }),
   );
   const previa = await first(c.env.DB, `${SELECT_VENTA} WHERE ve.taller_id = ? AND ve.idem_key = ?`, s.tallerId, d.idem_key);
@@ -91,7 +93,7 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
   const t = totales(items, d);
   // "Contado" significa cobrado: ya no es sólo una etiqueta que deja la venta impaga.
   if (d.condicion === 'contado' && t.total > 0 && !d.cobro) throw badRequest('Una venta de contado se cobra en el momento: elegí el medio de pago o pasala a cuenta corriente');
-  if (d.cobro?.medio === 'cheque' && !d.cobro.referencia) throw badRequest('Indicá el número de cheque en la referencia');
+  if (d.cobro) await validarMediosCobro(c.env.DB, s.tallerId, [medioDeCobroInmediato(d.cobro, t.total)]);
   const cobrar = d.condicion === 'contado' && !!d.cobro && t.total > 0;
   if (cobrar) await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   const porArticulo = agrupar(items.map((i) => ({ articulo_id: i.articulo_id ?? null, cantidad: i.cantidad })));
@@ -122,7 +124,7 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
     stmts.push(
       ...sentenciasCobro(c.env.DB, s, {
         id: uid(), clienteId, fecha, idemKey: `venta:${d.idem_key}`, notas: 'Cobro de venta de mostrador',
-        medios: [{ medio: d.cobro!.medio, importe: t.total, referencia: d.cobro!.referencia }],
+        medios: [medioDeCobroInmediato(d.cobro!, t.total)],
         aplicaciones: [{ ventaId: id, importe: t.total }],
       }),
     );
@@ -182,7 +184,7 @@ comercial.post('/ventas/:id/anular', requirePerm('ventas.anular'), async (c) => 
 const zCobro = z.object({
   cliente_id: zId,
   fecha: zFecha.optional(),
-  medios: z.array(z.object({ medio: z.enum(MEDIOS_PAGO), importe: zCentavos.refine((v) => v > 0, 'importe debe ser mayor a 0'), referencia: zTextoOpt(120) })).min(1).max(10),
+  medios: z.array(z.object({ medio: z.enum(MEDIOS_PAGO), importe: zCentavos.refine((v) => v > 0, 'importe debe ser mayor a 0'), referencia: zTextoOpt(120), cuenta_id: zId.nullish(), cheque: zChequeDatos.partial().nullish() })).min(1).max(10),
   aplicaciones: z.array(z.object({ venta_id: zId, importe: zCentavos.refine((v) => v > 0, 'importe debe ser mayor a 0') })).min(1).max(50),
   notas: zTextoOpt(500),
   idem_key: z.string().min(8).max(80),
@@ -254,7 +256,7 @@ comercial.post('/cobros', requirePerm('cobros.registrar'), async (c) => {
   const total = d.medios.reduce((a, m) => a + m.importe, 0);
   const aplicado = d.aplicaciones.reduce((a, m) => a + m.importe, 0);
   if (total !== aplicado) throw badRequest('La suma de los medios de pago debe coincidir con el importe aplicado a los comprobantes');
-  if (d.medios.some((m) => m.medio === 'cheque' && !m.referencia)) throw badRequest('Indicá el número de cheque en la referencia');
+  await validarMediosCobro(c.env.DB, s.tallerId, d.medios.map((m) => ({ medio: m.medio, importe: m.importe, referencia: m.referencia, cuentaId: m.cuenta_id, cheque: m.cheque })));
   const ventaIds = d.aplicaciones.map((a) => a.venta_id);
   if (new Set(ventaIds).size !== ventaIds.length) throw badRequest('Un comprobante aparece más de una vez');
   if (!(await first(c.env.DB, 'SELECT 1 FROM clientes WHERE taller_id = ? AND id = ?', s.tallerId, d.cliente_id))) throw badRequest('Cliente inexistente');
@@ -285,7 +287,7 @@ comercial.post('/cobros', requirePerm('cobros.registrar'), async (c) => {
     await c.env.DB.batch(
       sentenciasCobro(c.env.DB, s, {
         id, clienteId: d.cliente_id, fecha, notas: d.notas, idemKey: d.idem_key,
-        medios: d.medios.map((m) => ({ medio: m.medio, importe: m.importe, referencia: m.referencia })),
+        medios: d.medios.map((m) => ({ medio: m.medio, importe: m.importe, referencia: m.referencia, cuentaId: m.cuenta_id ?? null, cheque: m.cheque ?? null })),
         aplicaciones: d.aplicaciones.map((a) => ({ ventaId: a.venta_id, importe: a.importe })),
       }),
     );
@@ -308,6 +310,8 @@ comercial.post('/cobros/:id/anular', requirePerm('cobros.anular'), async (c) => 
   if (!co) throw notFound('Cobro');
   if (co.estado !== 'registrado') throw conflict('El cobro ya está anulado');
   await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
+  const bloqueo = await chequesBloqueanAnulacion(c.env.DB, s.tallerId, "origen_tipo = 'cobro_medio' AND origen_id IN (SELECT id FROM cobro_medios WHERE taller_id = cheques.taller_id AND cobro_id = ?)", [id]);
+  if (bloqueo) throw conflict(bloqueo, 'cheque_comprometido');
   const aps = await all<{ venta_id: string; importe: number }>(c.env.DB, 'SELECT venta_id, importe FROM cobro_aplicaciones WHERE taller_id = ? AND cobro_id = ?', s.tallerId, id);
   await c.env.DB.batch([
     guardCajaObligatoria(c.env.DB, s.tallerId),
@@ -316,6 +320,8 @@ comercial.post('/cobros/:id/anular', requirePerm('cobros.anular'), async (c) => 
     ...aps.map((a) => c.env.DB.prepare('UPDATE ventas SET cobrado = cobrado - ? WHERE taller_id = ? AND id = ?').bind(a.importe, s.tallerId, a.venta_id)),
     // El dinero devuelto sale de la caja abierta de hoy (contra-asiento): la caja histórica no se reescribe.
     reversoDeCobro(c.env.DB, s.tallerId, id, s.usuarioId),
+    reversoBancoDeCobro(c.env.DB, s.tallerId, id, s.usuarioId),
+    ...sentenciasAnularChequesDeCobro(c.env.DB, s.tallerId, id, s.usuarioId, hoy()),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'cobro', id, 'anular', { motivo }),
   ]);
   return c.json({ ok: true });

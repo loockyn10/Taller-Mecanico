@@ -13,6 +13,10 @@ import { FRECUENCIAS_GASTO, MEDIOS_PAGO, TIPOS_CATEGORIA_GASTO } from '../../sha
 import { siguienteOcurrencia } from '../../shared/precios';
 import { exigirCajaAbiertaSiCorresponde, guardCajaObligatoria, IMPORTE_FIRMADO_SQL, reversoDeOrigen, sentenciaMovimiento } from '../lib/caja';
 import { fechaComercial } from '../lib/fechas';
+import { DEUDA_TOTAL_SQL } from '../lib/proveedores';
+import { sentenciasMedioEgreso, validarMedioEgreso, zMedioEgreso, type MedioEgreso } from '../lib/pagos';
+import { reversoBancoDeOrigen } from '../lib/banco';
+import { chequesBloqueanAnulacion, sentenciasAnularChequesDePago } from '../lib/cheques';
 
 export const gastos = new Hono<AppEnv>();
 
@@ -97,21 +101,23 @@ const zGasto = z.object({
   comprobante: zTextoOpt(60),
   notas: zTextoOpt(500),
   idem_key: z.string().min(8).max(80),
+  ...zMedioEgreso,
 });
 
 /** Sentencias que registran un gasto y su egreso de caja (para usar también desde gastos recurrentes). */
-function sentenciasGasto(db: D1Database, s: { tallerId: string; usuarioId: string }, id: string, d: z.infer<typeof zGasto>, fecha: string, recurrente?: { id: string; fecha: string }): Stmt[] {
+function sentenciasGasto(db: D1Database, s: { tallerId: string; usuarioId: string }, id: string, d: z.infer<typeof zGasto>, fecha: string, recurrente?: { id: string; fecha: string }, medioEgreso: MedioEgreso = {}): Stmt[] {
   return [
     guardCajaObligatoria(db, s.tallerId),
     ...seqIncrementar(db, s.tallerId, 'gasto'),
     db.prepare(
-      `INSERT INTO gastos (id, taller_id, numero, fecha, categoria_id, concepto, importe, medio, referencia, proveedor_id, comprobante, recurrente_id, recurrente_fecha, idem_key, notas, usuario_id)
-       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, s.tallerId, s.tallerId, 'gasto', fecha, d.categoria_id, d.concepto, d.importe, d.medio, d.referencia, d.proveedor_id ?? null, d.comprobante, recurrente?.id ?? null, recurrente?.fecha ?? null, d.idem_key, d.notas, s.usuarioId),
+      `INSERT INTO gastos (id, taller_id, numero, fecha, categoria_id, concepto, importe, medio, referencia, proveedor_id, comprobante, recurrente_id, recurrente_fecha, idem_key, notas, usuario_id, cuenta_id)
+       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, s.tallerId, s.tallerId, 'gasto', fecha, d.categoria_id, d.concepto, d.importe, d.medio, d.referencia, d.proveedor_id ?? null, d.comprobante, recurrente?.id ?? null, recurrente?.fecha ?? null, d.idem_key, d.notas, s.usuarioId, medioEgreso.cuenta_id ?? null),
     sentenciaMovimiento(db, s.tallerId, {
       tipo: 'egreso', rubro: 'gasto', medio: d.medio, importe: d.importe, concepto: `Gasto: ${d.concepto}`, referencia: d.referencia,
       origenTipo: 'gasto', origenId: id, fecha, usuarioId: s.usuarioId,
     }),
+    ...sentenciasMedioEgreso(db, s.tallerId, { origenTipo: 'gasto', origenId: id, medio: d.medio, importe: d.importe, referencia: d.referencia, fecha, concepto: `Gasto: ${d.concepto}`, proveedorId: d.proveedor_id ?? null, usuarioId: s.usuarioId }, medioEgreso),
     auditar(db, s.tallerId, s.usuarioId, 'gasto', id, 'crear', { importe: d.importe, categoria_id: d.categoria_id }),
   ];
 }
@@ -129,11 +135,12 @@ gastos.post('/gastos', requirePerm('caja.operar'), async (c) => {
   const previo = await first(c.env.DB, `${SELECT_GASTO} WHERE g.taller_id = ? AND g.idem_key = ?`, s.tallerId, d.idem_key);
   if (previo) return c.json({ ...previo, duplicado: true });
   await validarRefsGasto(c.env.DB, s.tallerId, d);
+  const medioEgreso = await validarMedioEgreso(c.env.DB, s.tallerId, { origenTipo: 'gasto', medio: d.medio, importe: d.importe, referencia: d.referencia }, d);
   await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   const fecha = fechaComercial(s, d.fecha);
   const id = uid();
   try {
-    await c.env.DB.batch(sentenciasGasto(c.env.DB, s, id, d, fecha));
+    await c.env.DB.batch(sentenciasGasto(c.env.DB, s, id, d, fecha, undefined, medioEgreso));
   } catch (e) {
     if (String(e).includes('idem_key')) {
       const ex = await first(c.env.DB, `${SELECT_GASTO} WHERE g.taller_id = ? AND g.idem_key = ?`, s.tallerId, d.idem_key);
@@ -152,11 +159,15 @@ gastos.post('/gastos/:id/anular', requirePerm('gastos.gestionar'), async (c) => 
   if (!g) throw notFound('Gasto');
   if (g.estado !== 'registrado') throw conflict('El gasto ya está anulado');
   await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
+  const bloqueo = await chequesBloqueanAnulacion(c.env.DB, s.tallerId, "origen_tipo = 'gasto' AND origen_id = ?", [id], ['acreditado']);
+  if (bloqueo) throw conflict(bloqueo, 'cheque_comprometido');
   await c.env.DB.batch([
     guardCajaObligatoria(c.env.DB, s.tallerId),
     guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM gastos WHERE taller_id = ? AND id = ? AND estado = 'registrado')", s.tallerId, id),
     c.env.DB.prepare("UPDATE gastos SET estado = 'anulado', anulado_motivo = ? WHERE taller_id = ? AND id = ?").bind(motivo, s.tallerId, id),
     reversoDeOrigen(c.env.DB, s.tallerId, 'gasto', id, s.usuarioId),
+    reversoBancoDeOrigen(c.env.DB, s.tallerId, 'gasto', id, s.usuarioId),
+    ...sentenciasAnularChequesDePago(c.env.DB, s.tallerId, 'gasto', id, s.usuarioId, hoy()),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'gasto', id, 'anular', { motivo }),
   ]);
   return c.json({ ok: true });
@@ -233,6 +244,7 @@ gastos.post('/gastos-recurrentes/:id/registrar', requirePerm('gastos.gestionar')
   if (!r.activo) throw conflict('El gasto recurrente está desactivado');
   if (r.proxima_fecha !== d.ocurrencia) throw conflict('Esa ocurrencia ya fue registrada o salteada. Actualizá la lista.', 'ocurrencia_cambio');
   await validarRefsGasto(c.env.DB, s.tallerId, { categoria_id: r.categoria_id });
+  if ((d.medio ?? r.medio) === 'cheque') throw badRequest('Un gasto recurrente no se registra con cheque: cargá el gasto manualmente con los datos del cheque');
   await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   const gid = uid();
   const datos = {
@@ -271,7 +283,8 @@ finanzas.get('/resumen', requirePerm('finanzas.ver'), async (c) => {
   const { desde, hasta } = query(c, z.object({ desde: zFecha, hasta: zFecha }));
   if (desde > hasta) throw badRequest('El período es inválido');
   const db = c.env.DB;
-  const rango = 'm.taller_id = ? AND m.fecha BETWEEN ? AND ?';
+  // Los traspasos con bancos (depósitos/extracciones de efectivo) mueven plata entre lugares: no son ingresos ni egresos.
+  const rango = "m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.rubro <> 'traspaso'";
   const p = [s.tallerId, desde, hasta];
   const [rubros, porMedio, porMes, porDia, gastosCat, devengado] = await Promise.all([
     all<{ rubro: string; neto: number }>(db, `SELECT m.rubro, SUM(CASE m.tipo WHEN 'ingreso' THEN m.importe ELSE -m.importe END) AS neto FROM caja_movimientos m WHERE ${rango} GROUP BY m.rubro`, ...p),
@@ -291,9 +304,8 @@ finanzas.get('/resumen', requirePerm('finanzas.ver'), async (c) => {
          (SELECT COUNT(*) FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND fecha BETWEEN ? AND ?) AS ventas_cantidad,
          (SELECT COALESCE(SUM(total),0) FROM compras WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?) AS compras_registradas,
          (SELECT COALESCE(SUM(total - cobrado),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida') AS por_cobrar,
-         (SELECT COALESCE(SUM(total),0) FROM compras WHERE taller_id = ? AND estado = 'registrada')
-           - (SELECT COALESCE(SUM(importe),0) FROM pagos_proveedor WHERE taller_id = ? AND estado = 'registrado') AS por_pagar`,
-      ...p, ...p, ...p, s.tallerId, s.tallerId, s.tallerId,
+         ${DEUDA_TOTAL_SQL} AS por_pagar`,
+      ...p, ...p, ...p, s.tallerId, s.tallerId, s.tallerId, s.tallerId,
     ),
   ]);
   const neto = (r: string) => rubros.find((x) => x.rubro === r)?.neto ?? 0;

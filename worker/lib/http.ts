@@ -51,6 +51,11 @@ export function traducirErrorDb(e: unknown): ApiError | null {
     if (msg.includes('idx_ordenes_presupuesto') || msg.includes('ordenes.taller_id, ordenes.presupuesto_id'))
       return conflict('El presupuesto ya fue convertido en una OT', 'duplicado');
     if (msg.includes('ventas.taller_id, ventas.orden_id')) return conflict('La OT ya tiene un comprobante vigente', 'duplicado');
+    if (msg.includes('idx_cheques_duplicado')) return conflict('Ese cheque ya está registrado (mismo banco, número y librador)', 'duplicado');
+    if (msg.includes('idx_recepciones_remito')) return conflict('Ese remito del proveedor ya fue cargado', 'duplicado');
+    if (msg.includes('idx_facturas_prov_dup')) return conflict('Esa factura del proveedor ya fue registrada', 'duplicado');
+    if (msg.includes('idx_banco_mov_origen')) return conflict('El movimiento bancario ya fue registrado', 'duplicado');
+    if (msg.includes('cuentas_bancarias')) return conflict('Ya existe una cuenta bancaria con ese nombre', 'duplicado');
     if (msg.includes('codigo')) return conflict('Ya existe un registro con ese código', 'duplicado');
     if (msg.includes('nombre')) return conflict('Ya existe un registro con ese nombre', 'duplicado');
     return conflict('Registro duplicado', 'duplicado');
@@ -60,6 +65,7 @@ export function traducirErrorDb(e: unknown): ApiError | null {
   }
   if (msg.includes('CHECK constraint failed')) {
     if (msg.includes('cobrado')) return conflict('El importe supera el saldo pendiente del comprobante', 'saldo_excedido');
+    if (msg.includes('cantidad_recibida')) return conflict('La cantidad recibida supera lo pendiente de la orden de compra', 'recepcion_excedida');
     return badRequest('Algún valor está fuera de rango');
   }
   return null;

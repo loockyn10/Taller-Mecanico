@@ -8,7 +8,8 @@ import { invalidarDinero } from '@/lib/caja';
 import { cantidad, fecha, hoyISO, money, numero } from '@/lib/format';
 import { Aviso, Boton, Buscador, Campo, Cargando, Check, Encabezado, ErrorCaja, Input, InputMoneda, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
 import { AvisoCaja, useCajaBloqueada } from '@/components/Cobro';
-import { MEDIOS_PAGO, MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
+import { MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
+import { CamposMedio, errorMedio, extraAPayload, extraVacio, SelectorMedio, type ExtraMedio } from '@/components/MedioPago';
 
 export function Compras() {
   const nav = useNavigate();
@@ -126,6 +127,8 @@ export function NuevaCompra() {
   const [items, setItems] = useState<LineaCompra[]>(precarga?.items ?? []);
   const [contado, setContado] = useState(false);
   const [pago, setPago] = useState<{ medio: MedioPago; importe: number | null; referencia: string }>({ medio: 'efectivo', importe: null, referencia: '' });
+  const [extra, setExtra] = useState<ExtraMedio>(extraVacio());
+  const [vence, setVence] = useState('');
   const [q, setQ] = useState('');
   const dq = useDebounce(q);
   const [clave] = useState(nuevaClave());
@@ -133,16 +136,16 @@ export function NuevaCompra() {
   const neto = items.reduce((a, i) => a + Math.round(i.cantidad * i.costo), 0);
   const total = neto + f.iva + f.otros;
   const importePago = pago.importe ?? total;
-  const chequeSinNumero = contado && pago.medio === 'cheque' && !pago.referencia.trim();
+  const chequeSinNumero = contado && !!errorMedio(pago.medio, pago.referencia, extra, 'pago_proveedor');
   useEffect(() => {
     if (!prov && precarga?.proveedor_id) setProv(precarga.proveedor_id);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const m = useMutation({
     mutationFn: () =>
       api.post('/compras', {
-        proveedor_id: prov, ...f, numero_doc: f.numero_doc || null,
+        proveedor_id: prov, ...f, numero_doc: f.numero_doc || null, vencimiento: !contado && vence ? vence : null,
         items: items.map((i) => ({ articulo_id: i.articulo.id, cantidad: i.cantidad, costo_unitario: i.costo })), idem_key: clave,
-        pago: contado ? { medio: pago.medio, importe: importePago, referencia: pago.referencia.trim() || null } : null,
+        pago: contado ? { medio: pago.medio, importe: importePago, referencia: pago.referencia.trim() || null, ...extraAPayload(pago.medio, extra, 'pago_proveedor') } : null,
       }),
     onSuccess: () => {
       invalidarDinero(qc);
@@ -218,13 +221,19 @@ export function NuevaCompra() {
           <Tarjeta titulo="Forma de pago">
             <div className="space-y-3">
               <Check checked={contado} onChange={setContado} label="Pagar ahora (de contado)" />
-              {!contado && <p className="text-xs text-tenue">Si no se paga ahora, queda como deuda en la cuenta corriente del proveedor.</p>}
+              {!contado && (
+                <>
+                  <p className="text-xs text-tenue">Si no se paga ahora, queda como deuda en la cuenta corriente del proveedor.</p>
+                  <Campo label="Vencimiento del pago (opcional)" hint="Por defecto, el plazo de pago configurado en el taller"><Input type="date" value={vence} min={f.fecha} onChange={(e) => setVence(e.target.value)} /></Campo>
+                </>
+              )}
               {contado && (
                 <>
                   <AvisoCaja />
-                  <Campo label="Medio de pago"><Select value={pago.medio} onChange={(e) => setPago({ ...pago, medio: e.target.value as MedioPago })}>{MEDIOS_PAGO.map((x) => <option key={x} value={x}>{MEDIO_PAGO_LABEL[x]}</option>)}</Select></Campo>
+                  <Campo label="Medio de pago"><SelectorMedio value={pago.medio} onChange={(medio) => setPago({ ...pago, medio })} /></Campo>
                   <Campo label="Importe pagado" hint={importePago > total ? 'No puede superar el total' : importePago < total ? `Queda una deuda de ${money(total - importePago)}` : undefined}><InputMoneda value={importePago} onChange={(v) => setPago({ ...pago, importe: v })} /></Campo>
                   <Campo label={pago.medio === 'cheque' ? 'N° de cheque' : 'Referencia'} requerido={pago.medio === 'cheque'}><Input value={pago.referencia} onChange={(e) => setPago({ ...pago, referencia: e.target.value })} /></Campo>
+                  <CamposMedio medio={pago.medio} valor={extra} onChange={setExtra} ctx="pago_proveedor" importe={importePago} />
                 </>
               )}
             </div>

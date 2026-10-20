@@ -222,8 +222,8 @@ describe('cuentas corrientes y cobranzas', () => {
 describe('precisión decimal del stock', () => {
   it('0,3 − 0,1 deja exactamente 0,2 y permite la salida legítima de 0,2', async () => {
     const a = (await api.post('/api/articulos', { nombre: 'Aceite a granel', unidad: 'lt', stock_inicial: 0.3, precio: 1000 })).body;
-    expect((await api.post('/api/stock/movimientos', { articulo_id: a.id, tipo: 'salida', cantidad: 0.1, idem_key: idem() })).body.stock).toBe(0.2);
-    const salida = await api.post('/api/stock/movimientos', { articulo_id: a.id, tipo: 'salida', cantidad: 0.2, idem_key: idem() });
+    expect((await api.post('/api/stock/movimientos', { articulo_id: a.id, tipo: 'salida', motivo: 'merma', cantidad: 0.1, idem_key: idem() })).body.stock).toBe(0.2);
+    const salida = await api.post('/api/stock/movimientos', { articulo_id: a.id, tipo: 'salida', motivo: 'merma', cantidad: 0.2, idem_key: idem() });
     expect(salida.status).toBe(201);
     expect(salida.body.stock).toBe(0);
     // Y por venta de mostrador
@@ -236,7 +236,7 @@ describe('precisión decimal del stock', () => {
   });
   it('rechaza cantidades con más de 3 decimales', async () => {
     const a = (await api.post('/api/articulos', { nombre: 'Tornillo', stock_inicial: 10, precio: 100 })).body;
-    expect((await api.post('/api/stock/movimientos', { articulo_id: a.id, tipo: 'salida', cantidad: 0.0001, idem_key: idem() })).status).toBe(400);
+    expect((await api.post('/api/stock/movimientos', { articulo_id: a.id, tipo: 'salida', motivo: 'merma', cantidad: 0.0001, idem_key: idem() })).status).toBe(400);
     expect((await api.post('/api/ventas', { items: [{ tipo: 'articulo', articulo_id: a.id, descripcion: 'x', cantidad: 1.0005, precio_unitario: 100 }], cobro: { medio: 'efectivo' }, idem_key: idem() })).status).toBe(400);
   });
 });

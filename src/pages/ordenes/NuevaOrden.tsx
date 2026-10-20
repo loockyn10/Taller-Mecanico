@@ -6,7 +6,7 @@ import { km } from '@/lib/format';
 import { Boton, Campo, Encabezado, Input, Select, Tarjeta, Textarea, useToast } from '@/components/ui';
 import { SelectorCliente, SelectorVehiculo, useMecanicos, type ClienteMin } from '@/components/selectores';
 import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
-import { EditorItems, itemsParaApi, paramsVacios, type ItemUI, type ParamsUI } from '@/components/EditorItems';
+import { EditorItems, itemsParaApi, paramsVacios, useDefectosEnParams, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 
 export function NuevaOrden() {
   const nav = useNavigate();
@@ -26,6 +26,7 @@ export function NuevaOrden() {
   const [params, setParams] = useState<ParamsUI>(paramsVacios());
   const [lista, setLista] = useState<string | null>(null);
   useListaPorDefecto(true, lista, setLista);
+  useDefectosEnParams(true, setParams);
   const turnoId = sp.get('turno');
 
   // Precarga desde un turno de la agenda o desde la ficha de un cliente/vehículo.

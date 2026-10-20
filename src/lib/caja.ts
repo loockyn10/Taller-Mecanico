@@ -27,6 +27,7 @@ export function useEstadoCaja() {
 export const CLAVES_DINERO = [
   'cuenta', 'cuentas', 'ventas', 'venta', 'orden', 'ordenes', 'cobros', 'cobro', 'cliente', 'dashboard',
   'caja', 'finanzas', 'gastos', 'compras', 'compra', 'proveedor', 'proveedores',
+  'bancos', 'cheques', 'tesoreria', 'deuda', 'facturas', 'ordenes-compra', 'reposicion', 'informes', 'contabilidad',
 ];
 
 export function invalidarDinero(qc: QueryClient) {

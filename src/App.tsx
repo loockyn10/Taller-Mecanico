@@ -28,7 +28,18 @@ import { Caja } from './pages/caja/Caja';
 import { Finanzas } from './pages/finanzas/Finanzas';
 import { ListaPreciosDetalle, ListasPrecios } from './pages/stock/ListasPrecios';
 import { Reposicion } from './pages/stock/Reposicion';
-import type { ReactElement } from 'react';
+// Las pantallas administrativas se cargan bajo demanda para no inflar el paquete inicial.
+const Bancos = lazy(() => import('./pages/bancos/Bancos').then((m) => ({ default: m.Bancos })));
+const Cheques = lazy(() => import('./pages/bancos/Cheques').then((m) => ({ default: m.Cheques })));
+const Tesoreria = lazy(() => import('./pages/bancos/Tesoreria').then((m) => ({ default: m.Tesoreria })));
+const OrdenesCompra = lazy(() => import('./pages/compras/OrdenesCompra').then((m) => ({ default: m.OrdenesCompra })));
+const OrdenCompraForm = lazy(() => import('./pages/compras/OrdenesCompra').then((m) => ({ default: m.OrdenCompraForm })));
+const OrdenCompraDetalle = lazy(() => import('./pages/compras/OrdenesCompra').then((m) => ({ default: m.OrdenCompraDetalle })));
+const FacturasProveedor = lazy(() => import('./pages/compras/FacturasProveedor').then((m) => ({ default: m.FacturasProveedor })));
+const Inventario = lazy(() => import('./pages/stock/Inventario').then((m) => ({ default: m.Inventario })));
+const Informes = lazy(() => import('./pages/Informes').then((m) => ({ default: m.Informes })));
+const Contabilidad = lazy(() => import('./pages/Contabilidad').then((m) => ({ default: m.Contabilidad })));
+import { lazy, Suspense, type ReactElement } from 'react';
 import type { Permiso } from '@shared/permisos';
 import { Vacio } from './components/ui';
 import { Lock } from 'lucide-react';
@@ -36,7 +47,7 @@ import { Lock } from 'lucide-react';
 /** Guarda de ruta: el menú ya oculta las opciones, pero quien escribe la dirección a mano ve un aviso claro (la API igual verifica en el servidor). */
 function Requiere({ permiso, children }: { permiso: Permiso; children: ReactElement }) {
   const { puede } = useAuth();
-  return puede(permiso) ? children : <Vacio icono={<Lock className="size-5" />} titulo="No tenés acceso a esta sección" texto="Pedile al propietario o a un administrador que te habilite el permiso." />;
+  return puede(permiso) ? <Suspense fallback={<Cargando />}>{children}</Suspense> : <Vacio icono={<Lock className="size-5" />} titulo="No tenés acceso a esta sección" texto="Pedile al propietario o a un administrador que te habilite el permiso." />;
 }
 
 export function App() {
@@ -86,6 +97,17 @@ export function App() {
         <Route path="listas-precios/:id" element={<Requiere permiso="precios.gestionar"><ListaPreciosDetalle /></Requiere>} />
         <Route path="reposicion" element={<Requiere permiso="stock.ver"><Reposicion /></Requiere>} />
         <Route path="reportes" element={<Requiere permiso="reportes.ver"><Reportes /></Requiere>} />
+        <Route path="informes" element={<Requiere permiso="reportes.ver"><Informes /></Requiere>} />
+        <Route path="contabilidad" element={<Requiere permiso="contabilidad.ver"><Contabilidad /></Requiere>} />
+        <Route path="tesoreria" element={<Requiere permiso="tesoreria.ver"><Tesoreria /></Requiere>} />
+        <Route path="bancos" element={<Requiere permiso="bancos.gestionar"><Bancos /></Requiere>} />
+        <Route path="cheques" element={<Requiere permiso="cheques.gestionar"><Cheques /></Requiere>} />
+        <Route path="inventario" element={<Requiere permiso="stock.ver"><Inventario /></Requiere>} />
+        <Route path="ordenes-compra" element={<Requiere permiso="compras.gestionar"><OrdenesCompra /></Requiere>} />
+        <Route path="ordenes-compra/nueva" element={<Requiere permiso="compras.gestionar"><OrdenCompraForm /></Requiere>} />
+        <Route path="ordenes-compra/:id" element={<Requiere permiso="compras.gestionar"><OrdenCompraDetalle /></Requiere>} />
+        <Route path="ordenes-compra/:id/editar" element={<Requiere permiso="compras.gestionar"><OrdenCompraForm /></Requiere>} />
+        <Route path="facturas-proveedor" element={<Requiere permiso="compras.gestionar"><FacturasProveedor /></Requiere>} />
         <Route path="configuracion" element={<Configuracion />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

@@ -6,7 +6,7 @@ import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cantidad, fechaHora, money } from '@/lib/format';
 import { Boton, Buscador, Campo, Cargando, Check, Dato, Encabezado, ErrorCaja, Input, InputMoneda, Insignia, Modal, Select, Tabla, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
-import { TIPOS_MOVIMIENTO_STOCK_LABEL } from '@shared/dominio';
+import { MOTIVO_AJUSTE_LABEL, MOTIVOS_AJUSTE, TIPOS_MOVIMIENTO_STOCK_LABEL } from '@shared/dominio';
 
 function useCategoriasArticulo() {
   return useQuery({ queryKey: ['categorias-articulo'], queryFn: () => api.get<any[]>('/categorias-articulo'), staleTime: 60_000 });
@@ -104,9 +104,10 @@ export function ModalMovimiento({ articulo, onCerrar }: { articulo: any; onCerra
   const [tipo, setTipo] = useState<'entrada' | 'salida' | 'ajuste'>('entrada');
   const [cant, setCant] = useState('');
   const [notas, setNotas] = useState('');
+  const [motivo, setMotivo] = useState('conteo');
   const [clave] = useState(nuevaClave());
   const m = useMutation({
-    mutationFn: () => api.post('/stock/movimientos', { articulo_id: articulo.id, tipo, cantidad: Number(cant), notas, idem_key: clave }),
+    mutationFn: () => api.post('/stock/movimientos', { articulo_id: articulo.id, tipo, cantidad: Number(cant), notas, motivo: tipo === 'entrada' ? null : motivo, idem_key: clave }),
     onSuccess: (r) => {
       ['articulos', 'articulo', 'movimientos', 'dashboard'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       toast.ok(`Stock actualizado: ${r.stock} ${articulo.unidad}`);
@@ -115,7 +116,7 @@ export function ModalMovimiento({ articulo, onCerrar }: { articulo: any; onCerra
     onError: toast.error,
   });
   return (
-    <Modal abierto onCerrar={onCerrar} titulo={`Movimiento de stock · ${articulo.nombre}`} ancho="sm" pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="primario" disabled={cant === ''} cargando={m.isPending} onClick={() => m.mutate()}>Registrar</Boton></>}>
+    <Modal abierto onCerrar={onCerrar} titulo={`Movimiento de stock · ${articulo.nombre}`} ancho="sm" pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="primario" disabled={cant === '' || (tipo !== 'entrada' && motivo === 'otro' && !notas.trim())} cargando={m.isPending} onClick={() => m.mutate()}>Registrar</Boton></>}>
       <div className="space-y-3">
         <p className="text-sm">Stock actual: <strong>{cantidad(articulo.stock)} {articulo.unidad}</strong></p>
         <Campo label="Tipo">
@@ -126,7 +127,12 @@ export function ModalMovimiento({ articulo, onCerrar }: { articulo: any; onCerra
           </Select>
         </Campo>
         <Campo label={tipo === 'ajuste' ? 'Stock contado (queda este valor)' : 'Cantidad'}><Input type="number" min={0} step="any" value={cant} onChange={(e) => setCant(e.target.value)} autoFocus /></Campo>
-        <Campo label="Motivo / notas"><Input value={notas} onChange={(e) => setNotas(e.target.value)} /></Campo>
+        {tipo !== 'entrada' && (
+          <Campo label="Motivo" requerido hint="Queda registrado para auditar mermas y diferencias">
+            <Select value={motivo} onChange={(e) => setMotivo(e.target.value)}>{MOTIVOS_AJUSTE.map((x) => <option key={x} value={x}>{MOTIVO_AJUSTE_LABEL[x]}</option>)}</Select>
+          </Campo>
+        )}
+        <Campo label="Notas" requerido={tipo !== 'entrada' && motivo === 'otro'}><Input value={notas} onChange={(e) => setNotas(e.target.value)} /></Campo>
       </div>
     </Modal>
   );
@@ -187,6 +193,7 @@ export function ArticuloDetalle() {
   const [editar, setEditar] = useState(false);
   const [mov, setMov] = useState(false);
   const { data: a, isLoading, error, refetch } = useQuery({ queryKey: ['articulo', id], queryFn: () => api.get(`/articulos/${id}`) });
+  const { data: costos } = useQuery({ queryKey: ['articulo', id, 'costos'], queryFn: () => api.get(`/inventario/costos/${id}`), enabled: puede('stock.valorizar') });
   const { data: precios = [] } = useQuery({ queryKey: ['articulo', id, 'precios-lista'], queryFn: () => api.get<any[]>(`/articulos/${id}/precios-lista`) });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
@@ -213,7 +220,7 @@ export function ArticuloDetalle() {
             columnas={[
               { clave: 'f', titulo: 'Fecha', render: (m: any) => fechaHora(m.created_at), movil: 'meta' },
               { clave: 't', titulo: 'Tipo', render: (m: any) => TIPOS_MOVIMIENTO_STOCK_LABEL[m.tipo] ?? m.tipo, movil: 'titulo' },
-              { clave: 'n', titulo: 'Detalle', render: (m: any) => m.notas ?? '—', movil: 'subtitulo' },
+              { clave: 'n', titulo: 'Detalle', render: (m: any) => [m.motivo ? MOTIVO_AJUSTE_LABEL[m.motivo as keyof typeof MOTIVO_AJUSTE_LABEL] ?? m.motivo : null, m.notas].filter(Boolean).join(' · ') || '—', movil: 'subtitulo' },
               { clave: 'u', titulo: 'Usuario', render: (m: any) => m.usuario ?? '—', movil: 'oculta' },
               { clave: 'c', titulo: 'Cantidad', alinear: 'derecha', render: (m: any) => <span className={m.cantidad < 0 ? 'text-red-600' : 'text-emerald-700'}>{m.cantidad > 0 ? '+' : ''}{cantidad(m.cantidad)}</span>, movil: 'derecha' },
               { clave: 's', titulo: 'Stock', alinear: 'derecha', render: (m: any) => cantidad(m.stock_resultante), movil: 'meta' },
@@ -233,6 +240,18 @@ export function ArticuloDetalle() {
             <Dato etiqueta="Ubicación">{a.ubicacion}</Dato>
           </dl>
         </Tarjeta>
+        {costos && costos.historial.length > 0 && (
+          <Tarjeta titulo="Historial de costos" subtitulo="Cada cambio del costo queda registrado, venga de una compra, una recepción o una edición" className="lg:col-span-3" sinPadding>
+            <ul className="divide-y divide-borde text-sm">
+              {costos.historial.map((h: any) => (
+                <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+                  <span>{fechaHora(h.created_at)} <span className="text-tenue">· {h.origen === 'inicial' || h.origen === 'alta' ? 'Costo inicial' : h.origen?.startsWith('compra:') ? 'Compra' : h.origen?.startsWith('recepcion:') ? 'Recepción de orden de compra' : 'Edición / ajuste'}</span></span>
+                  <span className="tabular-nums">{h.costo_anterior != null ? <span className="text-tenue">{money(h.costo_anterior)} → </span> : null}<strong>{money(h.costo_nuevo)}</strong></span>
+                </li>
+              ))}
+            </ul>
+          </Tarjeta>
+        )}
         {precios.length > 0 && (
           <Tarjeta titulo="Precio por lista" className="lg:col-span-3" sinPadding>
             <ul className="divide-y divide-borde text-sm">

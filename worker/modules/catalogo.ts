@@ -6,9 +6,10 @@ import { badRequest, body, conflict, notFound, query, zCentavos, zId, zTextoOpt 
 import { all, auditar, delTaller, first, like, run, uid, updateParcial } from '../lib/db';
 import { requirePerm } from '../lib/auth';
 import { permiteNegativo, sentenciasMovimiento } from '../lib/stock';
-import { TIPOS_VEHICULO, CONDICIONES_IVA, redondearCantidad, esCantidadValida } from '../../shared/dominio';
+import { TIPOS_VEHICULO, CONDICIONES_IVA, MOTIVOS_AJUSTE, redondearCantidad, esCantidadValida } from '../../shared/dominio';
 import { precioArticuloEnLista, precioServicioEnLista, type ReglaLista } from '../../shared/precios';
 import { resolverLista } from '../lib/listas';
+import { SALDO_PROVEEDOR_FILA_SQL } from '../lib/proveedores';
 
 export const catalogo = new Hono<AppEnv>();
 
@@ -167,9 +168,7 @@ catalogo.get('/proveedores', requirePerm('catalogo.ver'), async (c) => {
   return c.json(
     await all(
       c.env.DB,
-      `SELECT p.*,
-              (SELECT COALESCE(SUM(total),0) FROM compras co WHERE co.taller_id = p.taller_id AND co.proveedor_id = p.id AND co.estado = 'registrada')
-            - (SELECT COALESCE(SUM(importe),0) FROM pagos_proveedor pp WHERE pp.taller_id = p.taller_id AND pp.proveedor_id = p.id AND pp.estado = 'registrado') AS saldo
+      `SELECT p.*, ${SALDO_PROVEEDOR_FILA_SQL} AS saldo
          FROM proveedores p WHERE p.taller_id = ? ORDER BY p.activo DESC, p.nombre`,
       s.tallerId,
     ),
@@ -336,10 +335,14 @@ catalogo.post('/stock/movimientos', requirePerm('stock.ajustar'), async (c) => {
       articulo_id: zId,
       tipo: z.enum(['entrada', 'salida', 'ajuste']),
       cantidad: z.number().min(0).max(1e9).refine(esCantidadValida, 'admite hasta 3 decimales'), // entrada/salida: cantidad; ajuste: stock final contado
+      motivo: z.enum(MOTIVOS_AJUSTE).nullish(),
       notas: zTextoOpt(300),
       idem_key: z.string().min(8).max(80),
     }),
   );
+  // Toda salida o ajuste de inventario deja su motivo: es lo que permite auditar mermas, roturas y diferencias.
+  if (d.tipo !== 'entrada' && !d.motivo) throw badRequest('Indicá el motivo del ajuste');
+  if (d.motivo === 'otro' && !(d.notas ?? '').trim()) throw badRequest('Con el motivo "otro" explicá qué pasó en las notas');
   const a = await delTaller<{ stock: number; costo: number }>(c.env.DB, 'articulos', s.tallerId, d.articulo_id, 'stock, costo');
   if (!a) throw notFound('Artículo');
   const delta = redondearCantidad(d.tipo === 'entrada' ? d.cantidad : d.tipo === 'salida' ? -d.cantidad : d.cantidad - a.stock);
@@ -356,7 +359,7 @@ catalogo.post('/stock/movimientos', requirePerm('stock.ajustar'), async (c) => {
     ...sentenciasMovimiento(
       c.env.DB,
       s.tallerId,
-      { articuloId: d.articulo_id, delta, tipo: d.tipo, notas: d.notas, usuarioId: s.usuarioId, idemKey: `manual:${d.idem_key}`, origenTipo: 'manual' },
+      { articuloId: d.articulo_id, delta, tipo: d.tipo, notas: d.notas, motivo: d.motivo ?? null, usuarioId: s.usuarioId, idemKey: `manual:${d.idem_key}`, origenTipo: 'manual' },
       negativo,
     ),
   );

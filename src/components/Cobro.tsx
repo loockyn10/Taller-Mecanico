@@ -7,8 +7,9 @@ import { api, nuevaClave } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { invalidarDinero, useEstadoCaja } from '@/lib/caja';
 import { fecha, hoyISO, money, numero } from '@/lib/format';
-import { MEDIOS_PAGO, MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
-import { Aviso, Boton, Campo, Check, Input, InputMoneda, Modal, Select, useToast } from './ui';
+import { type MedioPago } from '@shared/dominio';
+import { Aviso, Boton, Campo, Check, Input, InputMoneda, Modal, useToast } from './ui';
+import { CamposMedio, errorMedio, extraAPayload, extraVacio, SelectorMedio, type ExtraMedio } from './MedioPago';
 
 /** Aviso (y bloqueo) cuando el taller exige caja abierta para registrar movimientos de dinero. */
 export function AvisoCaja() {
@@ -25,12 +26,14 @@ export function useCajaBloqueada() {
   return !!data?.obligatoria && !data.sesion;
 }
 
-function FormaPago({ x, onChange, onQuitar, soloUna }: { x: { medio: MedioPago; importe: number; referencia: string }; onChange: (v: { medio: MedioPago; importe: number; referencia: string }) => void; onQuitar: () => void; soloUna: boolean }) {
+interface FormaPagoUI { medio: MedioPago; importe: number; referencia: string; extra: ExtraMedio }
+const formaVacia = (medio: MedioPago, importe: number): FormaPagoUI => ({ medio, importe, referencia: '', extra: extraVacio() });
+
+function FormaPago({ x, onChange, onQuitar, soloUna }: { x: FormaPagoUI; onChange: (v: FormaPagoUI) => void; onQuitar: () => void; soloUna: boolean }) {
   return (
+    <div className="space-y-2">
     <div className="grid grid-cols-[1fr_140px_auto] gap-2 sm:grid-cols-[180px_1fr_160px_auto]">
-      <Select value={x.medio} onChange={(e) => onChange({ ...x, medio: e.target.value as MedioPago })} aria-label="Medio de pago">
-        {MEDIOS_PAGO.map((mp) => <option key={mp} value={mp}>{MEDIO_PAGO_LABEL[mp]}</option>)}
-      </Select>
+      <SelectorMedio value={x.medio} onChange={(medio) => onChange({ ...x, medio })} />
       <Input
         className="col-span-3 row-start-2 sm:col-span-1 sm:row-start-auto"
         placeholder={x.medio === 'cheque' ? 'N° de cheque (obligatorio)' : 'Referencia (N° de operación…)'}
@@ -40,6 +43,8 @@ function FormaPago({ x, onChange, onQuitar, soloUna }: { x: { medio: MedioPago; 
       />
       <InputMoneda value={x.importe} onChange={(v) => onChange({ ...x, importe: v })} />
       <Boton variante="fantasma" disabled={soloUna} onClick={onQuitar} icono={<Trash2 className="size-4" />} aria-label="Quitar forma de pago" />
+    </div>
+    <CamposMedio medio={x.medio} valor={x.extra} onChange={(extra) => onChange({ ...x, extra })} ctx="cobro" importe={x.importe} />
     </div>
   );
 }
@@ -52,7 +57,7 @@ export function ModalCobro({ abierto, onCerrar, clienteId, ventaId }: { abierto:
   const { data } = useQuery({ queryKey: ['cuenta', clienteId], queryFn: () => api.get(`/cuentas-corrientes/${clienteId}`), enabled: abierto });
   const pendientes: any[] = data?.pendientes ?? [];
   const [sel, setSel] = useState<Record<string, number>>({});
-  const [medios, setMedios] = useState<Array<{ medio: MedioPago; importe: number; referencia: string }>>([{ medio: 'efectivo', importe: 0, referencia: '' }]);
+  const [medios, setMedios] = useState<FormaPagoUI[]>([formaVacia('efectivo', 0)]);
   const [fechaCobro, setFecha] = useState(hoyISO());
   const [notas, setNotas] = useState('');
   const [monto, setMonto] = useState(0);
@@ -66,7 +71,7 @@ export function ModalCobro({ abierto, onCerrar, clienteId, ventaId }: { abierto:
     for (const p of pendientes) if (!ventaId || p.id === ventaId) inicial[p.id] = p.saldo;
     setSel(inicial);
     const total = Object.values(inicial).reduce((a, b) => a + b, 0);
-    setMedios([{ medio: 'efectivo', importe: total, referencia: '' }]);
+    setMedios([formaVacia('efectivo', total)]);
     setMonto(total);
     setClave(nuevaClave());
   }, [abierto, data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -74,8 +79,8 @@ export function ModalCobro({ abierto, onCerrar, clienteId, ventaId }: { abierto:
   const aplicado = useMemo(() => Object.values(sel).reduce((a, b) => a + b, 0), [sel]);
   const pagado = medios.reduce((a, m) => a + m.importe, 0);
   const saldoTotal = pendientes.reduce((a, p) => a + p.saldo, 0);
-  const chequeSinNumero = medios.some((m) => m.medio === 'cheque' && !m.referencia.trim());
-  const valido = aplicado > 0 && aplicado === pagado && medios.every((m) => m.importe > 0) && !chequeSinNumero && !bloqueada;
+  const errorForma = medios.map((m) => errorMedio(m.medio, m.referencia, m.extra, 'cobro')).find(Boolean) ?? null;
+  const valido = aplicado > 0 && aplicado === pagado && medios.every((m) => m.importe > 0) && !errorForma && !bloqueada;
 
   /** Reparte un monto entre los comprobantes empezando por el más antiguo (los pendientes llegan ordenados por fecha). */
   const distribuir = (importe: number) => {
@@ -99,7 +104,7 @@ export function ModalCobro({ abierto, onCerrar, clienteId, ventaId }: { abierto:
         fecha: fechaCobro,
         notas,
         idem_key: clave,
-        medios: medios.map((x) => ({ ...x, referencia: x.referencia.trim() || null })),
+        medios: medios.map((x) => ({ medio: x.medio, importe: x.importe, referencia: x.referencia.trim() || null, ...extraAPayload(x.medio, x.extra, 'cobro') })),
         aplicaciones: Object.entries(sel).filter(([, v]) => v > 0).map(([venta_id, importe]) => ({ venta_id, importe })),
       }),
     onSuccess: (r) => {
@@ -199,10 +204,10 @@ export function ModalCobro({ abierto, onCerrar, clienteId, ventaId }: { abierto:
               {medios.map((x, i) => (
                 <FormaPago key={i} x={x} soloUna={medios.length === 1} onChange={(v) => setMedios(medios.map((y, j) => (j === i ? v : y)))} onQuitar={() => setMedios(medios.filter((_, j) => j !== i))} />
               ))}
-              <Boton tam="sm" variante="fantasma" icono={<Plus className="size-4" />} onClick={() => setMedios([...medios, { medio: 'transferencia', importe: Math.max(0, aplicado - pagado), referencia: '' }])}>Agregar forma de pago</Boton>
+              <Boton tam="sm" variante="fantasma" icono={<Plus className="size-4" />} onClick={() => setMedios([...medios, formaVacia('transferencia', Math.max(0, aplicado - pagado))])}>Agregar forma de pago</Boton>
             </div>
             {aplicado !== pagado && <p className="mt-2 text-sm text-red-600">Las formas de pago suman {money(pagado)} y lo aplicado es {money(aplicado)}.</p>}
-            {chequeSinNumero && <p className="mt-2 text-sm text-red-600">Indicá el número de cheque.</p>}
+            {errorForma && <p className="mt-2 text-sm text-red-600">{errorForma}</p>}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -220,30 +225,30 @@ export function ModalCobro({ abierto, onCerrar, clienteId, ventaId }: { abierto:
 }
 
 /** Confirmación de "emitir y cobrar" un comprobante recién generado (OT lista para entregar). */
-export function ModalEmitirCobrar({ total, cargando, onCerrar, onConfirmar }: { total: number; cargando?: boolean; onCerrar: () => void; onConfirmar: (cobro: { medio: string; referencia: string | null }) => void }) {
+export function ModalEmitirCobrar({ total, cargando, onCerrar, onConfirmar }: { total: number; cargando?: boolean; onCerrar: () => void; onConfirmar: (cobro: Record<string, unknown>) => void }) {
   const [medio, setMedio] = useState<MedioPago>('efectivo');
   const [ref, setRef] = useState('');
+  const [extra, setExtra] = useState<ExtraMedio>(extraVacio());
   const bloqueada = useCajaBloqueada();
-  const falta = medio === 'cheque' && !ref.trim();
+  const falta = !!errorMedio(medio, ref, extra, 'cobro');
   return (
     <Modal
       abierto
       onCerrar={onCerrar}
       titulo="Emitir comprobante y cobrar"
       ancho="sm"
-      pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="exito" disabled={falta || bloqueada} cargando={cargando} onClick={() => onConfirmar({ medio, referencia: ref.trim() || null })}>Cobrar {money(total)}</Boton></>}
+      pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="exito" disabled={falta || bloqueada} cargando={cargando} onClick={() => onConfirmar({ medio, referencia: ref.trim() || null, ...extraAPayload(medio, extra, 'cobro') })}>Cobrar {money(total)}</Boton></>}
     >
       <div className="space-y-3">
         <AvisoCaja />
         <p className="text-sm text-tenue">Se emite el comprobante interno y se registra el cobro del total en un solo paso.</p>
         <Campo label="Medio de pago">
-          <Select value={medio} onChange={(e) => setMedio(e.target.value as MedioPago)}>
-            {MEDIOS_PAGO.map((x) => <option key={x} value={x}>{MEDIO_PAGO_LABEL[x]}</option>)}
-          </Select>
+          <SelectorMedio value={medio} onChange={setMedio} />
         </Campo>
         <Campo label={medio === 'cheque' ? 'N° de cheque' : 'Referencia (opcional)'} requerido={medio === 'cheque'}>
           <Input value={ref} onChange={(e) => setRef(e.target.value)} />
         </Campo>
+        <CamposMedio medio={medio} valor={extra} onChange={setExtra} ctx="cobro" importe={total} />
       </div>
     </Modal>
   );

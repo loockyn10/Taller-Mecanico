@@ -178,7 +178,7 @@ export function OrdenDetalle() {
   });
 
   const comprobante = useMutation({
-    mutationFn: (datos: { condicion: string; cobro?: { medio: string; referencia: string | null } }) => api.post(`/ordenes/${id}/comprobante`, datos),
+    mutationFn: (datos: { condicion: string; cobro?: Record<string, unknown> }) => api.post(`/ordenes/${id}/comprobante`, datos),
     onSuccess: (v) => {
       ['orden', 'ventas', 'dashboard', 'cuentas', 'cobros', 'caja', 'finanzas'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       toast.ok(`Comprobante interno #${numero(v.numero)} generado`);

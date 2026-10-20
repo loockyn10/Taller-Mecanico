@@ -261,7 +261,7 @@ describe('ventas de mostrador, compras y stock', () => {
 
   it('ajuste de inventario fija el stock contado y es idempotente', async () => {
     const key = idem();
-    const r1 = await api.post('/api/stock/movimientos', { articulo_id: ctx.articulo, tipo: 'ajuste', cantidad: 7, idem_key: key });
+    const r1 = await api.post('/api/stock/movimientos', { articulo_id: ctx.articulo, tipo: 'ajuste', motivo: 'conteo', cantidad: 7, idem_key: key });
     expect(r1.status).toBe(201);
     expect(r1.body.stock).toBe(7);
     const r2 = await api.post('/api/stock/movimientos', { articulo_id: ctx.articulo, tipo: 'entrada', cantidad: 1, idem_key: key });

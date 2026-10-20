@@ -6,7 +6,7 @@ import { hoyISO, sumarDias } from '@/lib/format';
 import { Boton, Campo, Cargando, Encabezado, Input, Tarjeta, Textarea, useToast } from '@/components/ui';
 import { SelectorCliente, SelectorVehiculo, type ClienteMin } from '@/components/selectores';
 import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
-import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, type ItemUI, type ParamsUI } from '@/components/EditorItems';
+import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, useDefectosEnParams, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 
 export function PresupuestoForm() {
   const { id } = useParams();
@@ -25,6 +25,7 @@ export function PresupuestoForm() {
   const [params, setParams] = useState<ParamsUI>(paramsVacios());
   const [lista, setLista] = useState<string | null>(null);
   useListaPorDefecto(!id, lista, setLista);
+  useDefectosEnParams(!id, setParams);
 
   useEffect(() => {
     if (cfg && !id && !valido) setValido(sumarDias(hoyISO(), cfg.config.validez_presupuesto_dias));
