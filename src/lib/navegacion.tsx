@@ -44,7 +44,7 @@ export const GRUPOS: GrupoNav[] = [
       item('agenda', 'Agenda', '/agenda', CalendarDays, 'turnos calendario citas', 'operacion'),
       item('clientes', 'Clientes', '/clientes', Users, 'cliente personas contactos', 'operacion'),
       item('vehiculos', 'Vehículos', '/vehiculos', Car, 'autos patentes historial', 'operacion'),
-      item('recordatorios', 'Recordatorios de service', '/recordatorios', Bell, 'service vencimientos avisos mantenimiento', 'operacion'),
+      item('recordatorios', 'Recordatorios', '/recordatorios', Bell, 'service vencimientos avisos mantenimiento', 'operacion'),
       item('mecanicos', 'Mecánicos', '/configuracion?tab=mecanicos', UserCog, 'personal operarios equipo'),
     ],
   },
@@ -63,7 +63,7 @@ export const GRUPOS: GrupoNav[] = [
     items: [
       item('ventas', 'Ventas y comprobantes', '/ventas', Receipt, 'facturacion comprobantes recibos mostrador', 'ventas.ver'),
       item('mostrador', 'Venta de mostrador', '/ventas/nueva', BadgeDollarSign, 'vender nueva venta rapida', 'ventas.emitir'),
-      item('cobros', 'Cobranzas', '/cobros', Wallet, 'cobros pagos recibos clientes', 'ventas.ver'),
+      item('cobros', 'Cobranzas', '/cobros', Wallet, 'cobros pagos recibos', 'ventas.ver'),
       item('cuentas', 'Cuentas corrientes', '/cuentas', ClipboardList, 'cliente deuda saldo deudores', 'ventas.ver'),
     ],
   },
@@ -99,7 +99,7 @@ export const GRUPOS: GrupoNav[] = [
     items: [
       item('config', 'Configuración', '/configuracion', Settings, 'taller datos parametros preferencias documentos medios de pago', undefined, 'taller'),
       item('usuarios', 'Usuarios y permisos', '/configuracion?tab=usuarios', KeyRound, 'accesos roles empleados', 'usuarios.gestionar'),
-      item('servicios', 'Servicios', '/configuracion?tab=servicios', Layers, 'mano de obra catalogo precios horas'),
+      item('servicios', 'Servicios', '/configuracion?tab=servicios', Layers, 'mano de obra catalogo tarifas horas'),
       item('catalogos', 'Marcas y categorías', '/configuracion?tab=catalogos', Tags, 'catalogos marcas modelos categorias', 'catalogo.editar'),
       item('licencia', 'Licencia', '/configuracion?tab=licencia', ShieldCheck, 'plan suscripcion usuarios', 'licencia.ver'),
       item('actividad', 'Actividad', '/configuracion?tab=auditoria', History, 'auditoria registro cambios', 'config.editar'),
