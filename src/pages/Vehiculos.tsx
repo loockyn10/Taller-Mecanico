@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Car, History, Pencil, Wrench } from 'lucide-react';
+import { Car, Pencil, Plus, Wrench } from 'lucide-react';
 import { api } from '@/lib/api';
-import { fecha, km, money, numero } from '@/lib/format';
-import { Boton, Buscador, Cargando, Dato, Encabezado, ErrorCaja, Insignia, Modal, Tabla, Tarjeta, useDebounce, Vacio } from '@/components/ui';
-import { EstadoOTBadge } from '@/components/estados';
+import { useAuth } from '@/lib/auth';
+import { fecha, km } from '@/lib/format';
+import { Boton, Buscador, Cargando, Dato, Encabezado, ErrorCaja, Modal, Tabla, Tarjeta, useDebounce, Vacio } from '@/components/ui';
+import { HistorialTecnico } from '@/components/HistorialTecnico';
+import { AccionesMantenimiento, EstadoMantenimiento, FormPlanMantenimiento, proximoTexto, type MantenimientoApi } from '@/components/Mantenimientos';
 import { FormVehiculo } from '@/components/selectores';
 
 export function Vehiculos() {
@@ -37,8 +39,39 @@ export function Vehiculos() {
   );
 }
 
+function MantenimientosVehiculo({ v }: { v: any }) {
+  const { puede, me } = useAuth();
+  const [form, setForm] = useState<{ inicial: MantenimientoApi | null } | null>(null);
+  const { data = [], isLoading } = useQuery({ queryKey: ['mantenimientos', 'vehiculo', v.id], queryFn: () => api.get<MantenimientoApi[]>(`/vehiculos/${v.id}/mantenimientos`) });
+  return (
+    <Tarjeta titulo="Mantenimientos" subtitulo="Próximos vencimientos por kilometraje y tiempo" acciones={puede('mantenimientos.gestionar') && <Boton tam="sm" icono={<Plus className="size-4" />} onClick={() => setForm({ inicial: null })}>Programar</Boton>}>
+      {isLoading ? <Cargando /> : data.length === 0 ? (
+        <p className="text-sm text-tenue">Sin mantenimientos programados. Se arman solos con los servicios que tienen intervalo, o podés programarlos a mano.</p>
+      ) : (
+        <ul className="space-y-3 text-sm">
+          {data.map((m) => (
+            <li key={m.servicio_id} className="space-y-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <button type="button" className="text-left" onClick={() => puede('mantenimientos.gestionar') && setForm({ inicial: m })}>
+                  <span className="block font-medium">{m.servicio}</span>
+                  <span className="block text-xs text-tenue">{m.fecha_realizado ? `Último: ${fecha(m.fecha_realizado)}${m.km_realizado != null ? ` · ${km(m.km_realizado)}` : ''}${m.origen_realizado === 'antecedente' ? ' (antecedente)' : ''}` : 'Sin realización registrada'}</span>
+                  <span className="block text-xs text-tenue">Próximo: {proximoTexto(m)}</span>
+                </button>
+                <EstadoMantenimiento m={m} />
+              </div>
+              {m.estado !== 'al_dia' && <AccionesMantenimiento m={{ ...m, cliente: v.cliente, cliente_telefono: v.cliente_telefono }} clienteId={v.cliente_id} tallerNombre={me?.taller.nombre} />}
+            </li>
+          ))}
+        </ul>
+      )}
+      {form && <FormPlanMantenimiento vehiculoId={v.id} inicial={form.inicial} onCerrar={() => setForm(null)} />}
+    </Tarjeta>
+  );
+}
+
 export function VehiculoDetalle() {
   const { id } = useParams();
+  const { puede } = useAuth();
   const nav = useNavigate();
   const [editar, setEditar] = useState(false);
   const { data: v, isLoading, error, refetch } = useQuery({ queryKey: ['vehiculo', id], queryFn: () => api.get(`/vehiculos/${id}`) });
@@ -58,30 +91,7 @@ export function VehiculoDetalle() {
         }
       />
       <div className="grid gap-5 lg:grid-cols-3">
-        <Tarjeta titulo="Historial de reparaciones" className="lg:col-span-2" acciones={<Insignia>{v.historial.length} ingresos</Insignia>}>
-          {v.historial.length === 0 ? (
-            <Vacio icono={<History className="size-5" />} titulo="Sin trabajos registrados" />
-          ) : (
-            <ol className="relative space-y-5 border-l border-borde pl-5">
-              {v.historial.map((o: any) => (
-                <li key={o.id}>
-                  <span className="absolute -left-1.5 mt-1.5 size-3 rounded-full border-2 border-white bg-marca-500" />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link to={`/ordenes/${o.id}`} className="font-semibold text-marca-700">OT #{numero(o.numero)}</Link>
-                    <EstadoOTBadge estado={o.estado} />
-                    <span className="text-sm text-tenue">{fecha(o.fecha_entregada ?? o.fecha_ingreso)} · {km(o.km_ingreso)}</span>
-                  </div>
-                  {o.falla_reportada && <p className="mt-1 text-sm"><span className="text-tenue">Motivo:</span> {o.falla_reportada}</p>}
-                  {o.diagnostico && <p className="text-sm"><span className="text-tenue">Diagnóstico:</span> {o.diagnostico}</p>}
-                  <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                    {o.items.map((i: any, idx: number) => <li key={idx}><Insignia tono={i.tipo === 'articulo' ? 'cian' : 'azul'}>{i.descripcion}{i.cantidad !== 1 ? ` ×${i.cantidad}` : ''}</Insignia></li>)}
-                  </ul>
-                  <div className="mt-1 text-xs text-tenue">{o.mecanico ? `Mecánico: ${o.mecanico} · ` : ''}{money(o.total)}</div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Tarjeta>
+        <HistorialTecnico vehiculoId={v.id} className="lg:col-span-2" />
         <div className="space-y-5">
           <Tarjeta titulo="Ficha">
             <dl className="grid grid-cols-2 gap-4">
@@ -94,23 +104,7 @@ export function VehiculoDetalle() {
               <Dato etiqueta="Notas" className="col-span-2">{v.notas}</Dato>
             </dl>
           </Tarjeta>
-          <Tarjeta titulo="Próximos services">
-            {v.proximos.length === 0 ? (
-              <p className="text-sm text-tenue">Sin services con intervalo registrados todavía.</p>
-            ) : (
-              <ul className="space-y-3 text-sm">
-                {v.proximos.map((p: any, i: number) => (
-                  <li key={i} className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-medium">{p.servicio}</div>
-                      <div className="text-xs text-tenue">{p.proximo_km ? `A los ${km(p.proximo_km)}` : ''}{p.proximo_km && p.proxima_fecha ? ' o ' : ''}{p.proxima_fecha ? `el ${fecha(p.proxima_fecha)}` : ''}</div>
-                    </div>
-                    <Insignia tono={p.estado === 'vencido' ? 'rojo' : p.estado === 'proximo' ? 'ambar' : 'verde'}>{p.estado === 'vencido' ? 'Vencido' : p.estado === 'proximo' ? 'Próximo' : 'Al día'}</Insignia>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Tarjeta>
+          {puede('mantenimientos.ver') && <MantenimientosVehiculo v={v} />}
         </div>
       </div>
       <Modal abierto={editar} onCerrar={() => setEditar(false)} titulo="Editar vehículo" ancho="lg">

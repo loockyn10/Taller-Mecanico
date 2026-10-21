@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
-import { badRequest, body, conflict, notFound, query, zCentavos, zId, zTextoOpt } from '../lib/http';
+import { badRequest, body, conflict, forbidden, notFound, query, zCentavos, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, delTaller, first, like, run, uid, updateParcial } from '../lib/db';
 import { requireAny, requirePerm, tiene } from '../lib/auth';
 import { exigirPermisoDePrecios, limpiarArticulo, limpiarMovimiento, limpiarServicio } from '../lib/privacidad';
@@ -11,6 +11,7 @@ import { TIPOS_VEHICULO, CONDICIONES_IVA, MOTIVOS_AJUSTE, redondearCantidad, esC
 import { precioArticuloEnLista, precioServicioEnLista, type ReglaLista } from '../../shared/precios';
 import { resolverLista } from '../lib/listas';
 import { SALDO_PROVEEDOR_FILA_SQL } from '../lib/proveedores';
+import { precioPorTiempo, resolverTiempo, type ReglaTiempo } from '../../shared/tempario';
 
 export const catalogo = new Hono<AppEnv>();
 
@@ -44,7 +45,12 @@ catalogo.delete('/categorias-servicio/:id', requirePerm('catalogo.editar'), asyn
 // ───────────── Servicios ─────────────
 const zServicio = z.object({
   categoria_id: zId.nullish(),
+  codigo: z.string().trim().max(30).nullish().transform((v) => v || null),
   nombre: z.string().trim().min(2).max(160),
+  tiempo_min: z.number().int().min(1).max(6000).nullish(),
+  modo_precio: z.enum(['fijo', 'por_tiempo']).default('fijo'),
+  /** 'propio' confirma que el tiempo orientativo de la plantilla fue revisado por el taller. */
+  origen: z.literal('propio').optional(),
   descripcion: zTextoOpt(500),
   precio: zCentavos,
   tipo_vehiculo: z.enum(TIPOS_VEHICULO).default('todos'),
@@ -56,19 +62,55 @@ const zServicio = z.object({
 
 catalogo.get('/servicios', requirePerm('catalogo.ver'), async (c) => {
   const s = c.get('sesion');
-  const { q, todos, lista_id } = query(c, z.object({ q: z.string().optional(), todos: z.string().optional(), lista_id: z.string().optional() }));
+  const { q, todos, lista_id, vehiculo_id } = query(c, z.object({ q: z.string().optional(), todos: z.string().optional(), lista_id: z.string().optional(), vehiculo_id: z.string().optional() }));
   const lst = lista_id ? await resolverLista(c.env.DB, s.tallerId, lista_id) : null;
   const reglaLista = lst ? await first<{ servicios_pct: number | null; redondeo: number }>(c.env.DB, 'SELECT servicios_pct, redondeo FROM listas_precios WHERE taller_id = ? AND id = ?', s.tallerId, lst.id) : null;
+  const tarifas = await tarifasDelTaller(c.env.DB, s.tallerId);
+  const veh = vehiculo_id ? await first<{ marca_id: string | null; modelo_id: string | null; motor: string | null; anio: number | null }>(c.env.DB, 'SELECT marca_id, modelo_id, motor, anio FROM vehiculos WHERE taller_id = ? AND id = ?', s.tallerId, vehiculo_id) : null;
+  if (vehiculo_id && !veh) throw badRequest('Vehículo inexistente');
+  const reglas = veh ? await all<ReglaTiempo & { servicio_id: string }>(c.env.DB, 'SELECT id, servicio_id, marca_id, modelo_id, motor, anio_desde, anio_hasta, tiempo_min FROM servicio_tiempos WHERE taller_id = ? ORDER BY created_at', s.tallerId) : [];
   const rows = await all<Record<string, unknown>>(
     c.env.DB,
-    `SELECT se.*, cs.nombre AS categoria FROM servicios se LEFT JOIN categorias_servicio cs ON cs.taller_id = se.taller_id AND cs.id = se.categoria_id
+    `SELECT se.*, cs.nombre AS categoria, cs.tarifa_hora AS categoria_tarifa FROM servicios se LEFT JOIN categorias_servicio cs ON cs.taller_id = se.taller_id AND cs.id = se.categoria_id
       WHERE se.taller_id = ? ${todos ? '' : 'AND se.activo = 1'} ${q ? 'AND se.nombre LIKE ?' : ''}
       ORDER BY cs.orden, cs.nombre, se.nombre`,
     s.tallerId,
     ...(q ? [like(q)] : []),
   );
-  return c.json(rows.map((r) => limpiarServicio(s, { ...r, checks: JSON.parse(String(r.checks ?? '[]')), ...(reglaLista ? { precio_lista: precioServicioEnLista(reglaLista, r.precio as number) } : {}) })));
+  return c.json(
+    rows.map((r) => {
+      const t = resolverTiempo((r.tiempo_min as number | null) ?? null, reglas.filter((x) => x.servicio_id === r.id), veh);
+      const { precio, tarifa } = precioDeServicio(r, t.tiempo_min, tarifas);
+      const { categoria_tarifa: _ct, ...resto } = r;
+      return limpiarServicio(s, {
+        ...resto,
+        precio,
+        precio_cargado: r.precio,
+        tarifa_hora: tarifa,
+        tiempo_efectivo_min: t.tiempo_min,
+        tiempo_origen: t.origen,
+        checks: JSON.parse(String(r.checks ?? '[]')),
+        ...(reglaLista ? { precio_lista: precioServicioEnLista(reglaLista, precio) } : {}),
+      });
+    }),
+  );
 });
+
+/** Tarifas de mano de obra del taller (centavos por hora): la general y la de cada categoría que tenga una propia. */
+export async function tarifasDelTaller(db: D1Database, tallerId: string) {
+  const cfg = await first<{ tarifa_hora: number }>(db, 'SELECT tarifa_hora FROM taller_config WHERE taller_id = ?', tallerId);
+  return { general: cfg?.tarifa_hora ?? 0 };
+}
+
+/** Precio de un servicio: el cargado, o (modo "por tiempo") tiempo × tarifa de su categoría o la general; sin tarifa o sin tiempo, el cargado. */
+function precioDeServicio(r: Record<string, unknown>, tiempoMin: number | null, tarifas: { general: number }) {
+  const tarifa = (r.categoria_tarifa as number | null) ?? tarifas.general;
+  if (r.modo_precio === 'por_tiempo' && tiempoMin) {
+    const calculado = precioPorTiempo(tiempoMin, tarifa);
+    if (calculado > 0) return { precio: calculado, tarifa };
+  }
+  return { precio: r.precio as number, tarifa };
+}
 
 async function validarCategoriaServicio(db: D1Database, tallerId: string, id?: string | null) {
   if (id && !(await delTaller(db, 'categorias_servicio', tallerId, id, 'id'))) throw badRequest('Categoría inexistente');
@@ -82,8 +124,8 @@ catalogo.post('/servicios', requirePerm('catalogo.editar'), async (c) => {
   const id = uid();
   await run(
     c.env.DB,
-    'INSERT INTO servicios (id, taller_id, categoria_id, nombre, descripcion, precio, tipo_vehiculo, intervalo_km, intervalo_meses, checks) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    id, s.tallerId, d.categoria_id ?? null, d.nombre, d.descripcion, d.precio, d.tipo_vehiculo, d.intervalo_km ?? null, d.intervalo_meses ?? null, JSON.stringify(d.checks),
+    'INSERT INTO servicios (id, taller_id, categoria_id, codigo, nombre, descripcion, precio, tiempo_min, modo_precio, tipo_vehiculo, intervalo_km, intervalo_meses, checks) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    id, s.tallerId, d.categoria_id ?? null, d.codigo, d.nombre, d.descripcion, d.precio, d.tiempo_min ?? null, d.modo_precio, d.tipo_vehiculo, d.intervalo_km ?? null, d.intervalo_meses ?? null, JSON.stringify(d.checks),
   );
   return c.json({ id }, 201);
 });
@@ -91,14 +133,18 @@ catalogo.post('/servicios', requirePerm('catalogo.editar'), async (c) => {
 catalogo.put('/servicios/:id', requirePerm('catalogo.editar'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const d = await body(c, zServicio.partial());
+  const d = await body(c, zServicio.partial().extend({ modo_precio: z.enum(['fijo', 'por_tiempo']).optional() }));
   exigirPermisoDePrecios(s, { precio: d.precio });
+  // Cambiar el modo de cálculo del precio equivale a fijar un precio: exige poder verlos.
+  if (d.modo_precio !== undefined && !tiene(s, 'precios.venta.ver')) throw forbidden('No tenés permiso para ver ni modificar precios de venta');
   if (!(await delTaller(c.env.DB, 'servicios', s.tallerId, id, 'id'))) throw notFound('Servicio');
   await validarCategoriaServicio(c.env.DB, s.tallerId, d.categoria_id);
   const datos: Record<string, unknown> = { ...d };
   if (d.checks) datos.checks = JSON.stringify(d.checks);
   if (d.activo !== undefined) datos.activo = d.activo ? 1 : 0;
-  const st = updateParcial(c.env.DB, 'servicios', s.tallerId, id, datos, ['categoria_id', 'nombre', 'descripcion', 'precio', 'tipo_vehiculo', 'intervalo_km', 'intervalo_meses', 'checks', 'activo'], false);
+  // Un tiempo modificado o confirmado por el taller deja de ser "orientativo".
+  if (d.tiempo_min !== undefined || d.origen === 'propio') datos.origen = 'propio';
+  const st = updateParcial(c.env.DB, 'servicios', s.tallerId, id, datos, ['categoria_id', 'codigo', 'nombre', 'descripcion', 'precio', 'tiempo_min', 'modo_precio', 'origen', 'tipo_vehiculo', 'intervalo_km', 'intervalo_meses', 'checks', 'activo'], false);
   if (st) await st.run();
   return c.json({ ok: true });
 });
@@ -113,7 +159,7 @@ catalogo.post('/servicios/ajuste-masivo', requirePerm('catalogo.editar', 'precio
   const factor = 1 + d.porcentaje / 100;
   const res = await run(
     c.env.DB,
-    `UPDATE servicios SET precio = CAST(ROUND(precio * ? / ?) AS INTEGER) * ? WHERE taller_id = ? ${d.categoria_id ? 'AND categoria_id = ?' : ''}`,
+    `UPDATE servicios SET precio = CAST(ROUND(precio * ? / ?) AS INTEGER) * ? WHERE taller_id = ? AND modo_precio = 'fijo' ${d.categoria_id ? 'AND categoria_id = ?' : ''}`,
     factor, r, r, s.tallerId, ...(d.categoria_id ? [d.categoria_id] : []),
   );
   await auditar(c.env.DB, s.tallerId, s.usuarioId, 'servicio', null, 'ajuste_masivo', d).run();

@@ -1,11 +1,12 @@
 // Editor de ítems y totales compartido por presupuestos, órdenes de trabajo y ventas.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Package, Plus, Trash2, Wrench } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Clock, Package, Plus, Trash2, Wrench } from 'lucide-react';
+import { api, qs } from '@/lib/api';
 import { money } from '@/lib/format';
 import { useDefectosDocumento } from '@/lib/config';
 import { calcularTotales } from '@shared/totals';
+import { formatearMinutos } from '@shared/tempario';
 import { Boton, Buscador, Campo, cn, Input, InputMoneda, Insignia, Select, useDebounce } from './ui';
 
 export interface ItemUI {
@@ -18,6 +19,8 @@ export interface ItemUI {
   precio_unitario: number;
   desc_pct: number;
   stock?: number | null;
+  /** Tiempo estimado de mano de obra (minutos por unidad), sugerido por el tempario y ajustable. */
+  tiempo_min?: number | null;
 }
 
 export interface ParamsUI {
@@ -57,11 +60,12 @@ export function itemsDesdeApi(items: any[]): ItemUI[] {
     precio_unitario: i.precio_unitario,
     desc_pct: i.desc_pct ?? 0,
     stock: i.articulo_stock ?? null,
+    tiempo_min: i.tiempo_min ?? null,
   }));
 }
 
 export function itemsParaApi(items: ItemUI[]) {
-  return items.map(({ tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct }) => ({
+  return items.map(({ tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, tiempo_min }) => ({
     tipo,
     articulo_id: tipo === 'articulo' ? articulo_id : null,
     servicio_id: tipo === 'servicio' ? servicio_id : null,
@@ -69,11 +73,17 @@ export function itemsParaApi(items: ItemUI[]) {
     cantidad,
     precio_unitario,
     desc_pct,
+    tiempo_min: tipo === 'servicio' ? tiempo_min ?? null : null,
   }));
 }
 
-function AgregarServicio({ onAgregar, listaId }: { onAgregar: (i: ItemUI) => void; listaId?: string | null }) {
-  const { data: servicios = [] } = useQuery({ queryKey: ['servicios', { listaId: listaId ?? null }], queryFn: () => api.get<any[]>(`/servicios${listaId ? `?lista_id=${listaId}` : ''}`), staleTime: 60_000 });
+function AgregarServicio({ onAgregar, listaId, vehiculoId }: { onAgregar: (i: ItemUI) => void; listaId?: string | null; vehiculoId?: string | null }) {
+  // Con un vehículo elegido, el tempario devuelve el tiempo (y el precio por tiempo) que corresponde a ese vehículo.
+  const { data: servicios = [] } = useQuery({
+    queryKey: ['servicios', { listaId: listaId ?? null, vehiculoId: vehiculoId ?? null }],
+    queryFn: () => api.get<any[]>(`/servicios${qs({ lista_id: listaId, vehiculo_id: vehiculoId })}`),
+    staleTime: 60_000,
+  });
   const [cat, setCat] = useState<string>('');
   const [q, setQ] = useState('');
   const categorias = useMemo(() => [...new Map(servicios.map((s) => [s.categoria_id ?? '', s.categoria ?? 'Sin categoría'])).entries()], [servicios]);
@@ -95,11 +105,14 @@ function AgregarServicio({ onAgregar, listaId }: { onAgregar: (i: ItemUI) => voi
             <button
               type="button"
               className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-marca-50"
-              onClick={() => onAgregar({ key: k(), tipo: 'servicio', servicio_id: s.id, descripcion: s.nombre, cantidad: 1, precio_unitario: s.precio_lista ?? s.precio, desc_pct: 0 })}
+              onClick={() => onAgregar({ key: k(), tipo: 'servicio', servicio_id: s.id, descripcion: s.nombre, cantidad: 1, precio_unitario: s.precio_lista ?? s.precio, desc_pct: 0, tiempo_min: s.tiempo_efectivo_min ?? null })}
             >
               <span className="min-w-0">
                 <span className="block truncate">{s.nombre}</span>
-                <span className="text-xs text-tenue">{s.categoria ?? 'Sin categoría'}</span>
+                <span className="flex flex-wrap items-center gap-x-2 text-xs text-tenue">
+                  {s.categoria ?? 'Sin categoría'}
+                  {s.tiempo_efectivo_min ? <span className="inline-flex items-center gap-1"><Clock className="size-3" />{formatearMinutos(s.tiempo_efectivo_min)}{s.tiempo_origen === 'especifico' ? ' · para este vehículo' : s.origen === 'plantilla' ? ' · orientativo' : ''}</span> : null}
+                </span>
               </span>
               <span className="shrink-0 font-medium tabular-nums">{money(s.precio_lista ?? s.precio)}</span>
             </button>
@@ -172,8 +185,8 @@ function AgregarLibre({ onAgregar }: { onAgregar: (i: ItemUI) => void }) {
 }
 
 export function EditorItems({
-  items, onItems, params, onParams, soloLectura, conArticulos = true, listaId,
-}: { items: ItemUI[]; onItems: (i: ItemUI[]) => void; params: ParamsUI; onParams: (p: ParamsUI) => void; soloLectura?: boolean; conArticulos?: boolean; listaId?: string | null }) {
+  items, onItems, params, onParams, soloLectura, conArticulos = true, listaId, vehiculoId,
+}: { items: ItemUI[]; onItems: (i: ItemUI[]) => void; params: ParamsUI; onParams: (p: ParamsUI) => void; soloLectura?: boolean; conArticulos?: boolean; listaId?: string | null; vehiculoId?: string | null }) {
   const [modo, setModo] = useState<'servicio' | 'articulo' | 'libre' | null>(null);
   const t = calcularTotales(items, params);
   const upd = (key: string, cambios: Partial<ItemUI>) => onItems(items.map((i) => (i.key === key ? { ...i, ...cambios } : i)));
@@ -195,7 +208,7 @@ export function EditorItems({
           </div>
           {modo && (
             <div className="mt-3 rounded-xl border border-borde bg-slate-50/60 p-3">
-              {modo === 'servicio' && <AgregarServicio onAgregar={agregar} listaId={listaId} />}
+              {modo === 'servicio' && <AgregarServicio onAgregar={agregar} listaId={listaId} vehiculoId={vehiculoId} />}
               {modo === 'articulo' && <AgregarArticulo onAgregar={agregar} listaId={listaId} />}
               {modo === 'libre' && <AgregarLibre onAgregar={agregar} />}
             </div>
@@ -251,6 +264,15 @@ export function EditorItems({
                 {!soloLectura && (
                   <Boton variante="fantasma" tam="sm" onClick={() => onItems(items.filter((x) => x.key !== i.key))} icono={<Trash2 className="size-4 text-red-600" />} aria-label="Quitar" />
                 )}
+                {i.tipo === 'servicio' && (soloLectura ? (
+                  i.tiempo_min ? <p className="col-span-2 flex items-center gap-1 text-xs text-tenue md:col-span-6"><Clock className="size-3" /> Tiempo estimado: {formatearMinutos(Math.round(i.tiempo_min * i.cantidad))}</p> : null
+                ) : (
+                  <label className="col-span-2 flex flex-wrap items-center gap-2 text-xs text-tenue md:col-span-6">
+                    <Clock className="size-3.5" /> Tiempo estimado por unidad (min)
+                    <Input type="number" min={0} max={6000} value={i.tiempo_min ?? ''} onChange={(e) => upd(i.key, { tiempo_min: e.target.value === '' ? null : Math.min(6000, Math.max(0, Math.round(Number(e.target.value)))) })} className="h-8 w-24 text-right" aria-label="Tiempo estimado en minutos" />
+                    {i.tiempo_min ? <span>{formatearMinutos(Math.round(i.tiempo_min * i.cantidad))} en total</span> : null}
+                  </label>
+                ))}
                 {i.tipo === 'articulo' && i.stock != null && i.cantidad > i.stock && (
                   <p className="col-span-2 text-xs text-amber-700 md:col-span-6">Atención: stock disponible {i.stock}</p>
                 )}

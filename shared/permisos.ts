@@ -18,8 +18,12 @@ export const PERMISOS = [
   'ordenes.trabajar_asignadas', // actualizar tareas, estado y observaciones técnicas de sus órdenes asignadas
   'ordenes.crear',
   'ordenes.modificar', // editar ítems, cambiar estados y completar el check-list de cualquier orden
+  'ordenes.asignar', // asignar el mecánico responsable, los participantes y las tareas de las órdenes (sin tocar importes)
   'turnos.ver',
   'turnos.gestionar',
+  // ── Mantenimientos programados
+  'mantenimientos.ver',
+  'mantenimientos.gestionar', // planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro
   // ── Precios (visibilidad)
   'precios.venta.ver', // precios de venta de servicios y artículos
   'precios.costo.ver', // costos de artículos
@@ -53,6 +57,7 @@ export const PERMISOS = [
   'contabilidad.ver', // registros internos, libros de ventas y compras
   // ── Informes
   'reportes.ver', // estadísticas e informes
+  'productividad.ver', // indicadores operativos de mecánicos y taller (horas, tareas, carga de trabajo)
   'informes.exportar', // exportar informes y listados
   // ── Personal y asistencia
   'usuarios.gestionar', // administrar empleados
@@ -81,6 +86,9 @@ export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
   'presupuestos.gestionar': ['presupuestos.ver'],
   'ordenes.crear': ['ordenes.ver'],
   'ordenes.modificar': ['ordenes.ver'],
+  'ordenes.asignar': ['ordenes.ver'],
+  'mantenimientos.ver': ['vehiculos.ver'],
+  'mantenimientos.gestionar': ['mantenimientos.ver'],
   'ordenes.ver': ['ordenes.asignadas'],
   'ordenes.trabajar_asignadas': ['ordenes.asignadas'],
   'turnos.gestionar': ['turnos.ver'],
@@ -113,10 +121,10 @@ const SIN_BANCOS_AJUSTE = (p: Permiso) => p !== 'bancos.ajustar' && p !== 'permi
 
 const RECEPCION: Permiso[] = [
   'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
-  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'turnos.ver', 'turnos.gestionar',
-  'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'asistencia.fichar',
+  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar',
+  'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar',
 ];
-const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'asistencia.fichar'];
+const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'mantenimientos.ver', 'asistencia.fichar'];
 const DEPOSITO: Permiso[] = [
   'catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'compras.ver', 'compras.gestionar', 'precios.venta.ver', 'precios.costo.ver',
   'ordenes.ver', 'vehiculos.ver', 'asistencia.fichar',
@@ -128,9 +136,9 @@ const CAJA: Permiso[] = [
 /** Plantilla anterior a este sprint: se conserva para los usuarios ya creados (mismos accesos que tenían). */
 const EMPLEADO: Permiso[] = [
   'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
-  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'turnos.ver', 'turnos.gestionar',
+  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar',
-  'asistencia.fichar',
+  'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar',
 ];
 
 export interface Plantilla {
@@ -243,9 +251,12 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'ordenes.asignadas': { etiqueta: 'Ver órdenes asignadas', ayuda: 'Solo las órdenes donde la persona figura como mecánico' },
   'ordenes.trabajar_asignadas': { etiqueta: 'Actualizar órdenes asignadas', ayuda: 'Tareas, estado y observaciones técnicas de sus órdenes' },
   'ordenes.crear': { etiqueta: 'Crear órdenes de trabajo' },
+  'ordenes.asignar': { etiqueta: 'Asignar mecánicos y tareas', ayuda: 'Responsable, participantes y reparto de tareas de cada orden. No permite modificar importes' },
   'ordenes.modificar': { etiqueta: 'Modificar órdenes de trabajo', ayuda: 'Editar ítems, estados y check-list. La edición de ítems requiere ver precios y presupuestos valorizados' },
   'turnos.ver': { etiqueta: 'Ver agenda de turnos' },
   'turnos.gestionar': { etiqueta: 'Gestionar turnos' },
+  'mantenimientos.ver': { etiqueta: 'Ver mantenimientos programados', ayuda: 'Vencimientos por kilometraje y tiempo de cada vehículo' },
+  'mantenimientos.gestionar': { etiqueta: 'Gestionar mantenimientos', ayuda: 'Planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro' },
   'precios.venta.ver': { etiqueta: 'Ver precios de venta' },
   'precios.costo.ver': { etiqueta: 'Ver precios de costo' },
   'margenes.ver': { etiqueta: 'Ver márgenes de ganancia', ayuda: 'Implica ver precios de venta y de costo' },
@@ -274,6 +285,7 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'contabilidad.ver': { etiqueta: 'Ver registros contables internos' },
   'reportes.ver': { etiqueta: 'Ver estadísticas e informes' },
   'informes.exportar': { etiqueta: 'Exportar informes' },
+  'productividad.ver': { etiqueta: 'Ver productividad', ayuda: 'Horas, tareas y carga de trabajo del taller y de cada mecánico. Los importes requieren además ver presupuestos valorizados' },
   'usuarios.gestionar': { etiqueta: 'Administrar empleados', ayuda: 'Crear, editar y desactivar usuarios (no cambia permisos)' },
   'permisos.gestionar': { etiqueta: 'Gestionar permisos', ayuda: 'Asignar roles y personalizar permisos. Solo puede otorgar los permisos que ya tiene' },
   'asistencia.fichar': { etiqueta: 'Registrar su propia asistencia' },
@@ -288,13 +300,13 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
 
 export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Clientes y vehículos', permisos: ['clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar'] },
-  { titulo: 'Presupuestos, órdenes y agenda', permisos: ['presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.crear', 'ordenes.modificar', 'turnos.ver', 'turnos.gestionar'] },
+  { titulo: 'Presupuestos, órdenes, agenda y mantenimientos', permisos: ['presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar', 'mantenimientos.ver', 'mantenimientos.gestionar'] },
   { titulo: 'Precios y márgenes', permisos: ['precios.venta.ver', 'precios.costo.ver', 'margenes.ver', 'presupuestos.valorizados.ver', 'precios.gestionar'] },
   { titulo: 'Catálogo e inventario', permisos: ['catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'stock.valorizar'] },
   { titulo: 'Ventas y cobranzas', permisos: ['ventas.ver', 'ventas.emitir', 'ventas.anular', 'cobros.registrar', 'cobros.anular'] },
   { titulo: 'Compras', permisos: ['compras.ver', 'compras.gestionar'] },
   { titulo: 'Caja, bancos y finanzas', permisos: ['caja.operar', 'finanzas.ver', 'gastos.gestionar', 'bancos.ver', 'bancos.gestionar', 'bancos.ajustar', 'cheques.gestionar', 'tesoreria.ver', 'contabilidad.ver'] },
-  { titulo: 'Informes', permisos: ['reportes.ver', 'informes.exportar'] },
+  { titulo: 'Informes', permisos: ['reportes.ver', 'informes.exportar', 'productividad.ver'] },
   { titulo: 'Personal y asistencia', permisos: ['usuarios.gestionar', 'permisos.gestionar', 'asistencia.fichar', 'asistencia.ver', 'asistencia.corregir', 'reloj.administrar'] },
   { titulo: 'Administración', permisos: ['config.editar', 'licencia.ver', 'registros.eliminar', 'fechas.retroactivas'] },
 ];

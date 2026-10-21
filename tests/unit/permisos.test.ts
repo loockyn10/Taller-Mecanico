@@ -25,6 +25,18 @@ describe('plantillas de permisos', () => {
     expect(m).toContain('ordenes.asignadas');
     expect(m).not.toContain('ordenes.ver');
   });
+  it('Sprint 07: el mecánico consulta mantenimientos pero no asigna; recepción asigna y gestiona; productividad queda para administración', () => {
+    const m = permisosEfectivos('mecanico');
+    expect(m).toContain('mantenimientos.ver');
+    for (const p of ['ordenes.asignar', 'mantenimientos.gestionar', 'productividad.ver', 'catalogo.editar'] as Permiso[]) expect(m).not.toContain(p);
+    const r = permisosEfectivos('recepcion');
+    for (const p of ['ordenes.asignar', 'mantenimientos.ver', 'mantenimientos.gestionar'] as Permiso[]) expect(r).toContain(p);
+    expect(r).not.toContain('productividad.ver');
+    expect(permisosEfectivos('administrador')).toContain('productividad.ver');
+    // asignar exige ver las órdenes; gestionar mantenimientos exige verlos
+    expect(permisosEfectivos('mecanico', { g: ['ordenes.asignar'], r: [] })).toContain('ordenes.ver');
+    expect(permisosEfectivos('deposito', { g: ['mantenimientos.gestionar'], r: [] })).toContain('mantenimientos.ver');
+  });
   it('los roles se mapean a un nivel de privilegio compatible con la base', () => {
     expect(nivelDeRol('propietario')).toBe('propietario');
     expect(nivelDeRol('administrador')).toBe('administrador');

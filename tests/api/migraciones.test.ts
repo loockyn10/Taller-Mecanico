@@ -65,4 +65,58 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(() => db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('dup', 't1', 'ingreso', 'cobro', 'efectivo', 1, 'dup', 'cobro', 'cm1', '2026-05-01')")).toThrow(/UNIQUE/);
     db.close();
   });
+
+  it('0007 conserva servicios, órdenes y tareas del Sprint 06 y deja la base lista para el tempario y las tareas con estado', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    const migraciones = fs.readdirSync(path.join(RAIZ, 'migrations')).sort();
+    for (const m of migraciones.filter((f) => f < '0007')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all() as Array<Record<string, any>>;
+    // Datos existentes antes del Sprint 07 (como los del Worker online): un taller con servicio, OT y tareas hechas y pendientes.
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Viejo'), ('t2', 'Otro');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x');
+      INSERT INTO taller_config (taller_id) VALUES ('t1');
+      INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES ('c1', 't1', 1, 'Cliente');
+      INSERT INTO vehiculos (id, taller_id, cliente_id, patente, km_actual) VALUES ('v1', 't1', 'c1', 'AAA111', 1000);
+      INSERT INTO categorias_servicio (id, taller_id, nombre) VALUES ('cs1', 't1', 'Frenos');
+      INSERT INTO servicios (id, taller_id, categoria_id, nombre, precio, intervalo_km) VALUES ('s1', 't1', 'cs1', 'Cambio de pastillas', 4500000, 20000);
+      INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, fecha_ingreso) VALUES ('o1', 't1', 1, 'c1', 'v1', '2026-10-01T10:00:00Z');
+      INSERT INTO orden_items (id, taller_id, orden_id, tipo, servicio_id, descripcion, cantidad, precio_unitario, subtotal) VALUES ('i1', 't1', 'o1', 'servicio', 's1', 'Cambio de pastillas', 1, 4500000, 4500000);
+      INSERT INTO orden_tareas (id, taller_id, orden_id, posicion, descripcion, hecha, hecha_at, hecha_por, creada_por) VALUES ('ta1', 't1', 'o1', 0, 'Cambiar pastillas', 1, '2026-10-02T10:00:00Z', 'u1', 'u1');
+      INSERT INTO orden_tareas (id, taller_id, orden_id, posicion, descripcion) VALUES ('ta2', 't1', 'o1', 1, 'Probar frenos');
+      INSERT INTO orden_tiempos (id, taller_id, orden_id, usuario_id, inicio_at, fin_at, duracion_seg) VALUES ('ti1', 't1', 'o1', 'u1', '2026-10-02T09:00:00Z', '2026-10-02T10:00:00Z', 3600);
+    `);
+    db.exec(leer('migrations', migraciones.find((f) => f.startsWith('0007'))!));
+    // Nada se perdió: el servicio conserva su precio y pasa a "precio fijo" sin tiempo; las tareas conservan su estado
+    expect(uno("SELECT precio, modo_precio, origen, tiempo_min, codigo FROM servicios WHERE id = 's1'")).toMatchObject({ precio: 4500000, modo_precio: 'fijo', origen: 'propio', tiempo_min: null, codigo: null });
+    expect(todos('SELECT id, estado, hecha_at, hecha_por, responsable_id FROM orden_tareas ORDER BY id').map((r) => ({ ...r }))).toEqual([
+      { id: 'ta1', estado: 'completada', hecha_at: '2026-10-02T10:00:00Z', hecha_por: 'u1', responsable_id: null },
+      { id: 'ta2', estado: 'pendiente', hecha_at: null, hecha_por: null, responsable_id: null },
+    ]);
+    expect(uno("SELECT duracion_seg, tarea_id FROM orden_tiempos WHERE id = 'ti1'")).toMatchObject({ duracion_seg: 3600, tarea_id: null });
+    expect(uno("SELECT tarifa_hora FROM taller_config WHERE taller_id = 't1'").tarifa_hora).toBe(0);
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    // El cronómetro se puede atribuir a una tarea; al borrar la tarea el tiempo se conserva en la OT
+    db.exec("INSERT INTO orden_tiempos (id, taller_id, orden_id, usuario_id, inicio_at, fin_at, duracion_seg, tarea_id) VALUES ('ti2', 't1', 'o1', 'u1', '2026-10-03T09:00:00Z', '2026-10-03T09:30:00Z', 1800, 'ta2')");
+    db.exec("DELETE FROM orden_tareas WHERE id = 'ta2'");
+    expect(uno("SELECT tarea_id, duracion_seg FROM orden_tiempos WHERE id = 'ti2'")).toMatchObject({ tarea_id: null, duracion_seg: 1800 });
+    // Integridad multiempresa: una tarea no puede asignarse a un usuario de otro taller ni a un servicio ajeno
+    db.exec("INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u2', 't2', 'b@b.com', 'Otro', 'propietario', 'propietario', 'x')");
+    expect(() => db.exec("UPDATE orden_tareas SET responsable_id = 'u2' WHERE id = 'ta1'")).toThrow(/FOREIGN KEY/);
+    expect(() => db.exec("INSERT INTO servicio_tiempos (id, taller_id, servicio_id, motor, tiempo_min) VALUES ('r1', 't2', 's1', '1.6', 30)")).toThrow(/FOREIGN KEY/);
+    // Reglas de tiempo: al menos un criterio, años coherentes
+    expect(() => db.exec("INSERT INTO servicio_tiempos (id, taller_id, servicio_id, tiempo_min) VALUES ('r2', 't1', 's1', 30)")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO servicio_tiempos (id, taller_id, servicio_id, anio_desde, anio_hasta, tiempo_min) VALUES ('r3', 't1', 's1', 2020, 2010, 30)")).toThrow(/CHECK/);
+    db.exec("INSERT INTO servicio_tiempos (id, taller_id, servicio_id, motor, tiempo_min) VALUES ('r4', 't1', 's1', '1.6', 30)");
+    // Un plan de mantenimiento por vehículo y operación
+    db.exec("INSERT INTO vehiculo_mantenimientos (id, taller_id, vehiculo_id, servicio_id) VALUES ('m1', 't1', 'v1', 's1')");
+    expect(() => db.exec("INSERT INTO vehiculo_mantenimientos (id, taller_id, vehiculo_id, servicio_id) VALUES ('m2', 't1', 'v1', 's1')")).toThrow(/UNIQUE/);
+    // Código de operación único por taller (si está cargado)
+    db.exec("UPDATE servicios SET codigo = 'FRE-001' WHERE id = 's1'");
+    db.exec("INSERT INTO servicios (id, taller_id, nombre, precio, codigo) VALUES ('s2', 't2', 'Otra', 0, 'FRE-001')");
+    expect(() => db.exec("INSERT INTO servicios (id, taller_id, nombre, precio, codigo) VALUES ('s3', 't1', 'Dup', 0, 'FRE-001')")).toThrow(/UNIQUE/);
+    db.close();
+  });
 });

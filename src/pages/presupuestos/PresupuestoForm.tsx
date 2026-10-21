@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { hoyISO, sumarDias } from '@/lib/format';
 import { Boton, Campo, Cargando, Encabezado, Input, Tarjeta, Textarea, useToast } from '@/components/ui';
@@ -13,6 +13,7 @@ export function PresupuestoForm() {
   const nav = useNavigate();
   const toast = useToast();
   const qc = useQueryClient();
+  const [sp] = useSearchParams();
   const { data: cfg } = useQuery({ queryKey: ['config'], queryFn: () => api.get('/taller/config') });
   const { data: existente, isLoading } = useQuery({ queryKey: ['presupuesto', id], queryFn: () => api.get(`/presupuestos/${id}`), enabled: !!id });
   const [cliente, setCliente] = useState<ClienteMin | null>(null);
@@ -27,6 +28,25 @@ export function PresupuestoForm() {
   useListaPorDefecto(!id, lista, setLista);
   useDefectosEnParams(!id, setParams);
 
+  // Precarga desde un mantenimiento pendiente o la ficha de un vehículo: cliente, vehículo y la operación a presupuestar.
+  useEffect(() => {
+    if (id) return;
+    const cId = sp.get('cliente');
+    const vId = sp.get('vehiculo');
+    const sId = sp.get('servicio');
+    if (cId) api.get(`/clientes/${cId}`).then((c) => setCliente(c)).catch(() => undefined);
+    if (vId) {
+      setVehiculoId(vId);
+      if (sId) {
+        api.get<any[]>(`/servicios?vehiculo_id=${vId}`).then((lista) => {
+          const sv = lista.find((x) => x.id === sId);
+          if (sv) setItems((prev) => (prev.length ? prev : [{ key: Math.random().toString(36).slice(2), tipo: 'servicio', servicio_id: sv.id, descripcion: sv.nombre, cantidad: 1, precio_unitario: sv.precio, desc_pct: 0, tiempo_min: sv.tiempo_efectivo_min ?? null }]));
+        }).catch(() => undefined);
+      }
+    }
+    if (sp.get('motivo')) setObs(sp.get('motivo')!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (cfg && !id && !valido) setValido(sumarDias(hoyISO(), cfg.config.validez_presupuesto_dias));
   }, [cfg, id, valido]);
@@ -75,7 +95,7 @@ export function PresupuestoForm() {
           </Tarjeta>
           <Tarjeta titulo="Detalle">
             <div className="mb-4"><SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} nombreActual={existente?.lista_precio_nombre} /></div>
-            <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} />
+            <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} vehiculoId={vehiculoId} />
           </Tarjeta>
         </div>
         <div className="space-y-5">

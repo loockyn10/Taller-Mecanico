@@ -89,7 +89,7 @@ export function NuevaOrden() {
           </Tarjeta>
           <Tarjeta titulo="Trabajos y repuestos" subtitulo="Podés completarlo ahora o después del diagnóstico">
             <div className="mb-4"><SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} /></div>
-            <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} />
+            <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} vehiculoId={vehiculoId} />
           </Tarjeta>
         </div>
         <div className="space-y-5">

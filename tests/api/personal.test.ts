@@ -248,7 +248,8 @@ describe('trabajo del mecánico en sus órdenes', () => {
     expect((await m.post(`/api/ordenes/${id}/tareas`, { descripcion: 'Cambiar pastillas' })).status).toBe(201);
     expect((await m.post(`/api/ordenes/${id}/tareas`, { descripcion: 'Probar frenos' })).status).toBe(201);
     let det = (await m.get(`/api/ordenes/${id}`)).body;
-    expect(det.tareas).toHaveLength(2);
+    // la orden trae además la tarea generada desde su trabajo (mano de obra) del catálogo
+    expect(det.tareas).toHaveLength(3);
     expect((await m.patch(`/api/ordenes/${id}/tareas/${det.tareas[0].id}`, { hecha: true })).status).toBe(200);
     expect((await m.post(`/api/ordenes/${id}/notas`, { texto: 'Discos con desgaste, avisar a recepción' })).status).toBe(201);
     expect((await m.patch(`/api/ordenes/${id}/tecnico`, { diagnostico: 'Pastillas gastadas' })).status).toBe(200);
@@ -267,7 +268,7 @@ describe('trabajo del mecánico en sus órdenes', () => {
     expect(det.mi_cronometro).toBeNull();
     // las tareas y notas llegan también a quienes ven todas las órdenes, con importes si tienen permiso
     const rec = (await d.recepcion.api.get(`/api/ordenes/${id}`)).body;
-    expect(rec.tareas).toHaveLength(2);
+    expect(rec.tareas).toHaveLength(3);
     expect(rec.total).toBeGreaterThan(0);
     expect(rec.items[0].precio_unitario).toBeGreaterThan(0);
     // no puede trabajar en la orden de otro mecánico

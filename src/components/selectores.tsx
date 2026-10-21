@@ -288,6 +288,6 @@ export function SelectorVehiculo({ clienteId, valor, onCambio }: { clienteId: st
   );
 }
 
-export function useMecanicos() {
-  return useQuery({ queryKey: ['mecanicos'], queryFn: () => api.get<any[]>('/mecanicos'), staleTime: 60_000 });
+export function useMecanicos(habilitado = true) {
+  return useQuery({ queryKey: ['mecanicos'], queryFn: () => api.get<any[]>('/mecanicos'), staleTime: 60_000, enabled: habilitado });
 }

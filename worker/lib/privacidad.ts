@@ -52,7 +52,7 @@ export function limpiarArticulo<T extends Fila>(s: Sesion, a: T): T {
 }
 
 export function limpiarServicio<T extends Fila>(s: Sesion, a: T): T {
-  return puedePrecioVenta(s) ? a : sin(a, ['precio', 'precio_lista']);
+  return puedePrecioVenta(s) ? a : sin(a, ['precio', 'precio_lista', 'precio_cargado', 'tarifa_hora']);
 }
 
 /** Movimientos de stock: el costo unitario es un dato de costo. */
@@ -64,4 +64,9 @@ export function limpiarMovimiento<T extends Fila>(s: Sesion, m: T): T {
 export function exigirPermisoDePrecios(s: Sesion, datos: { costo?: unknown; precio?: unknown }) {
   if (datos.costo !== undefined && !puedeCosto(s)) throw forbidden('No tenés permiso para ver ni modificar costos');
   if (datos.precio !== undefined && !puedePrecioVenta(s)) throw forbidden('No tenés permiso para ver ni modificar precios de venta');
+}
+
+/** Mantenimiento programado: los datos de contacto del cliente solo se muestran a quien puede ver clientes. */
+export function limpiarMantenimiento<T extends Fila>(s: Sesion, m: T): T {
+  return tiene(s, 'clientes.ver') ? m : sin(m, ['cliente_id', 'cliente', 'cliente_telefono']);
 }

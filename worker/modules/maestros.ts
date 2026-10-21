@@ -5,7 +5,8 @@ import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, delTaller, first, like, run, SEQ_VALOR, seqIncrementar, uid, updateParcial } from '../lib/db';
 import { requireAny, requirePerm, tiene } from '../lib/auth';
-import { limpiarDocumento } from '../lib/privacidad';
+import { limpiarDocumento, limpiarMantenimiento } from '../lib/privacidad';
+import { estadoMantenimientos } from '../lib/mantenimiento';
 import { CONDICIONES_IVA, normalizarPatente } from '../../shared/dominio';
 
 export const maestros = new Hono<AppEnv>();
@@ -180,53 +181,8 @@ maestros.get('/vehiculos/:id', requirePerm('vehiculos.ver'), async (c) => {
     v.id,
   );
   const historial = ordenes.map((o) => limpiarDocumento(s, { ...o, items: items.filter((i) => i.orden_id === o.id) }));
-  const proximos = tiene(s, 'clientes.ver') ? await proximosServices(c.env.DB, s.tallerId, String(v.id)) : [];
+  const proximos = tiene(s, 'mantenimientos.ver') ? (await estadoMantenimientos(c.env.DB, s.tallerId, { vehiculoId: String(v.id) })).map((m) => limpiarMantenimiento(s, m)) : [];
   return c.json({ ...limpiarDocumento(s, v), historial, proximos });
-});
-
-/** Próximos services según intervalos de los servicios realizados en OT entregadas/listas. */
-export async function proximosServices(db: D1Database, tallerId: string, vehiculoId?: string) {
-  const rows = await all<{
-    vehiculo_id: string; patente: string; cliente: string; cliente_telefono: string | null; km_actual: number; servicio: string;
-    intervalo_km: number | null; intervalo_meses: number | null; km_realizado: number | null; fecha_realizado: string;
-  }>(
-    db,
-    `SELECT v.id AS vehiculo_id, v.patente, c.nombre AS cliente, c.telefono AS cliente_telefono, v.km_actual, se.nombre AS servicio,
-            se.intervalo_km, se.intervalo_meses, MAX(o.km_ingreso) AS km_realizado, MAX(COALESCE(o.fecha_entregada, o.fecha_lista, o.fecha_ingreso)) AS fecha_realizado
-       FROM orden_items oi
-       JOIN ordenes o ON o.taller_id = oi.taller_id AND o.id = oi.orden_id AND o.estado IN ('lista','entregada')
-       JOIN servicios se ON se.taller_id = oi.taller_id AND se.id = oi.servicio_id
-       JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id AND v.activo = 1
-       JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
-      WHERE oi.taller_id = ? ${vehiculoId ? 'AND v.id = ?' : ''} AND (se.intervalo_km IS NOT NULL OR se.intervalo_meses IS NOT NULL)
-      GROUP BY v.id, se.id`,
-    tallerId,
-    ...(vehiculoId ? [vehiculoId] : []),
-  );
-  const hoyMs = Date.now() - 3 * 3600_000;
-  return rows
-    .map((r) => {
-      const proximoKm = r.intervalo_km && r.km_realizado != null ? r.km_realizado + r.intervalo_km : null;
-      let proximaFecha: string | null = null;
-      if (r.intervalo_meses) {
-        const d = new Date(r.fecha_realizado);
-        d.setMonth(d.getMonth() + r.intervalo_meses);
-        proximaFecha = d.toISOString().slice(0, 10);
-      }
-      const vencidoKm = proximoKm != null && r.km_actual >= proximoKm;
-      const vencidoFecha = proximaFecha != null && new Date(proximaFecha).getTime() <= hoyMs;
-      const proximoKmCerca = proximoKm != null && !vencidoKm && proximoKm - r.km_actual <= 1000;
-      const proximaFechaCerca = proximaFecha != null && !vencidoFecha && new Date(proximaFecha).getTime() - hoyMs <= 30 * 86400_000;
-      const estado = vencidoKm || vencidoFecha ? 'vencido' : proximoKmCerca || proximaFechaCerca ? 'proximo' : 'al_dia';
-      return { ...r, proximo_km: proximoKm, proxima_fecha: proximaFecha, estado };
-    })
-    .sort((a, b) => (a.estado === b.estado ? 0 : a.estado === 'vencido' ? -1 : b.estado === 'vencido' ? 1 : a.estado === 'proximo' ? -1 : 1));
-}
-
-maestros.get('/recordatorios', requirePerm('vehiculos.ver', 'clientes.ver'), async (c) => {
-  const s = c.get('sesion');
-  const todos = await proximosServices(c.env.DB, s.tallerId);
-  return c.json(todos.filter((r) => r.estado !== 'al_dia'));
 });
 
 maestros.post('/vehiculos', requirePerm('vehiculos.crear'), async (c) => {

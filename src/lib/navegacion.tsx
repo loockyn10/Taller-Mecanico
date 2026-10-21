@@ -3,8 +3,8 @@
 import type { ReactNode } from 'react';
 import {
   Banknote, BarChart3, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, PackageSearch, Package, PiggyBank,
-  Receipt, Scale, ScrollText, Settings, ShoppingCart, Tags, Truck, UserCog, Users, Wallet, Wrench, KeyRound, Layers, ShieldCheck, History, UserRound, BadgeDollarSign, ShoppingBasket,
-  Clock, MonitorSmartphone, UsersRound, CalendarCheck, HardHat,
+  Receipt, Scale, ScrollText, Settings, ShoppingCart, Tags, Truck, UserCog, Users, Wallet, Wrench, KeyRound, ShieldCheck, History, UserRound, BadgeDollarSign, ShoppingBasket,
+  Clock, MonitorSmartphone, UsersRound, CalendarCheck, HardHat, Timer, Activity,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permiso } from '@shared/permisos';
@@ -48,7 +48,8 @@ export const GRUPOS: GrupoNav[] = [
       item('agenda', 'Agenda', '/agenda', CalendarDays, 'turnos calendario citas', 'turnos.ver'),
       item('clientes', 'Clientes', '/clientes', Users, 'cliente personas contactos', 'clientes.ver'),
       item('vehiculos', 'Vehículos', '/vehiculos', Car, 'autos patentes historial', 'vehiculos.ver'),
-      item('recordatorios', 'Recordatorios', '/recordatorios', Bell, 'service vencimientos avisos mantenimiento', 'clientes.ver'),
+      item('mantenimientos', 'Mantenimientos', '/mantenimientos', Bell, 'service vencimientos avisos recordatorios programados kilometraje proximos vencidos', 'mantenimientos.ver'),
+      item('tempario', 'Tempario', '/tempario', Timer, 'tiempos mano de obra operaciones servicios tarifas horas precios catalogo', 'catalogo.ver'),
       item('mecanicos', 'Mecánicos sin usuario', '/configuracion?tab=mecanicos', UserCog, 'operarios equipo tercerizados', 'usuarios.gestionar'),
     ],
   },
@@ -94,6 +95,7 @@ export const GRUPOS: GrupoNav[] = [
     id: 'informes', titulo: 'Informes', icono: ic(BarChart3),
     items: [
       item('estadisticas', 'Estadísticas', '/reportes', BarChart3, 'graficos ventas indicadores mecanicos', 'reportes.ver'),
+      item('productividad', 'Productividad', '/productividad', Activity, 'mecanicos horas tareas carga de trabajo rendimiento asistencia tiempos', 'productividad.ver'),
       item('informes', 'Informes', '/informes', FileSpreadsheet, 'reportes exportar excel csv comerciales financieros', 'reportes.ver'),
       item('contabilidad', 'Registros contables', '/contabilidad', Calculator, 'libro ventas compras iva impuestos', 'contabilidad.ver'),
     ],
@@ -111,7 +113,6 @@ export const GRUPOS: GrupoNav[] = [
     id: 'admin', titulo: 'Administración', icono: ic(Settings),
     items: [
       item('config', 'Configuración', '/configuracion', Settings, 'taller datos parametros preferencias documentos medios de pago', undefined, 'taller'),
-      item('servicios', 'Servicios', '/configuracion?tab=servicios', Layers, 'mano de obra catalogo tarifas horas'),
       item('catalogos', 'Marcas y categorías', '/configuracion?tab=catalogos', Tags, 'catalogos marcas modelos categorias', 'catalogo.editar'),
       item('licencia', 'Licencia', '/configuracion?tab=licencia', ShieldCheck, 'plan suscripcion usuarios', 'licencia.ver'),
       item('actividad', 'Actividad', '/configuracion?tab=auditoria', History, 'auditoria registro cambios', 'config.editar'),

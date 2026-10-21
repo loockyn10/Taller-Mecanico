@@ -10,6 +10,7 @@ import { fechaComercial } from '../lib/fechas';
 import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
 import { normalizarPatente } from '../../shared/dominio';
+import { sentenciaTareasDesdeTrabajos } from '../lib/tareas';
 
 export const presupuestos = new Hono<AppEnv>();
 presupuestos.use('*', requireRW('presupuestos.ver', 'presupuestos.gestionar'));
@@ -167,10 +168,12 @@ presupuestos.post('/:id/convertir', requirePerm('ordenes.crear'), async (c) => {
     c.env.DB.prepare('UPDATE ordenes SET lista_precio_id = (SELECT lista_precio_id FROM presupuestos WHERE taller_id = ? AND id = ?), lista_precio_nombre = (SELECT lista_precio_nombre FROM presupuestos WHERE taller_id = ? AND id = ?) WHERE taller_id = ? AND id = ?')
       .bind(s.tallerId, id, s.tallerId, id, s.tallerId, ordenId),
     c.env.DB.prepare(
-      `INSERT INTO orden_items (id, taller_id, orden_id, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, subtotal)
-       SELECT lower(hex(randomblob(16))), taller_id, ?, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, subtotal
+      `INSERT INTO orden_items (id, taller_id, orden_id, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, subtotal, tiempo_min)
+       SELECT lower(hex(randomblob(16))), taller_id, ?, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, subtotal, tiempo_min
          FROM presupuesto_items WHERE taller_id = ? AND presupuesto_id = ?`,
     ).bind(ordenId, s.tallerId, id),
+    // Cada trabajo (mano de obra) del presupuesto pasa a ser una tarea pendiente de la OT, con su tiempo estimado.
+    sentenciaTareasDesdeTrabajos(c.env.DB, s.tallerId, ordenId, s.usuarioId),
     c.env.DB.prepare("INSERT INTO orden_eventos (id, taller_id, orden_id, estado_nuevo, nota, usuario_id) VALUES (?, ?, ?, 'recibida', ?, ?)")
       .bind(uid(), s.tallerId, ordenId, `Generada desde presupuesto #${p.numero}`, s.usuarioId),
     c.env.DB.prepare("UPDATE presupuestos SET estado = 'convertido', orden_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id = ? AND id = ?")

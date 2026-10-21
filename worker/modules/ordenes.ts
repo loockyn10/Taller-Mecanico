@@ -12,20 +12,27 @@ import { exigirCajaAbiertaSiCorresponde } from '../lib/caja';
 import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
 import { agrupar, permiteNegativo, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
+import { nombreUsuarioSql, sentenciaTareasDesdeTrabajos } from '../lib/tareas';
+import { ESTADOS_TAREA } from '../../shared/tempario';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
 
 export const ordenes = new Hono<AppEnv>();
 // Quien solo tiene "órdenes asignadas" (mecánicos) ve y trabaja únicamente las OT donde figura como mecánico.
 ordenes.use('*', requireAny('ordenes.ver', 'ordenes.asignadas'));
 
-const ASIGNADA_A_MI = 'o.mecanico_id IN (SELECT m.id FROM mecanicos m WHERE m.taller_id = o.taller_id AND m.usuario_id = ?)';
+// Una orden es "mía" si soy el mecánico responsable, figuro entre los participantes o tengo alguna tarea a mi cargo.
+const ASIGNADA_A_MI = `(o.mecanico_id IN (SELECT m.id FROM mecanicos m WHERE m.taller_id = o.taller_id AND m.usuario_id = ?)
+    OR EXISTS (SELECT 1 FROM orden_participantes pa WHERE pa.taller_id = o.taller_id AND pa.orden_id = o.id AND pa.usuario_id = ?)
+    OR EXISTS (SELECT 1 FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id AND ta.responsable_id = ?))`;
 /** Condición SQL de acceso a las OT según el alcance de la sesión (todas o solo las asignadas). */
 function alcance(s: Sesion): { cond: string[]; params: unknown[] } {
-  return tiene(s, 'ordenes.ver') ? { cond: [], params: [] } : { cond: [ASIGNADA_A_MI], params: [s.usuarioId] };
+  return tiene(s, 'ordenes.ver') ? { cond: [], params: [] } : { cond: [ASIGNADA_A_MI], params: [s.usuarioId, s.usuarioId, s.usuarioId] };
 }
 async function esAsignadaAMi(db: D1Database, s: Sesion, ordenId: string): Promise<boolean> {
-  return !!(await first(db, `SELECT 1 FROM ordenes o WHERE o.taller_id = ? AND o.id = ? AND ${ASIGNADA_A_MI}`, s.tallerId, ordenId, s.usuarioId));
+  return !!(await first(db, `SELECT 1 FROM ordenes o WHERE o.taller_id = ? AND o.id = ? AND ${ASIGNADA_A_MI}`, s.tallerId, ordenId, s.usuarioId, s.usuarioId, s.usuarioId));
 }
+/** Asignar el responsable, los participantes y las tareas: lo hace quien administra las órdenes o tiene el permiso específico (sin tocar importes). */
+const puedeAsignar = (s: Sesion) => tiene(s, 'ordenes.modificar') || tiene(s, 'ordenes.asignar');
 /**
  * Autoriza una operación de trabajo sobre una OT: quien puede modificar órdenes lo hace sobre cualquiera;
  * quien solo puede "actualizar órdenes asignadas" únicamente sobre las suyas.
@@ -38,7 +45,13 @@ async function autorizarTrabajo(db: D1Database, s: Sesion, ordenId: string) {
 const ESTADOS_DE_TALLER = ['diagnostico', 'en_reparacion', 'esperando_repuestos', 'lista'];
 
 const SELECT = `SELECT o.*, c.nombre AS cliente, c.codigo AS cliente_codigo, c.telefono AS cliente_telefono, v.patente, v.anio, ma.nombre AS marca, mo.nombre AS modelo,
-    m.nombre AS mecanico, p.numero AS presupuesto_numero,
+    m.nombre AS mecanico, m.usuario_id AS mecanico_usuario_id, p.numero AS presupuesto_numero,
+    (SELECT COUNT(*) FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id) AS tareas_total,
+    (SELECT COUNT(*) FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id AND ta.estado = 'completada') AS tareas_completadas,
+    (SELECT COUNT(*) FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id AND ta.estado = 'en_proceso') AS tareas_en_proceso,
+    (SELECT SUM(ta.tiempo_estimado_min) FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id) AS tiempo_estimado_min,
+    (SELECT COALESCE(SUM(ti.duracion_seg), 0) FROM orden_tiempos ti WHERE ti.taller_id = o.taller_id AND ti.orden_id = o.id) AS tiempo_real_seg,
+    (SELECT COUNT(*) FROM orden_participantes pa WHERE pa.taller_id = o.taller_id AND pa.orden_id = o.id) AS participantes_n,
     ve.id AS venta_id, ve.numero AS venta_numero, ve.total AS venta_total, ve.cobrado AS venta_cobrado
   FROM ordenes o
   JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id
@@ -96,12 +109,26 @@ ordenes.get('/', async (c) => {
   return c.json((await all(c.env.DB, `${SELECT} WHERE ${cond.join(' AND ')} ORDER BY o.numero DESC LIMIT ?`, ...params, limite)).map((o) => limpiarDocumento(s, o)));
 });
 
+/** Mi cronómetro en marcha (si lo hay) y en qué orden y tarea: lo usa la barra de la vista del mecánico. */
+ordenes.get('/cronometro/activo', async (c) => {
+  const s = c.get('sesion');
+  const x = await first(
+    c.env.DB,
+    `SELECT x.orden_id, o.numero AS orden_numero, v.patente, x.inicio_at, x.tarea_id, t.descripcion AS tarea
+       FROM orden_tiempos x JOIN ordenes o ON o.taller_id = x.taller_id AND o.id = x.orden_id JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
+       LEFT JOIN orden_tareas t ON t.taller_id = x.taller_id AND t.id = x.tarea_id
+      WHERE x.taller_id = ? AND x.usuario_id = ? AND x.fin_at IS NULL`,
+    s.tallerId, s.usuarioId,
+  );
+  return c.json(x);
+});
+
 ordenes.get('/:id', async (c) => {
   const s = c.get('sesion');
   const ac = alcance(s);
   const o = await first<any>(c.env.DB, `${SELECT} WHERE o.taller_id = ? AND o.id = ? ${ac.cond.map((x) => `AND ${x}`).join(' ')}`, s.tallerId, c.req.param('id'), ...ac.params);
   if (!o) throw notFound('Orden de trabajo');
-  const [items, eventos, checklist, tareas, notas, tiempos] = await Promise.all([
+  const [items, eventos, checklist, tareasDb, notas, tiempos, participantes] = await Promise.all([
     all(
       c.env.DB,
       `SELECT oi.*, a.stock AS articulo_stock, a.unidad FROM orden_items oi LEFT JOIN articulos a ON a.taller_id = oi.taller_id AND a.id = oi.articulo_id
@@ -119,7 +146,12 @@ ordenes.get('/:id', async (c) => {
     first(c.env.DB, 'SELECT * FROM checklists WHERE taller_id = ? AND orden_id = ?', s.tallerId, o.id),
     all(
       c.env.DB,
-      `SELECT t.id, t.descripcion, t.hecha, t.hecha_at, u.nombre AS hecha_por FROM orden_tareas t LEFT JOIN usuarios u ON u.taller_id = t.taller_id AND u.id = t.hecha_por
+      `SELECT t.id, t.descripcion, t.estado, t.servicio_id, t.tiempo_estimado_min, t.observaciones, t.iniciada_at, t.hecha_at, t.responsable_id,
+              ${nombreUsuarioSql('r')} AS responsable, ${nombreUsuarioSql('u')} AS hecha_por,
+              (SELECT COALESCE(SUM(ti.duracion_seg), 0) FROM orden_tiempos ti WHERE ti.taller_id = t.taller_id AND ti.tarea_id = t.id) AS tiempo_real_seg
+         FROM orden_tareas t
+         LEFT JOIN usuarios u ON u.taller_id = t.taller_id AND u.id = t.hecha_por
+         LEFT JOIN usuarios r ON r.taller_id = t.taller_id AND r.id = t.responsable_id
         WHERE t.taller_id = ? AND t.orden_id = ? ORDER BY t.posicion, t.created_at`,
       s.tallerId,
       o.id,
@@ -131,17 +163,32 @@ ordenes.get('/:id', async (c) => {
       s.tallerId,
       o.id,
     ),
-    all<{ usuario_id: string; inicio_at: string; fin_at: string | null; duracion_seg: number | null; usuario: string }>(
+    all<{ usuario_id: string; tarea_id: string | null; inicio_at: string; fin_at: string | null; duracion_seg: number | null; usuario: string }>(
       c.env.DB,
-      `SELECT t.usuario_id, t.inicio_at, t.fin_at, t.duracion_seg, u.nombre AS usuario FROM orden_tiempos t JOIN usuarios u ON u.taller_id = t.taller_id AND u.id = t.usuario_id
+      `SELECT t.usuario_id, t.tarea_id, t.inicio_at, t.fin_at, t.duracion_seg, ${nombreUsuarioSql('u')} AS usuario FROM orden_tiempos t JOIN usuarios u ON u.taller_id = t.taller_id AND u.id = t.usuario_id
         WHERE t.taller_id = ? AND t.orden_id = ? ORDER BY t.inicio_at DESC LIMIT 200`,
       s.tallerId,
       o.id,
     ),
+    all(
+      c.env.DB,
+      `SELECT p.usuario_id, ${nombreUsuarioSql('u')} AS nombre FROM orden_participantes p JOIN usuarios u ON u.taller_id = p.taller_id AND u.id = p.usuario_id
+        WHERE p.taller_id = ? AND p.orden_id = ? ORDER BY p.created_at`,
+      s.tallerId,
+      o.id,
+    ),
   ]);
+  // Tiempo real de cada tarea = tramos cerrados + el tramo en marcha (si lo hay). `hecha` se conserva por compatibilidad.
+  const ahoraMs = Date.now();
+  const tareas = tareasDb.map((t: any) => {
+    const abiertos = tiempos.filter((x) => x.tarea_id === t.id && !x.fin_at);
+    const enMarcha = abiertos.reduce((a, x) => a + Math.max(0, Math.round((ahoraMs - Date.parse(x.inicio_at)) / 1000)), 0);
+    return { ...t, hecha: t.estado === 'completada' ? 1 : 0, tiempo_cerrado_seg: t.tiempo_real_seg, tiempo_real_seg: t.tiempo_real_seg + enMarcha, en_marcha: abiertos.map((x) => ({ usuario_id: x.usuario_id, usuario: x.usuario, inicio_at: x.inicio_at })) };
+  });
   // Tiempo dedicado a la reparación (no es asistencia al taller): total cerrado, y el cronómetro propio si está en marcha.
   const tiempoTotalSeg = tiempos.reduce((a, t) => a + (t.duracion_seg ?? 0), 0);
   const miCronometro = tiempos.find((t) => t.usuario_id === s.usuarioId && !t.fin_at) ?? null;
+  const tareasEstimadoMin = tareas.reduce((a: number, t: any) => a + (t.tiempo_estimado_min ?? 0), 0);
   return c.json({
     ...limpiarDocumento(s, o),
     items: limpiarItems(s, items),
@@ -151,7 +198,9 @@ ordenes.get('/:id', async (c) => {
     notas,
     tiempos,
     tiempo_total_seg: tiempoTotalSeg,
-    mi_cronometro: miCronometro ? { inicio_at: miCronometro.inicio_at } : null,
+    mi_cronometro: miCronometro ? { inicio_at: miCronometro.inicio_at, tarea_id: miCronometro.tarea_id } : null,
+    participantes,
+    tiempo_estimado_total_min: tareasEstimadoMin,
     asignada_a_mi: await esAsignadaAMi(c.env.DB, s, o.id),
   });
 });
@@ -178,6 +227,7 @@ ordenes.post('/', requirePerm('ordenes.crear'), async (c) => {
       new Date().toISOString(), d.fecha_prometida ?? null, s.usuarioId, ...valoresTotales(d, t),
     ),
     ...sentenciasItems(c.env.DB, 'orden_items', 'orden_id', s.tallerId, id, items, t.subtotales),
+    sentenciaTareasDesdeTrabajos(c.env.DB, s.tallerId, id, s.usuarioId),
     ...(lista ? [sentenciaListaEnDocumento(c.env.DB, 'ordenes', s.tallerId, id, lista)] : []),
     c.env.DB.prepare("INSERT INTO orden_eventos (id, taller_id, orden_id, estado_nuevo, usuario_id) VALUES (?, ?, ?, 'recibida', ?)").bind(uid(), s.tallerId, id, s.usuarioId),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'crear', { total: t.total }),
@@ -308,6 +358,16 @@ ordenes.post('/:id/estado', async (c) => {
     c.env.DB.prepare('INSERT INTO orden_eventos (id, taller_id, orden_id, estado_anterior, estado_nuevo, nota, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .bind(uid(), s.tallerId, id, o.estado, d.estado, d.nota, s.usuarioId),
   );
+  // Al dejar la orden lista, entregarla o cancelarla no pueden quedar cronómetros en marcha ni tareas "en proceso".
+  if (['lista', 'entregada', 'cancelada'].includes(d.estado)) {
+    const fin = new Date().toISOString();
+    stmts.push(
+      c.env.DB.prepare(
+        "UPDATE orden_tiempos SET fin_at = ?, duracion_seg = MAX(0, CAST(ROUND((julianday(?) - julianday(inicio_at)) * 86400) AS INTEGER)) WHERE taller_id = ? AND orden_id = ? AND fin_at IS NULL",
+      ).bind(fin, fin, s.tallerId, id),
+      c.env.DB.prepare("UPDATE orden_tareas SET estado = 'pausada' WHERE taller_id = ? AND orden_id = ? AND estado = 'en_proceso'").bind(s.tallerId, id),
+    );
+  }
   if (d.estado === 'entregada') stmts.push(c.env.DB.prepare("UPDATE turnos SET estado = 'completado' WHERE taller_id = ? AND orden_id = ? AND estado IN ('agendado','confirmado','en_taller')").bind(s.tallerId, id));
   await c.env.DB.batch(stmts);
   return c.json({ ok: true, stock: aplicar ? 'descontado' : reponer ? 'repuesto' : 'sin_cambios' });
@@ -411,6 +471,46 @@ ordenes.get('/resumen/estados', async (c) => {
   return c.json(await all(c.env.DB, `SELECT o.estado, COUNT(*) AS cantidad FROM ordenes o WHERE o.taller_id = ? ${ac.cond.map((x) => `AND ${x}`).join(' ')} GROUP BY o.estado`, s.tallerId, ...ac.params));
 });
 
+// ───── Asignación: mecánico responsable y participantes ─────
+// Quien asigna no necesita ver ni modificar importes: el permiso `ordenes.asignar` alcanza (o `ordenes.modificar`).
+async function validarUsuariosActivos(db: D1Database, tallerId: string, ids: string[]) {
+  if (!ids.length) return;
+  const filas = await all(db, `SELECT id FROM usuarios WHERE taller_id = ? AND activo = 1 AND id IN (${ids.map(() => '?').join(',')})`, tallerId, ...ids);
+  if (filas.length !== ids.length) throw badRequest('Hay personas inexistentes o inactivas');
+}
+
+ordenes.patch('/:id/responsable', async (c) => {
+  const s = c.get('sesion');
+  const id = c.req.param('id');
+  const d = await body(c, z.object({ mecanico_id: zId.nullable() }));
+  if (!puedeAsignar(s)) throw forbidden('No tenés permiso para asignar mecánicos');
+  await ordenAbierta(c.env.DB, s.tallerId, id);
+  if (d.mecanico_id && !(await first(c.env.DB, 'SELECT 1 FROM mecanicos WHERE taller_id = ? AND id = ? AND activo = 1', s.tallerId, d.mecanico_id))) throw badRequest('Mecánico inexistente o inactivo');
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE ordenes SET mecanico_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id = ? AND id = ?").bind(d.mecanico_id, s.tallerId, id),
+    auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'asignar_responsable', { mecanico_id: d.mecanico_id }),
+  ]);
+  return c.json({ ok: true });
+});
+
+ordenes.put('/:id/participantes', async (c) => {
+  const s = c.get('sesion');
+  const id = c.req.param('id');
+  const d = await body(c, z.object({ usuario_ids: z.array(zId).max(12) }));
+  if (!puedeAsignar(s)) throw forbidden('No tenés permiso para asignar participantes');
+  await ordenAbierta(c.env.DB, s.tallerId, id);
+  const ids = [...new Set(d.usuario_ids)];
+  await validarUsuariosActivos(c.env.DB, s.tallerId, ids);
+  const actuales = (await all<{ usuario_id: string }>(c.env.DB, 'SELECT usuario_id FROM orden_participantes WHERE taller_id = ? AND orden_id = ?', s.tallerId, id)).map((x) => x.usuario_id);
+  const stmts: Stmt[] = [
+    ...actuales.filter((u) => !ids.includes(u)).map((u) => c.env.DB.prepare('DELETE FROM orden_participantes WHERE taller_id = ? AND orden_id = ? AND usuario_id = ?').bind(s.tallerId, id, u)),
+    ...ids.filter((u) => !actuales.includes(u)).map((u) => c.env.DB.prepare('INSERT INTO orden_participantes (id, taller_id, orden_id, usuario_id, asignado_por) VALUES (?, ?, ?, ?, ?)').bind(uid(), s.tallerId, id, u, s.usuarioId)),
+    auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'asignar_participantes', { usuario_ids: ids }),
+  ];
+  await c.env.DB.batch(stmts);
+  return c.json({ ok: true });
+});
+
 // ───── Trabajo del mecánico: tareas, observaciones técnicas y tiempo dedicado a la reparación ─────
 // Son datos propios de la OT, independientes de los ítems facturables y de la asistencia al taller.
 async function ordenAbierta(db: D1Database, tallerId: string, id: string) {
@@ -419,48 +519,127 @@ async function ordenAbierta(db: D1Database, tallerId: string, id: string) {
   if (o.estado === 'entregada' || o.estado === 'cancelada') throw conflict('La orden está cerrada');
 }
 
+const zObsOpcional = z.string().trim().max(2000).optional();
 ordenes.patch('/:id/tecnico', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const d = await body(c, z.object({ diagnostico: zTextoOpt(2000) }));
+  const d = await body(c, z.object({ diagnostico: zObsOpcional, resultado: zObsOpcional }));
   await autorizarTrabajo(c.env.DB, s, id);
   await ordenAbierta(c.env.DB, s.tallerId, id);
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (d.diagnostico !== undefined) (sets.push('diagnostico = ?'), vals.push(d.diagnostico || null));
+  if (d.resultado !== undefined) (sets.push('resultado = ?'), vals.push(d.resultado || null));
+  if (!sets.length) return c.json({ ok: true });
   await c.env.DB.batch([
-    c.env.DB.prepare("UPDATE ordenes SET diagnostico = ?, version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id = ? AND id = ?").bind(d.diagnostico, s.tallerId, id),
+    c.env.DB.prepare(`UPDATE ordenes SET ${sets.join(', ')}, version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id = ? AND id = ?`).bind(...vals, s.tallerId, id),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'diagnostico'),
   ]);
   return c.json({ ok: true });
 });
 
+const zEstimado = z.number().int().min(0).max(60000);
+const zTareaNueva = z.object({
+  descripcion: z.string().trim().min(2).max(200),
+  responsable_id: zId.nullish(),
+  tiempo_estimado_min: zEstimado.nullish(),
+  servicio_id: zId.nullish(),
+  observaciones: z.string().trim().max(1000).nullish(),
+});
+
+/** Cambiar el responsable de una tarea: lo hace quien asigna; cualquiera puede tomar una tarea libre o soltar la suya. */
+function autorizarResponsable(s: Sesion, actual: string | null, nuevo: string | null) {
+  if (nuevo === actual) return;
+  const toma = nuevo === s.usuarioId && !actual;
+  const suelta = nuevo === null && actual === s.usuarioId;
+  if (!puedeAsignar(s) && !toma && !suelta) throw forbidden('Solo quien asigna tareas puede cambiar el responsable');
+}
+
 ordenes.post('/:id/tareas', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const d = await body(c, z.object({ descripcion: z.string().trim().min(2).max(200) }));
+  const d = await body(c, zTareaNueva);
   await autorizarTrabajo(c.env.DB, s, id);
   await ordenAbierta(c.env.DB, s.tallerId, id);
+  if (d.responsable_id) {
+    autorizarResponsable(s, null, d.responsable_id);
+    await validarUsuariosActivos(c.env.DB, s.tallerId, [d.responsable_id]);
+  }
+  if (d.servicio_id && !(await first(c.env.DB, 'SELECT 1 FROM servicios WHERE taller_id = ? AND id = ?', s.tallerId, d.servicio_id))) throw badRequest('Servicio inexistente');
   const n = await first<{ n: number }>(c.env.DB, 'SELECT COUNT(*) AS n FROM orden_tareas WHERE taller_id = ? AND orden_id = ?', s.tallerId, id);
   if ((n?.n ?? 0) >= 100) throw badRequest('La orden ya tiene el máximo de tareas');
   const tid = uid();
-  await c.env.DB.prepare('INSERT INTO orden_tareas (id, taller_id, orden_id, posicion, descripcion, creada_por) VALUES (?, ?, ?, ?, ?, ?)').bind(tid, s.tallerId, id, n?.n ?? 0, d.descripcion, s.usuarioId).run();
+  await c.env.DB.prepare(
+    'INSERT INTO orden_tareas (id, taller_id, orden_id, posicion, descripcion, responsable_id, servicio_id, tiempo_estimado_min, observaciones, creada_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).bind(tid, s.tallerId, id, n?.n ?? 0, d.descripcion, d.responsable_id ?? null, d.servicio_id ?? null, d.tiempo_estimado_min ?? null, d.observaciones || null, s.usuarioId).run();
   return c.json({ id: tid }, 201);
 });
+
+/** Crea una tarea por cada trabajo de la OT que todavía no la tenga (con el tiempo estimado del tempario). */
+ordenes.post('/:id/tareas/desde-trabajos', async (c) => {
+  const s = c.get('sesion');
+  const id = c.req.param('id');
+  await autorizarTrabajo(c.env.DB, s, id);
+  await ordenAbierta(c.env.DB, s.tallerId, id);
+  const r = await sentenciaTareasDesdeTrabajos(c.env.DB, s.tallerId, id, s.usuarioId).run();
+  return c.json({ creadas: r.meta.changes ?? 0 });
+});
+
+const zTareaPatch = z.object({
+  hecha: z.boolean().optional(),
+  estado: z.enum(ESTADOS_TAREA).optional(),
+  descripcion: z.string().trim().min(2).max(200).optional(),
+  responsable_id: zId.nullish(),
+  tiempo_estimado_min: zEstimado.nullish(),
+  observaciones: z.string().trim().max(1000).nullish(),
+});
+
+/** SQL que cierra el cronómetro propio de una tarea (pausar o completar la tarea detiene el reloj). */
+const CERRAR_MI_TRAMO = `UPDATE orden_tiempos SET fin_at = ?, duracion_seg = MAX(0, CAST(ROUND((julianday(?) - julianday(inicio_at)) * 86400) AS INTEGER))
+  WHERE taller_id = ? AND usuario_id = ? AND tarea_id = ? AND fin_at IS NULL`;
 
 ordenes.patch('/:id/tareas/:tid', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const d = await body(c, z.object({ hecha: z.boolean().optional(), descripcion: z.string().trim().min(2).max(200).optional() }));
+  const tid = c.req.param('tid');
+  const d = await body(c, zTareaPatch);
   await autorizarTrabajo(c.env.DB, s, id);
   await ordenAbierta(c.env.DB, s.tallerId, id);
+  const t = await first<{ estado: string; responsable_id: string | null }>(c.env.DB, 'SELECT estado, responsable_id FROM orden_tareas WHERE taller_id = ? AND orden_id = ? AND id = ?', s.tallerId, id, tid);
+  if (!t) throw notFound('Tarea');
+  const ahoraIso = new Date().toISOString();
   const sets: string[] = [];
   const vals: unknown[] = [];
-  if (d.hecha !== undefined) {
-    sets.push('hecha = ?', 'hecha_at = ?', 'hecha_por = ?');
-    vals.push(d.hecha ? 1 : 0, d.hecha ? new Date().toISOString() : null, d.hecha ? s.usuarioId : null);
+  const stmts: Stmt[] = [];
+
+  // `hecha` (versión anterior de la API) equivale a completada / pendiente.
+  const estado = d.estado ?? (d.hecha === undefined ? undefined : d.hecha ? 'completada' : t.estado === 'completada' ? 'pendiente' : t.estado);
+  let responsable = t.responsable_id;
+  if (d.responsable_id !== undefined) {
+    autorizarResponsable(s, t.responsable_id, d.responsable_id ?? null);
+    if (d.responsable_id) await validarUsuariosActivos(c.env.DB, s.tallerId, [d.responsable_id]);
+    responsable = d.responsable_id ?? null;
   }
+  if (estado && estado !== t.estado) {
+    sets.push('estado = ?');
+    vals.push(estado);
+    // Quien empieza o termina una tarea libre y está asignado a la orden pasa a ser su responsable.
+    if ((estado === 'en_proceso' || estado === 'completada') && !responsable && (await esAsignadaAMi(c.env.DB, s, id))) responsable = s.usuarioId;
+    if (estado === 'en_proceso') (sets.push('iniciada_at = COALESCE(iniciada_at, ?)'), vals.push(ahoraIso));
+    if (estado === 'completada') (sets.push('hecha_at = ?', 'hecha_por = ?'), vals.push(ahoraIso, s.usuarioId));
+    else if (t.estado === 'completada') sets.push('hecha_at = NULL', 'hecha_por = NULL');
+    if (estado !== 'en_proceso') stmts.push(c.env.DB.prepare(CERRAR_MI_TRAMO).bind(ahoraIso, ahoraIso, s.tallerId, s.usuarioId, tid));
+  }
+  if (responsable !== t.responsable_id) (sets.push('responsable_id = ?'), vals.push(responsable));
   if (d.descripcion) (sets.push('descripcion = ?'), vals.push(d.descripcion));
+  if (d.tiempo_estimado_min !== undefined) (sets.push('tiempo_estimado_min = ?'), vals.push(d.tiempo_estimado_min ?? null));
+  if (d.observaciones !== undefined) (sets.push('observaciones = ?'), vals.push(d.observaciones || null));
   if (!sets.length) return c.json({ ok: true });
-  const r = await c.env.DB.prepare(`UPDATE orden_tareas SET ${sets.join(', ')} WHERE taller_id = ? AND orden_id = ? AND id = ?`).bind(...vals, s.tallerId, id, c.req.param('tid')).run();
-  if (!r.meta.changes) throw notFound('Tarea');
+  stmts.push(
+    c.env.DB.prepare(`UPDATE orden_tareas SET ${sets.join(', ')} WHERE taller_id = ? AND orden_id = ? AND id = ?`).bind(...vals, s.tallerId, id, tid),
+    auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'tarea', { tarea_id: tid, estado: estado ?? undefined, responsable_id: responsable !== t.responsable_id ? responsable : undefined }),
+  );
+  await c.env.DB.batch(stmts);
   return c.json({ ok: true });
 });
 
@@ -485,9 +664,18 @@ ordenes.post('/:id/notas', async (c) => {
   return c.json({ id: nid }, 201);
 });
 
+// ───── Cronómetro de la OT (un tramo por vez y por persona; puede atribuirse a una tarea) ─────
+async function cuerpoOpcional<T extends z.ZodTypeAny>(c: { req: { json: () => Promise<unknown> } }, schema: T): Promise<z.infer<T>> {
+  const raw = await c.req.json().catch(() => ({}));
+  const r = schema.safeParse(raw ?? {});
+  if (!r.success) throw badRequest(`${r.error.issues[0].path.join('.') || 'datos'}: ${r.error.issues[0].message}`);
+  return r.data;
+}
+
 ordenes.post('/:id/tiempo/iniciar', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
+  const d = await cuerpoOpcional(c, z.object({ tarea_id: zId.nullish() }));
   await autorizarTrabajo(c.env.DB, s, id);
   await ordenAbierta(c.env.DB, s.tallerId, id);
   const abierto = await first<{ orden_id: string; numero: number }>(
@@ -497,17 +685,41 @@ ordenes.post('/:id/tiempo/iniciar', async (c) => {
     s.usuarioId,
   );
   if (abierto) throw conflict(abierto.orden_id === id ? 'Ya estás trabajando en esta orden' : `Ya tenés el cronómetro en marcha en la OT #${abierto.numero}: detenelo antes de empezar otra`, 'cronometro_en_marcha');
-  await c.env.DB.prepare('INSERT INTO orden_tiempos (id, taller_id, orden_id, usuario_id, inicio_at) VALUES (?, ?, ?, ?, ?)').bind(uid(), s.tallerId, id, s.usuarioId, new Date().toISOString()).run();
+  const ahoraIso = new Date().toISOString();
+  const stmts: Stmt[] = [];
+  if (d.tarea_id) {
+    const t = await first<{ estado: string; responsable_id: string | null }>(c.env.DB, 'SELECT estado, responsable_id FROM orden_tareas WHERE taller_id = ? AND orden_id = ? AND id = ?', s.tallerId, id, d.tarea_id);
+    if (!t) throw badRequest('La tarea no pertenece a esta orden');
+    if (t.estado === 'completada') throw conflict('La tarea ya está completada: reabrila para seguir trabajando en ella');
+    // Empezar a trabajar en una tarea la pone "en proceso" y, si estaba libre, queda a cargo de quien la empezó.
+    stmts.push(
+      c.env.DB.prepare("UPDATE orden_tareas SET estado = 'en_proceso', iniciada_at = COALESCE(iniciada_at, ?), responsable_id = COALESCE(responsable_id, ?) WHERE taller_id = ? AND orden_id = ? AND id = ?")
+        .bind(ahoraIso, s.usuarioId, s.tallerId, id, d.tarea_id),
+    );
+  }
+  stmts.push(c.env.DB.prepare('INSERT INTO orden_tiempos (id, taller_id, orden_id, usuario_id, inicio_at, tarea_id) VALUES (?, ?, ?, ?, ?, ?)').bind(uid(), s.tallerId, id, s.usuarioId, ahoraIso, d.tarea_id ?? null));
+  await c.env.DB.batch(stmts);
   return c.json({ ok: true }, 201);
 });
 
 ordenes.post('/:id/tiempo/detener', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const t = await first<{ id: string; inicio_at: string }>(c.env.DB, 'SELECT id, inicio_at FROM orden_tiempos WHERE taller_id = ? AND orden_id = ? AND usuario_id = ? AND fin_at IS NULL', s.tallerId, id, s.usuarioId);
+  const d = await cuerpoOpcional(c, z.object({ pausar_tarea: z.boolean().default(true) }));
+  const t = await first<{ id: string; inicio_at: string; tarea_id: string | null }>(c.env.DB, 'SELECT id, inicio_at, tarea_id FROM orden_tiempos WHERE taller_id = ? AND orden_id = ? AND usuario_id = ? AND fin_at IS NULL', s.tallerId, id, s.usuarioId);
   if (!t) throw conflict('No tenés el cronómetro en marcha en esta orden');
   const fin = new Date();
   const seg = Math.max(0, Math.round((fin.getTime() - Date.parse(t.inicio_at)) / 1000));
-  await c.env.DB.prepare('UPDATE orden_tiempos SET fin_at = ?, duracion_seg = ? WHERE taller_id = ? AND id = ? AND fin_at IS NULL').bind(fin.toISOString(), seg, s.tallerId, t.id).run();
+  const stmts: Stmt[] = [c.env.DB.prepare('UPDATE orden_tiempos SET fin_at = ?, duracion_seg = ? WHERE taller_id = ? AND id = ? AND fin_at IS NULL').bind(fin.toISOString(), seg, s.tallerId, t.id)];
+  // Detener el reloj deja la tarea "pausada" (salvo que se indique lo contrario) si seguía en proceso y nadie más trabaja en ella.
+  if (t.tarea_id && d.pausar_tarea) {
+    stmts.push(
+      c.env.DB.prepare(
+        `UPDATE orden_tareas SET estado = 'pausada' WHERE taller_id = ? AND id = ? AND estado = 'en_proceso'
+           AND NOT EXISTS (SELECT 1 FROM orden_tiempos x WHERE x.taller_id = orden_tareas.taller_id AND x.tarea_id = orden_tareas.id AND x.fin_at IS NULL AND x.id <> ?)`,
+      ).bind(s.tallerId, t.tarea_id, t.id),
+    );
+  }
+  await c.env.DB.batch(stmts);
   return c.json({ ok: true, duracion_seg: seg });
 });

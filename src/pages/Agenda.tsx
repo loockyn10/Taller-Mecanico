@@ -1,6 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CalendarClock, ChevronLeft, ChevronRight, Plus, Wrench } from 'lucide-react';
 import { api } from '@/lib/api';
 import { hoyISO, money, numero, sumarDias } from '@/lib/format';
@@ -93,6 +93,15 @@ export function Agenda() {
   const { confirmar, dialogo } = useConfirmar();
   const [inicio, setInicio] = useState(lunesDe(hoyISO()));
   const [form, setForm] = useState<any | null>(null);
+  const [sp, setSp] = useSearchParams();
+  // Un mantenimiento pendiente abre el turno ya cargado con el cliente, el vehículo y el motivo.
+  useEffect(() => {
+    const vId = sp.get('vehiculo');
+    if (sp.get('nuevo') && vId) {
+      api.get(`/vehiculos/${vId}`).then((v) => setForm({ cliente_id: v.cliente_id, cliente: v.cliente, cliente_telefono: v.cliente_telefono, vehiculo_id: v.id, motivo: sp.get('motivo') ?? '' })).catch(() => undefined);
+      setSp({}, { replace: true });
+    }
+  }, [sp, setSp]);
   const dias = useMemo(() => Array.from({ length: 7 }, (_, i) => sumarDias(inicio, i)), [inicio]);
   const { data: turnos = [], isLoading } = useQuery({ queryKey: ['turnos', inicio], queryFn: () => api.get<any[]>(`/turnos?desde=${dias[0]}&hasta=${dias[6]}`) });
   const { data: pendientes = [] } = useQuery({ queryKey: ['turnos', 'pendientes'], queryFn: () => api.get<any[]>('/turnos/pendientes') });

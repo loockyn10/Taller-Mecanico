@@ -25,6 +25,10 @@ import { abastecimiento } from './modules/abastecimiento';
 import { personal } from './modules/personal';
 import { asistencia } from './modules/asistencia';
 import { relojAdmin, relojPublico } from './modules/reloj';
+import { tempario } from './modules/tempario';
+import { historial } from './modules/historial';
+import { mantenimientos } from './modules/mantenimientos';
+import { productividad } from './modules/productividad';
 
 const app = new Hono<AppEnv>();
 
@@ -49,6 +53,10 @@ api.route('/taller', personal);
 api.route('/asistencia', asistencia);
 api.route('/asistencia', relojAdmin);
 api.route('/', maestros);
+api.route('/', historial);
+api.route('/', mantenimientos);
+api.route('/tempario', tempario);
+api.route('/productividad', productividad);
 api.route('/', catalogo);
 api.route('/presupuestos', presupuestos);
 api.route('/ordenes', ordenes);

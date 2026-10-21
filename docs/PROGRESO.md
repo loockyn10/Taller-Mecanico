@@ -1,6 +1,6 @@
 # Progreso del desarrollo · Fierro v0.1.0
 
-Última actualización: 2026-10-20 (ver la sección 14 en adelante: Sprint 03, expansión administrativa y ERP). Documento para retomar el trabajo en nuevas sesiones.
+Última actualización: 2026-10-21 (ver la sección 27 en adelante: Sprint 07, gestión mecánica avanzada). Documento para retomar el trabajo en nuevas sesiones.
 
 ## 1. Arquitectura implementada
 - **Un único Worker** (`worker/index.ts`, Hono) sirve la API en `/api/*` y la SPA compilada (assets estáticos). En desarrollo, Vite sirve la SPA y redirige `/api` a `wrangler dev`.
@@ -268,7 +268,7 @@ Es aditiva: no se pierden datos. Una consecuencia de comportamiento: **para los 
 
 ## 18. Pendiente / no implementado
 - **Contabilidad de partida doble** completa (plan de cuentas, asientos, libro diario/mayor, balance de comprobación) y cierre de períodos.
-- **Sprint 02** (historial clínico, tempario, horas y comisiones de mecánicos): no existe en el repositorio.
+- ~~Sprint 02~~ (historial técnico, tempario, tiempos de mecánicos): completado en el Sprint 07 (secciones 27 a 32). Siguen pendientes las comisiones.
 - El rechazo de un cheque no reabre solo la deuda del cliente: se avisa y hay que anular el cobro (que queda permitido). Tampoco se concilian cheques contra extractos importados.
 - Cobros/pagos por tarjeta se acreditan en la cuenta el mismo día (no hay liquidaciones diferidas del procesador).
 - Imputación de pagos a proveedores contra comprobantes específicos (hoy es automática al más antiguo); OCR de facturas; importación/exportación masiva de artículos; recuperación de contraseña por email.
@@ -330,3 +330,73 @@ Trabajo sobre `main`, sin ramas ni PR. Se reutilizó la autenticación existente
 - Un administrador ya no puede crear otros administradores ni otorgar permisos que no tiene.
 - La pestaña "Usuarios y permisos" de Configuración pasó a **Personal → Equipo y permisos**.
 - Fuera de alcance, sin cambios: ARCA, el modelo comercial de licencias y los datos del Taller Demo Fierro.
+
+---
+
+# Sprint 07 — Gestión mecánica avanzada
+
+Trabajo directo sobre `main` (sin ramas, PR ni `gh`). Completa la funcionalidad del antiguo "Sprint 02" (tempario, historial técnico, mantenimientos, horas de mecánicos) **reutilizando** lo que ya existía: no se crearon módulos, entidades ni sistemas de permisos paralelos.
+
+## 27. Qué se implementó
+
+### Tempario (`/tempario`, `worker/modules/tempario.ts`, `shared/tempario.ts`)
+- **El tempario son los servicios del taller** (mano de obra, ya existían con categoría, precio e intervalos). Se les sumó: código, tiempo estimado general, modo de precio (`fijo` o `por tiempo`) y origen (`propio` / `plantilla` = tiempo orientativo sin revisar). Los servicios existentes quedan **intactos** (precio fijo, sin tiempo).
+- **Tarifas de mano de obra por taller**: tarifa general por hora y, opcionalmente, una por categoría. Precio "por tiempo" = tiempo × tarifa, redondeado al peso. Sin tarifa o sin tiempo se conserva el precio cargado. Ver la tarifa exige `precios.venta.ver`; modificarla, `precios.gestionar`.
+- **Tiempos específicos opcionales** (`servicio_tiempos`) por marca, modelo, motorización (texto contenido en el motor del vehículo) y rango de años. Gana la regla más precisa (modelo > marca > motor > años); si ninguna aplica se usa el tiempo general. Probado en `tests/unit/tempario.test.ts`.
+- **Plantilla general orientativa** (47 operaciones: aceite, filtros, frenos, discos, embrague, distribución, amortiguadores, suspensión, diagnóstico electrónico, reparaciones generales, etc.). **No son datos oficiales de fabricantes**: la pantalla y la API lo dicen, y toda operación copiada queda marcada "Orientativo" hasta que el taller edita o confirma su tiempo. Se **copia** al taller (`POST /api/tempario/plantilla/importar`); a lo que el taller ya tenía solo se le completa el tiempo si estaba vacío (no se pisa ningún precio ni dato). Cada taller edita su copia; nada se comparte entre talleres.
+- **Integración con presupuestos y OT**: al elegir una operación en el editor de ítems se incorpora la descripción, se sugiere el tiempo (el del vehículo elegido, si hay regla específica) y se calcula la mano de obra con la tarifa del taller. El tiempo (`tiempo_min`) queda en el ítem y es ajustable por quien puede editar ítems (exige permiso de precios e importes, como antes). La lista de precios elegida se aplica sobre el precio calculado.
+
+### Historial técnico del vehículo (`GET /api/vehiculos/:id/historial-tecnico`, `HistorialTecnico.tsx`)
+- Línea de tiempo con fecha, kilometraje, OT, diagnóstico, trabajos, repuestos, mecánicos participantes y su tiempo, tareas, observaciones técnicas y resultado. **Se lee de las órdenes de trabajo**; no se duplica nada.
+- **Antecedentes anteriores a Fierro** (`vehiculo_antecedentes`): se cargan a mano (`vehiculos.editar`), se anulan sin borrarse, y se muestran **diferenciados** ("Hecho en Fierro" / "Antecedente cargado manualmente"). Si corresponden a una operación programable cuentan como su última realización.
+- Los mecánicos con `vehiculos.ver` consultan todo **sin importes** (el total solo viaja con `presupuestos.valorizados.ver`; los ítems del historial no llevan precios ni costos).
+- Nueva columna `ordenes.resultado` ("Resultado del trabajo"), editable por el mecánico.
+
+### Mantenimientos programados (`/mantenimientos`, `worker/modules/mantenimientos.ts`, `worker/lib/mantenimiento.ts`)
+- Una sola fuente de cálculo para la pantalla, la ficha del vehículo y `/recordatorios` (que sigue existiendo por compatibilidad). Estados: **vencido**, **próximo** (≤ 1.000 km o 30 días), **al día** y **sin registro**.
+- La última realización se **calcula** de las OT terminadas (lista/entregada, con su kilometraje) y de los antecedentes; el kilometraje actual es el del vehículo (que las OT mantienen). No se guarda duplicada.
+- Planes por vehículo (`vehiculo_mantenimientos`) con intervalos propios de km y/o meses que reemplazan a los del servicio, pausa, notas y "última vez" informada (queda como antecedente). Cada taller define sus mantenimientos con los intervalos de sus servicios.
+- Desde un mantenimiento pendiente: **generar turno** (abre la agenda con cliente, vehículo y motivo cargados), **generar presupuesto** (abre el formulario con el vehículo y la operación) y **avisar por WhatsApp** (enlace manual). **No hay envíos automáticos** de WhatsApp, SMS ni correo.
+
+### Mecánicos, tareas y cronómetro (reutilizando Sprint 06)
+- **Sin segunda entidad de mecánicos**: el responsable sigue siendo `ordenes.mecanico_id` (el mecánico vinculado al usuario) y los **participantes** (`orden_participantes`) son usuarios del Sprint 06. El alcance de "órdenes asignadas" incluye ser responsable, participante o responsable de alguna tarea.
+- **Tareas** (`orden_tareas`, reconstruida copiando las existentes): estado pendiente / en proceso / pausada / completada, responsable, tiempo estimado, observaciones técnicas, tiempo real y quién la completó. Se crean desde los trabajos con tiempo del tempario al crear la OT o convertir el presupuesto (idempotente, también por botón).
+- **Mismo cronómetro de OT** (`orden_tiempos`): ahora puede atribuirse a una tarea (`tarea_id`). Empezar una tarea la pone en proceso (y a cargo de quien la empieza si estaba libre); detener o pausar deja la tarea pausada; completarla detiene el reloj. Un cronómetro a la vez por persona (índice único). Al pasar la OT a lista / entregada / cancelada se cierran los tramos abiertos.
+- **Asignación sin importes**: `ordenes.asignar` (nuevo permiso; también lo tienen administración y recepción) permite fijar responsable, participantes y repartir tareas sin ver ni modificar precios. Un mecánico puede tomar una tarea libre o soltar la suya, pero no reasignar a otros.
+- **Entrega**: un mecánico sin `ordenes.modificar` no puede entregar, cancelar ni reabrir (403 en la API; la pantalla ni siquiera ofrece esos estados).
+
+### Productividad (`/productividad`, `worker/modules/productividad.ts`)
+- **Por mecánico**: horas de asistencia (fichajes), horas registradas en OT (cronómetro), OT trabajadas, tareas completadas, estimado vs. real (solo tareas completadas con estimación **y** cronómetro) y carga actual (OT abiertas, tareas pendientes y su tiempo estimado).
+- **Por taller**: órdenes pendientes, en proceso, completadas e ingresadas del período, tiempo promedio de ejecución (ingreso → lista y tiempo cronometrado por orden), tareas completadas y carga por empleado.
+- **Asistencia ≠ productividad**: se muestran por separado y **no se calcula ningún "tiempo improductivo"** ni porcentaje de aprovechamiento; la pantalla aclara que la diferencia incluye diagnóstico sin cronómetro, esperas, limpieza, atención, etc.
+- Permiso `productividad.ver` (administración y propietario; otorgable). El único indicador económico (mano de obra de las órdenes completadas) solo viaja con `presupuestos.valorizados.ver`. Cada persona ve sus propios números en "Mis trabajos" (`/productividad/mia`).
+
+### Experiencia móvil (misma aplicación, sin segunda app)
+- "Mis trabajos" rediseñada: tarjetas con patente grande, estado, avance de tareas y tiempo estimado; resumen del día propio; **barra de cronómetro** siempre visible (detener a un toque); botones de 48–56 px (Empezar / Pausar / Terminar por tarea); tareas agrupadas en **En curso / Pendientes / Finalizadas**; **observación rápida** flotante; navegación al trabajo anterior/siguiente; en tablet, dos columnas.
+
+## 28. Integraciones reutilizadas
+Usuarios, roles y 53 permisos del Sprint 06 (se sumaron 4: `ordenes.asignar`, `mantenimientos.ver`, `mantenimientos.gestionar`, `productividad.ver`, con sus dependencias y las plantillas de rol actualizadas); `mecanicos.usuario_id`; cronómetro `orden_tiempos`; tareas y notas de OT; asistencias y zona horaria del taller; `servicios` y categorías (el tempario); listas de precios; `vehiculos.km_actual` mantenido por las OT; filtrado de importes de `worker/lib/privacidad.ts`; agenda y presupuestos (prellenados desde mantenimientos). Todo con `taller_id` de la sesión y claves foráneas compuestas.
+
+## 29. Migración
+- `migrations/0007_gestion_mecanica.sql` (aditiva): columnas en `servicios` (código único por taller, tiempo, modo de precio, origen), `taller_config.tarifa_hora`, `categorias_servicio.tarifa_hora`, `presupuesto_items.tiempo_min`, `orden_items.tiempo_min`, `ordenes.resultado`, `orden_tiempos.tarea_id`; tablas `servicio_tiempos`, `orden_participantes`, `vehiculo_antecedentes`, `vehiculo_mantenimientos`; **reconstruye `orden_tareas`** copiando todas sus filas (las hechas pasan a `completada`).
+- Probada en `tests/api/migraciones.test.ts` sobre datos previos del Sprint 06 (servicios, OT, tareas hechas y pendientes, tiempos) y ensayada sobre el respaldo de la D1 remota antes de aplicarla.
+
+## 30. Pruebas
+- `npm test`: **46 unitarias + 191 de integración, todas OK** (`npm run typecheck` y `npm run build` también). Nuevas: `tests/api/mecanica.test.ts` (19 pruebas contra el Worker real: plantilla y copia por taller, tarifas y precio por tiempo, regla específica vs. genérica, validación de reglas, permisos de precios, tareas generadas desde los trabajos, asignación y alcance de participantes, cronómetro por tarea, mecánico que no cambia importes ni entrega, cierre de cronómetros, historial con y sin importes, antecedentes, mantenimientos con kilometraje y antecedentes, productividad con/sin importes y aislamiento entre talleres), `tests/unit/tempario.test.ts` (11: resolución de tiempos específicos, precio por tiempo y vencimientos) y la prueba de migraciones ampliada con la 0007 sobre datos del Sprint 06.
+- Las pruebas de integración se corrieron en dos tandas de archivos; una corrida única de toda la suite se colgó una vez en el servidor local de pruebas (dejó de responder a mitad de camino, sin error de las pruebas) y al repetirla por tandas pasó todo. No se identificó una causa en el código.
+- Verificación en el navegador sobre una instancia aislada (puertos 8790/5180, sin tocar la instancia de desarrollo propia): vista móvil 375 px de "Mis trabajos" (barra de cronómetro, empezar/terminar tareas, avance), Tempario con tarifas y plantilla, ficha del vehículo con historial técnico y mantenimientos, turno prellenado desde un mantenimiento vencido, Mantenimientos, Productividad y la pestaña de equipo y tareas de la OT. Se corrigió un solape de la barra "Observación rápida" con la navegación inferior y las consultas de mecánicos que un mecánico no puede hacer.
+- Despliegue: la migración 0007 se ensayó sobre el respaldo de la D1 remota (todas las filas conservadas, 0 violaciones de claves foráneas) antes de aplicarla.
+
+## 31. Cambios de comportamiento a tener en cuenta
+- "Recordatorios" pasó a **Mantenimientos** (`/recordatorios` redirige) y ahora requiere `mantenimientos.ver`. La pestaña **Configuración → Servicios** pasó al **Tempario**.
+- Las OT nuevas (y las que salen de un presupuesto) crean una **tarea por cada trabajo** de mano de obra.
+- El ajuste masivo de precios de servicios solo toca los de precio fijo; los de precio por tiempo cambian con la tarifa por hora.
+- Los servicios que ya existían no cambian: siguen con precio fijo hasta que el taller decida pasarlos a "por tiempo".
+
+## 32. Limitaciones pendientes
+- Los tiempos de la plantilla son orientativos y genéricos: cada taller debe revisarlos. No hay tempario oficial de fabricantes ni sincronización con catálogos externos.
+- La motorización se compara por texto contenido en el campo "motor" del vehículo; si el vehículo no lo tiene cargado, las reglas por motor no aplican.
+- El tiempo real de una tarea sale del cronómetro; el tiempo trabajado sin cronómetro no se imputa. No hay comisiones, liquidación de sueldos ni costo por hora del mecánico.
+- Los avisos de mantenimiento son manuales (enlace de WhatsApp): no hay envío automático por WhatsApp, SMS o correo.
+- El historial no registra fotos ni archivos (requiere almacenamiento de archivos).
+- Sin pruebas de interfaz automatizadas (E2E); la verificación visual fue manual en una instancia aislada.

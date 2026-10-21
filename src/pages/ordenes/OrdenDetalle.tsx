@@ -8,7 +8,7 @@ import { fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, ResumenTotales, type ItemUI, type ParamsUI } from '@/components/EditorItems';
-import { Cronometro, NotasTecnicas, Tareas } from '@/components/TrabajoMecanico';
+import { Cronometro, EquipoOrden, NotasTecnicas, Tareas } from '@/components/TrabajoMecanico';
 import { useMecanicos } from '@/components/selectores';
 import { ModalCobro, ModalEmitirCobrar } from '@/components/Cobro';
 import { SelectorLista } from '@/components/SelectorLista';
@@ -211,6 +211,8 @@ export function OrdenDetalle() {
   const puedeModificar = puede('ordenes.modificar');
   const cerrada = o.estado === 'entregada' || o.estado === 'cancelada';
   const puedeTrabajar = !cerrada && (puedeModificar || (puede('ordenes.trabajar_asignadas') && o.asignada_a_mi));
+  // Asignar responsable, participantes y tareas no requiere ver ni modificar importes.
+  const puedeAsignar = !cerrada && (puedeModificar || puede('ordenes.asignar'));
   // Editar ítems exige ver precios e importes (el servidor también lo verifica).
   const editable = ESTADOS_OT_EDITABLES.includes(o.estado) && puedeModificar && valorizado && puede('precios.venta.ver');
   const saldo = o.venta_id ? o.venta_total - o.venta_cobrado : null;
@@ -246,7 +248,7 @@ export function OrdenDetalle() {
             onCambio={setTab}
             items={[
               { clave: 'trabajo', titulo: 'Trabajo' },
-              { clave: 'tareas', titulo: 'Tareas y notas', contador: o.tareas.length || undefined },
+              { clave: 'tareas', titulo: 'Equipo, tareas y tiempos', contador: o.tareas.length || undefined },
               { clave: 'checklist', titulo: 'Check-list de ingreso' },
               ...(puede('ventas.ver') ? [{ clave: 'cobro' as const, titulo: 'Comprobante y cobro' }] : []),
               { clave: 'historial', titulo: 'Historial', contador: o.eventos.length },
@@ -286,7 +288,7 @@ export function OrdenDetalle() {
                     <Campo label="Observaciones" className="sm:col-span-2"><Textarea value={cab.observaciones} onChange={(e) => setCab({ ...cab, observaciones: e.target.value })} rows={2} /></Campo>
                   </div>
                   <SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} nombreActual={o.lista_precio_nombre} />
-                  <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} />
+                  <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} vehiculoId={o.vehiculo_id} />
                 </div>
               ) : (
                 <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} soloLectura />
@@ -295,8 +297,9 @@ export function OrdenDetalle() {
           )}
           {tab === 'tareas' && (
             <div className="space-y-5">
-              <Tarjeta titulo="Tareas del trabajo"><Tareas orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
-              <Tarjeta titulo="Diagnóstico y observaciones técnicas"><NotasTecnicas orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
+              <Tarjeta titulo="Equipo de trabajo" subtitulo="Mecánico responsable y quienes participan en la orden"><EquipoOrden orden={o} puedeAsignar={puedeAsignar} /></Tarjeta>
+              <Tarjeta titulo="Tareas del trabajo" subtitulo="Cada tarea tiene su responsable, estado, tiempo estimado y tiempo real"><Tareas orden={o} puedeEditar={puedeTrabajar} puedeAsignar={puedeAsignar} /></Tarjeta>
+              <Tarjeta titulo="Diagnóstico, resultado y observaciones técnicas"><NotasTecnicas orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
               <Tarjeta titulo="Tiempo dedicado a la reparación" subtitulo="Aparte de las horas de asistencia al taller"><Cronometro orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
             </div>
           )}
@@ -359,12 +362,14 @@ export function OrdenDetalle() {
               <Dato etiqueta="Vehículo">{puede('vehiculos.ver') ? <Link className="text-marca-700" to={`/vehiculos/${o.vehiculo_id}`}>{o.patente}</Link> : o.patente}</Dato>
               <Dato etiqueta="Km de ingreso">{km(o.km_ingreso)}</Dato>
               <Dato etiqueta="Mecánico">{o.mecanico}</Dato>
+              {o.participantes?.length > 0 && <Dato etiqueta="Participan">{o.participantes.map((p: any) => p.nombre).join(', ')}</Dato>}
               <Dato etiqueta="Ingreso">{fecha(o.fecha_ingreso)}</Dato>
               <Dato etiqueta="Prometida">{fecha(o.fecha_prometida)}</Dato>
               <Dato etiqueta="Entregada">{fecha(o.fecha_entregada)}</Dato>
               {o.presupuesto_id && <Dato etiqueta="Origen" className="col-span-2"><Link className="text-marca-700" to={`/presupuestos/${o.presupuesto_id}`}>Presupuesto #{numero(o.presupuesto_numero)}</Link></Dato>}
               <Dato etiqueta="Falla reportada" className="col-span-2">{o.falla_reportada}</Dato>
               <Dato etiqueta="Diagnóstico" className="col-span-2">{o.diagnostico}</Dato>
+              {o.resultado && <Dato etiqueta="Resultado del trabajo" className="col-span-2">{o.resultado}</Dato>}
               <Dato etiqueta="Observaciones" className="col-span-2">{o.observaciones}</Dato>
               {o.lista_precio_nombre && <Dato etiqueta="Lista de precios" className="col-span-2">{o.lista_precio_nombre}</Dato>}
             </dl>

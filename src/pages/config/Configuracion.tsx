@@ -4,10 +4,10 @@ import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { fechaHora, money } from '@/lib/format';
+import { fechaHora } from '@/lib/format';
 import { Aviso, Boton, Campo, Cargando, Check, Encabezado, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { useMarcas } from '@/components/selectores';
-import { CONDICIONES_IVA, CONDICION_IVA_LABEL, MEDIO_PAGO_LABEL, MEDIOS_PAGO, TIPOS_VEHICULO, TIPO_VEHICULO_LABEL } from '@shared/dominio';
+import { CONDICIONES_IVA, CONDICION_IVA_LABEL, MEDIO_PAGO_LABEL, MEDIOS_PAGO } from '@shared/dominio';
 import { ZONAS_HORARIAS } from '@shared/permisos';
 
 function DatosTaller() {
@@ -204,117 +204,6 @@ function Mecanicos() {
   );
 }
 
-function Servicios() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const { puede } = useAuth();
-  const { data: servicios = [] } = useQuery({ queryKey: ['servicios', 'todos'], queryFn: () => api.get<any[]>('/servicios?todos=1') });
-  const { data: cats = [] } = useQuery({ queryKey: ['categorias-servicio'], queryFn: () => api.get<any[]>('/categorias-servicio') });
-  const [f, setF] = useState<any>(null);
-  const [ajuste, setAjuste] = useState<any>(null);
-  const [nuevaCat, setNuevaCat] = useState('');
-  const inv = () => { qc.invalidateQueries({ queryKey: ['servicios'] }); qc.invalidateQueries({ queryKey: ['categorias-servicio'] }); };
-  const guardar = useMutation({
-    mutationFn: () => {
-      const d = { categoria_id: f.categoria_id || null, nombre: f.nombre, descripcion: f.descripcion, precio: f.precio, tipo_vehiculo: f.tipo_vehiculo, intervalo_km: f.intervalo_km ? Number(f.intervalo_km) : null, intervalo_meses: f.intervalo_meses ? Number(f.intervalo_meses) : null, checks: f.checks, activo: f.activo };
-      return f.id ? api.put(`/servicios/${f.id}`, d) : api.post('/servicios', d);
-    },
-    onSuccess: () => { inv(); setF(null); toast.ok('Servicio guardado'); },
-    onError: toast.error,
-  });
-  const masivo = useMutation({
-    mutationFn: () => api.post('/servicios/ajuste-masivo', { categoria_id: ajuste.categoria_id || null, porcentaje: Number(ajuste.porcentaje), redondeo: ajuste.redondeo }),
-    onSuccess: (r) => { inv(); setAjuste(null); toast.ok(`${r.actualizados} precios actualizados`); },
-    onError: toast.error,
-  });
-  const crearCat = useMutation({ mutationFn: () => api.post('/categorias-servicio', { nombre: nuevaCat, orden: cats.length }), onSuccess: () => { inv(); setNuevaCat(''); }, onError: toast.error });
-  const edita = puede('catalogo.editar');
-  return (
-    <>
-      <Tarjeta
-        titulo="Servicios y mano de obra"
-        subtitulo="Catálogo de trabajos con precio sugerido e intervalos para recordatorios"
-        sinPadding
-        acciones={edita && (
-          <>
-            <Boton tam="sm" onClick={() => setAjuste({ categoria_id: '', porcentaje: 10, redondeo: '100' })}>Ajuste masivo de precios</Boton>
-            <Boton tam="sm" variante="primario" icono={<Plus className="size-4" />} onClick={() => setF({ nombre: '', categoria_id: cats[0]?.id ?? '', precio: 0, tipo_vehiculo: 'todos', intervalo_km: '', intervalo_meses: '', checks: [], activo: true, descripcion: '' })}>Nuevo servicio</Boton>
-          </>
-        )}
-      >
-        <Tabla
-          filas={servicios}
-          clave={(s) => s.id}
-          onFila={edita ? (s) => setF({ ...s, activo: !!s.activo, intervalo_km: s.intervalo_km ?? '', intervalo_meses: s.intervalo_meses ?? '' }) : undefined}
-          columnas={[
-            { clave: 'c', titulo: 'Categoría', render: (s) => s.categoria ?? '—', movil: 'subtitulo' },
-            { clave: 'n', titulo: 'Servicio', render: (s) => <span className={s.activo ? 'font-medium' : 'text-tenue line-through'}>{s.nombre}</span>, movil: 'titulo' },
-            { clave: 't', titulo: 'Vehículo', render: (s) => TIPO_VEHICULO_LABEL[s.tipo_vehiculo as keyof typeof TIPO_VEHICULO_LABEL] ?? s.tipo_vehiculo, movil: 'oculta' },
-            { clave: 'i', titulo: 'Intervalo', render: (s) => [s.intervalo_km ? `${s.intervalo_km.toLocaleString('es-AR')} km` : null, s.intervalo_meses ? `${s.intervalo_meses} meses` : null].filter(Boolean).join(' / ') || '—', movil: 'meta' },
-            { clave: 'p', titulo: 'Precio', alinear: 'derecha', render: (s) => money(s.precio), movil: 'derecha' },
-          ]}
-        />
-      </Tarjeta>
-      {edita && (
-        <Tarjeta titulo="Categorías de servicio" className="mt-5">
-          <div className="flex flex-wrap gap-2">
-            {cats.map((c) => <Insignia key={c.id} className="px-3 py-1 text-sm">{c.nombre}</Insignia>)}
-          </div>
-          <div className="mt-3 flex max-w-md gap-2">
-            <Input value={nuevaCat} onChange={(e) => setNuevaCat(e.target.value)} placeholder="Nueva categoría" />
-            <Boton disabled={!nuevaCat.trim()} onClick={() => crearCat.mutate()}>Agregar</Boton>
-          </div>
-        </Tarjeta>
-      )}
-      {f && (
-        <Modal abierto onCerrar={() => setF(null)} titulo={f.id ? 'Editar servicio' : 'Nuevo servicio'} ancho="lg" pie={<><Boton onClick={() => setF(null)}>Cancelar</Boton><Boton variante="primario" disabled={f.nombre.trim().length < 2} cargando={guardar.isPending} onClick={() => guardar.mutate()}>Guardar</Boton></>}>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Campo label="Nombre" requerido className="sm:col-span-2"><Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} autoFocus /></Campo>
-            <Campo label="Categoría">
-              <Select value={f.categoria_id ?? ''} onChange={(e) => setF({ ...f, categoria_id: e.target.value })}>
-                <option value="">Sin categoría</option>
-                {cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-              </Select>
-            </Campo>
-            <Campo label="Precio"><InputMoneda value={f.precio} onChange={(v) => setF({ ...f, precio: v })} /></Campo>
-            <Campo label="Tipo de vehículo">
-              <Select value={f.tipo_vehiculo} onChange={(e) => setF({ ...f, tipo_vehiculo: e.target.value })}>
-                {TIPOS_VEHICULO.map((t) => <option key={t} value={t}>{TIPO_VEHICULO_LABEL[t]}</option>)}
-              </Select>
-            </Campo>
-            <div className="grid grid-cols-2 gap-3">
-              <Campo label="Cada (km)"><Input value={f.intervalo_km} onChange={(e) => setF({ ...f, intervalo_km: e.target.value.replace(/\D/g, '') })} inputMode="numeric" /></Campo>
-              <Campo label="Cada (meses)"><Input value={f.intervalo_meses} onChange={(e) => setF({ ...f, intervalo_meses: e.target.value.replace(/\D/g, '') })} inputMode="numeric" /></Campo>
-            </div>
-            <Campo label="Incluye (uno por línea)" className="sm:col-span-2" hint="Ej.: filtro de aceite, filtro de aire…">
-              <Textarea rows={3} value={(f.checks ?? []).join('\n')} onChange={(e) => setF({ ...f, checks: e.target.value.split('\n').map((x: string) => x.trim()).filter(Boolean) })} />
-            </Campo>
-            {f.id && <Check checked={f.activo} onChange={(v) => setF({ ...f, activo: v })} label="Activo (visible al cargar trabajos)" />}
-          </div>
-        </Modal>
-      )}
-      {ajuste && (
-        <Modal abierto onCerrar={() => setAjuste(null)} titulo="Ajuste masivo de precios" ancho="sm" pie={<><Boton onClick={() => setAjuste(null)}>Cancelar</Boton><Boton variante="primario" cargando={masivo.isPending} onClick={() => masivo.mutate()}>Aplicar</Boton></>}>
-          <div className="space-y-3">
-            <Campo label="Categoría">
-              <Select value={ajuste.categoria_id} onChange={(e) => setAjuste({ ...ajuste, categoria_id: e.target.value })}>
-                <option value="">Todas</option>
-                {cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-              </Select>
-            </Campo>
-            <Campo label="Porcentaje (negativo para bajar)"><Input type="number" value={ajuste.porcentaje} onChange={(e) => setAjuste({ ...ajuste, porcentaje: e.target.value })} /></Campo>
-            <Campo label="Redondeo">
-              <Select value={ajuste.redondeo} onChange={(e) => setAjuste({ ...ajuste, redondeo: e.target.value })}>
-                <option value="ninguno">Sin redondeo</option><option value="10">A múltiplo de $10</option><option value="100">A múltiplo de $100</option><option value="1000">A múltiplo de $1.000</option>
-              </Select>
-            </Campo>
-          </div>
-        </Modal>
-      )}
-    </>
-  );
-}
-
 function Catalogos() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -396,7 +285,7 @@ function Auditoria() {
   );
 }
 
-type Tab = 'taller' | 'mecanicos' | 'servicios' | 'catalogos' | 'licencia' | 'cuenta' | 'auditoria';
+type Tab = 'taller' | 'mecanicos' | 'catalogos' | 'licencia' | 'cuenta' | 'auditoria';
 
 export function Configuracion() {
   const { puede } = useAuth();
@@ -404,7 +293,6 @@ export function Configuracion() {
   const items: Array<{ clave: Tab; titulo: string; ok: boolean }> = [
     { clave: 'taller', titulo: 'Taller y preferencias', ok: true },
     { clave: 'mecanicos', titulo: 'Mecánicos sin usuario', ok: puede('usuarios.gestionar') },
-    { clave: 'servicios', titulo: 'Servicios', ok: puede('catalogo.ver') },
     { clave: 'catalogos', titulo: 'Marcas y categorías', ok: puede('catalogo.editar') },
     { clave: 'licencia', titulo: 'Licencia', ok: puede('licencia.ver') },
     { clave: 'auditoria', titulo: 'Actividad', ok: puede('config.editar') },
@@ -414,6 +302,8 @@ export function Configuracion() {
   const pedido = sp.get('tab');
   // Los usuarios y permisos se administran ahora en Personal → Equipo y permisos.
   if (pedido === 'usuarios') return <Navigate to="/personal/equipo" replace />;
+  // Los servicios y la mano de obra ahora se administran en el Tempario.
+  if (pedido === 'servicios') return <Navigate to="/tempario" replace />;
   const tab: Tab = items.some((i) => i.ok && i.clave === pedido) ? (pedido as Tab) : 'taller';
   const setTab = (k: Tab) => setSp(k === 'taller' ? {} : { tab: k }, { replace: true });
   return (
@@ -422,7 +312,6 @@ export function Configuracion() {
       <Pestanas items={items.filter((i) => i.ok).map(({ clave, titulo }) => ({ clave, titulo }))} activo={tab} onCambio={setTab} />
       {tab === 'taller' && <DatosTaller />}
       {tab === 'mecanicos' && <Mecanicos />}
-      {tab === 'servicios' && <Servicios />}
       {tab === 'catalogos' && <Catalogos />}
       {tab === 'licencia' && <Licencia />}
       {tab === 'auditoria' && <Auditoria />}

@@ -12,6 +12,8 @@ export const zItem = z.object({
   cantidad: zCantidad,
   precio_unitario: zCentavos,
   desc_pct: zPct.default(0),
+  /** Tiempo estimado de mano de obra, en minutos por unidad (viene del tempario; solo tiene sentido en servicios). */
+  tiempo_min: z.number().int().min(0).max(6000).nullish(),
 });
 export type ItemEntrada = z.infer<typeof zItem>;
 
@@ -45,6 +47,7 @@ export async function validarItems(db: D1Database, tallerId: string, items: Item
     ...i,
     articulo_id: i.tipo === 'articulo' ? i.articulo_id ?? null : null,
     servicio_id: i.tipo === 'servicio' ? i.servicio_id ?? null : null,
+    tiempo_min: i.tipo === 'servicio' ? i.tiempo_min ?? null : null,
   }));
 }
 
@@ -67,6 +70,7 @@ export function sentenciasItems(
     const cols = ['id', 'taller_id', fk, 'orden', 'tipo', 'articulo_id', 'servicio_id', 'descripcion', 'cantidad', 'precio_unitario', 'desc_pct', 'subtotal'];
     const vals: unknown[] = [uid(), tallerId, padreId, i, it.tipo, it.articulo_id ?? null, it.servicio_id ?? null, it.descripcion, it.cantidad, it.precio_unitario, it.desc_pct ?? 0, subtotales[i]];
     if (alicuotas) (cols.push('alicuota_iva'), vals.push(alicuotas[i]));
+    if (tabla !== 'venta_items') (cols.push('tiempo_min'), vals.push(it.tiempo_min ?? null));
     return db.prepare(`INSERT INTO ${tabla} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).bind(...vals);
   });
 }

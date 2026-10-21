@@ -16,7 +16,6 @@ import { PresupuestoDetalle } from './pages/presupuestos/PresupuestoDetalle';
 import { Clientes, ClienteDetalle } from './pages/Clientes';
 import { Vehiculos, VehiculoDetalle } from './pages/Vehiculos';
 import { Agenda } from './pages/Agenda';
-import { Recordatorios } from './pages/Recordatorios';
 import { Ventas, VentaDetalle, VentaMostrador } from './pages/comercial/Ventas';
 import { Cobros } from './pages/comercial/Cobros';
 import { Cuentas, CuentaCliente } from './pages/comercial/Cuentas';
@@ -47,6 +46,9 @@ const Equipo = lazy(() => import('./pages/personal/Equipo').then((m) => ({ defau
 const PanelAsistencia = lazy(() => import('./pages/personal/PanelAsistencia').then((m) => ({ default: m.PanelAsistencia })));
 const RelojAdmin = lazy(() => import('./pages/personal/RelojAdmin').then((m) => ({ default: m.RelojAdmin })));
 const Informes = lazy(() => import('./pages/Informes').then((m) => ({ default: m.Informes })));
+const Mantenimientos = lazy(() => import('./pages/Mantenimientos').then((m) => ({ default: m.Mantenimientos })));
+const Tempario = lazy(() => import('./pages/Tempario').then((m) => ({ default: m.Tempario })));
+const Productividad = lazy(() => import('./pages/Productividad').then((m) => ({ default: m.Productividad })));
 const Contabilidad = lazy(() => import('./pages/Contabilidad').then((m) => ({ default: m.Contabilidad })));
 
 /** Guarda de ruta: el menú ya oculta las opciones, pero quien escribe la dirección a mano ve un aviso claro (la API igual verifica en el servidor). */
@@ -95,7 +97,10 @@ export function App() {
         <Route path="vehiculos" element={<Requiere permiso="vehiculos.ver"><Vehiculos /></Requiere>} />
         <Route path="vehiculos/:id" element={<Requiere permiso="vehiculos.ver"><VehiculoDetalle /></Requiere>} />
         <Route path="agenda" element={<Requiere permiso="turnos.ver"><Agenda /></Requiere>} />
-        <Route path="recordatorios" element={<Requiere permiso="clientes.ver"><Recordatorios /></Requiere>} />
+        <Route path="mantenimientos" element={<Requiere permiso="mantenimientos.ver"><Mantenimientos /></Requiere>} />
+        <Route path="recordatorios" element={<Navigate to="/mantenimientos" replace />} />
+        <Route path="tempario" element={<Requiere permiso="catalogo.ver"><Tempario /></Requiere>} />
+        <Route path="productividad" element={<Requiere permiso="productividad.ver"><Productividad /></Requiere>} />
         <Route path="asistencia" element={<Requiere permiso="asistencia.fichar"><Asistencia /></Requiere>} />
         <Route path="personal/equipo" element={<Requiere permiso="usuarios.gestionar"><Equipo /></Requiere>} />
         <Route path="personal/asistencia" element={<Requiere permiso="asistencia.ver"><PanelAsistencia /></Requiere>} />
