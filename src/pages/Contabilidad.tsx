@@ -4,9 +4,9 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download, Printer } from 'lucide-react';
 import { api, qs } from '@/lib/api';
-import { descargarCSV, pesosCSV } from '@/lib/csv';
+import { descargarCSV, exportarAutorizado, pesosCSV } from '@/lib/csv';
 import { fecha, hoyISO, money, numero } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Indicador, Insignia, Pestanas, Select, Tabla, Tarjeta, useDebounce, Vacio } from '@/components/ui';
+import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Indicador, Insignia, Pestanas, Select, Tabla, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
 import { primerDiaMes, SelectorPeriodo } from '@/components/Periodo';
 
 type Tab = 'resumen' | 'ventas' | 'compras' | 'operaciones';
@@ -19,14 +19,15 @@ const EFECTO: Record<string, { texto: string; tono: 'verde' | 'rojo' | 'gris' | 
 };
 
 function Resumen({ desde, hasta }: { desde: string; hasta: string }) {
+  const toast = useToast();
   const { data: r, isLoading, error, refetch } = useQuery({ queryKey: ['contabilidad', 'resumen', desde, hasta], queryFn: () => api.get(`/contabilidad/resumen?desde=${desde}&hasta=${hasta}`) });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
-  const exportar = () => descargarCSV(`resumen-contable-${desde}_${hasta}`, ['Concepto', 'Importe'], [
+  const exportar = () => exportarAutorizado(`/contabilidad/resumen?desde=${desde}&hasta=${hasta}`, () => descargarCSV(`resumen-contable-${desde}_${hasta}`, ['Concepto', 'Importe'], [
     ['Cobros de clientes', pesosCSV(r.ingresos.cobros)], ['Otros ingresos', pesosCSV(r.ingresos.otros)], ['Ingresos bancarios', pesosCSV(r.ingresos.bancarios)], ['TOTAL INGRESOS', pesosCSV(r.ingresos.total)],
     ['Pagos a proveedores', pesosCSV(r.egresos.pagos_proveedor)], ['Gastos', pesosCSV(r.egresos.gastos)], ['Egresos bancarios', pesosCSV(r.egresos.bancarios)], ['TOTAL EGRESOS', pesosCSV(r.egresos.total)], ['RESULTADO', pesosCSV(r.resultado)],
     ['Ventas netas (devengado)', pesosCSV(r.devengado.ventas_netas)], ['Compras netas (devengado)', pesosCSV(r.devengado.compras_netas)], ['IVA registrado en ventas', pesosCSV(r.impuestos_registrados.iva_ventas)], ['IVA registrado en compras', pesosCSV(r.impuestos_registrados.iva_compras)],
-  ]);
+  ])).catch((e) => toast.error(e));
   return (
     <div className="space-y-5">
       <div className="no-print flex justify-end gap-2"><Boton icono={<Download className="size-4" />} onClick={exportar}>CSV</Boton><Boton icono={<Printer className="size-4" />} onClick={() => window.print()}>Imprimir / PDF</Boton></div>
@@ -60,10 +61,11 @@ function Resumen({ desde, hasta }: { desde: string; hasta: string }) {
 }
 
 function LibroVentas({ desde, hasta }: { desde: string; hasta: string }) {
+  const toast = useToast();
   const { data: l, isLoading, error, refetch } = useQuery({ queryKey: ['contabilidad', 'ventas', desde, hasta], queryFn: () => api.get(`/contabilidad/libro-ventas?desde=${desde}&hasta=${hasta}`) });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
-  const exportar = () => descargarCSV(`libro-interno-ventas-${desde}_${hasta}`, ['Fecha', 'N°', 'Tipo', 'Cliente', 'Documento', 'Condición IVA', 'Neto', 'Alícuota IVA', 'IVA', 'Recargo', 'Total', 'Estado'], l.filas.map((f: any) => [fecha(f.fecha), f.numero, f.tipo, f.cliente, f.documento, f.condicion_iva, pesosCSV(f.neto), String(f.iva_pct).replace('.', ','), pesosCSV(f.iva), pesosCSV(f.recargo), pesosCSV(f.total), f.estado === 'emitida' ? 'Vigente' : 'Anulado']));
+  const exportar = () => exportarAutorizado(`/contabilidad/libro-ventas?desde=${desde}&hasta=${hasta}`, () => descargarCSV(`libro-interno-ventas-${desde}_${hasta}`, ['Fecha', 'N°', 'Tipo', 'Cliente', 'Documento', 'Condición IVA', 'Neto', 'Alícuota IVA', 'IVA', 'Recargo', 'Total', 'Estado'], l.filas.map((f: any) => [fecha(f.fecha), f.numero, f.tipo, f.cliente, f.documento, f.condicion_iva, pesosCSV(f.neto), String(f.iva_pct).replace('.', ','), pesosCSV(f.iva), pesosCSV(f.recargo), pesosCSV(f.total), f.estado === 'emitida' ? 'Vigente' : 'Anulado']))).catch((e) => toast.error(e));
   return (
     <div className="space-y-5">
       <div className="no-print flex justify-end gap-2"><Boton icono={<Download className="size-4" />} onClick={exportar} disabled={!l.filas.length}>CSV</Boton><Boton icono={<Printer className="size-4" />} onClick={() => window.print()}>Imprimir / PDF</Boton></div>
@@ -99,10 +101,11 @@ function LibroVentas({ desde, hasta }: { desde: string; hasta: string }) {
 }
 
 function LibroCompras({ desde, hasta }: { desde: string; hasta: string }) {
+  const toast = useToast();
   const { data: l, isLoading, error, refetch } = useQuery({ queryKey: ['contabilidad', 'compras', desde, hasta], queryFn: () => api.get(`/contabilidad/libro-compras?desde=${desde}&hasta=${hasta}`) });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
-  const exportar = () => descargarCSV(`libro-interno-compras-${desde}_${hasta}`, ['Fecha', 'Origen', 'Proveedor', 'CUIT', 'Comprobante', 'Neto gravado', 'No gravado', 'IVA 21', 'IVA 10,5', 'IVA 27', 'IVA (compras)', 'Otros tributos', 'Total'], l.filas.map((f: any) => [fecha(f.fecha), f.origen, f.proveedor, f.cuit, f.comprobante, pesosCSV(f.neto_gravado), pesosCSV(f.no_gravado), pesosCSV(f.iva_21), pesosCSV(f.iva_10_5), pesosCSV(f.iva_27), pesosCSV(f.iva_otros), pesosCSV(f.otros_tributos), pesosCSV(f.total)]));
+  const exportar = () => exportarAutorizado(`/contabilidad/libro-compras?desde=${desde}&hasta=${hasta}`, () => descargarCSV(`libro-interno-compras-${desde}_${hasta}`, ['Fecha', 'Origen', 'Proveedor', 'CUIT', 'Comprobante', 'Neto gravado', 'No gravado', 'IVA 21', 'IVA 10,5', 'IVA 27', 'IVA (compras)', 'Otros tributos', 'Total'], l.filas.map((f: any) => [fecha(f.fecha), f.origen, f.proveedor, f.cuit, f.comprobante, pesosCSV(f.neto_gravado), pesosCSV(f.no_gravado), pesosCSV(f.iva_21), pesosCSV(f.iva_10_5), pesosCSV(f.iva_27), pesosCSV(f.iva_otros), pesosCSV(f.otros_tributos), pesosCSV(f.total)]))).catch((e) => toast.error(e));
   return (
     <div className="space-y-5">
       <div className="no-print flex justify-end gap-2"><Boton icono={<Download className="size-4" />} onClick={exportar} disabled={!l.filas.length}>CSV</Boton><Boton icono={<Printer className="size-4" />} onClick={() => window.print()}>Imprimir / PDF</Boton></div>
@@ -134,11 +137,12 @@ function LibroCompras({ desde, hasta }: { desde: string; hasta: string }) {
 }
 
 function Operaciones({ desde, hasta }: { desde: string; hasta: string }) {
+  const toast = useToast();
   const [tipo, setTipo] = useState('');
   const [q, setQ] = useState('');
   const dq = useDebounce(q);
   const { data: o, isLoading, error, refetch } = useQuery({ queryKey: ['contabilidad', 'operaciones', desde, hasta, tipo, dq], queryFn: () => api.get(`/contabilidad/operaciones${qs({ desde, hasta, tipo, q: dq })}`) });
-  const exportar = () => o && descargarCSV(`operaciones-${desde}_${hasta}`, ['Fecha', 'Tipo', 'N°', 'Tercero', 'Concepto', 'Importe', 'Efecto', 'Estado'], o.filas.map((f: any) => [fecha(f.fecha), NOMBRE_TIPO[f.tipo] ?? f.tipo, f.numero || '', f.tercero ?? '', f.concepto ?? '', pesosCSV(f.importe), EFECTO[f.efecto]?.texto ?? f.efecto, f.estado]));
+  const exportar = () => o && exportarAutorizado(`/contabilidad/operaciones${qs({ desde, hasta, tipo, q: dq })}`, () => descargarCSV(`operaciones-${desde}_${hasta}`, ['Fecha', 'Tipo', 'N°', 'Tercero', 'Concepto', 'Importe', 'Efecto', 'Estado'], o.filas.map((f: any) => [fecha(f.fecha), NOMBRE_TIPO[f.tipo] ?? f.tipo, f.numero || '', f.tercero ?? '', f.concepto ?? '', pesosCSV(f.importe), EFECTO[f.efecto]?.texto ?? f.efecto, f.estado]))).catch((e) => toast.error(e));
   return (
     <div className="space-y-4">
       <div className="no-print flex flex-wrap items-end gap-3">

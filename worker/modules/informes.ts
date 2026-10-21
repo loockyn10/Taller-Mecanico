@@ -9,8 +9,9 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, notFound, query, zFecha } from '../lib/http';
 import { all, first, like } from '../lib/db';
-import { requirePerm } from '../lib/auth';
-import { tienePermiso } from '../../shared/permisos';
+import { autorizarExportacion } from '../lib/exportar';
+import { requirePerm, tiene } from '../lib/auth';
+import type { Permiso } from '../../shared/permisos';
 import { redondearCantidad as r3 } from '../../shared/dominio';
 import { deudaProveedores } from '../lib/proveedores';
 import { IMPORTE_FIRMADO_SQL } from '../lib/caja';
@@ -221,11 +222,11 @@ async function actividadFinanciera({ db, t, f }: Ctx): Promise<Informe> {
   return { titulo: 'Actividad financiera', columnas: [col('periodo', f.agrupar === 'mes' ? 'Mes' : 'Fecha', f.agrupar === 'mes' ? 'texto' : 'fecha'), col('ingresos', 'Ingresos', 'moneda'), col('egresos', 'Egresos', 'moneda'), col('resultado', 'Resultado', 'moneda')], filas, totales: sumar(filas, ['ingresos', 'egresos', 'resultado']), nota: 'Base caja: lo efectivamente cobrado y pagado. Depósitos y transferencias entre cuentas propias no se cuentan.' };
 }
 
-const TIPOS: Record<string, { fn: (c: Ctx) => Promise<Informe>; permiso?: Parameters<typeof tienePermiso>[1]; costos?: boolean }> = {
+const TIPOS: Record<string, { fn: (c: Ctx) => Promise<Informe>; permiso?: Permiso; costos?: boolean }> = {
   ventas: { fn: ventasPeriodo },
   'ventas-articulo': { fn: (c) => ventasArticulo(c, 'total') },
   'ventas-categoria': { fn: ventasCategoria },
-  rentabilidad: { fn: (c) => ventasArticulo(c, 'margen'), permiso: 'stock.valorizar', costos: true },
+  rentabilidad: { fn: (c) => ventasArticulo(c, 'margen'), permiso: 'margenes.ver', costos: true },
   'mas-vendidos': { fn: (c) => ventasArticulo(c, 'cantidad', 50) },
   servicios: { fn: serviciosRealizados },
   compras: { fn: comprasInforme },
@@ -243,10 +244,11 @@ informes.get('/informes/:tipo', requirePerm('reportes.ver'), async (c) => {
   const s = c.get('sesion');
   const def = TIPOS[c.req.param('tipo')];
   if (!def) throw notFound('Informe');
-  if (def.permiso && !tienePermiso(s.rol, def.permiso)) throw forbidden();
+  if (def.permiso && !tiene(s, def.permiso)) throw forbidden();
   const f = query(c, zFiltros);
   if (f.desde > f.hasta) throw badRequest('El período es inválido');
-  const r = await def.fn({ db: c.env.DB, t: s.tallerId, f, puedeCostos: tienePermiso(s.rol, 'stock.valorizar') });
+  await autorizarExportacion(c, c.req.param('tipo'));
+  const r = await def.fn({ db: c.env.DB, t: s.tallerId, f, puedeCostos: tiene(s, 'margenes.ver') });
   return c.json({ tipo: c.req.param('tipo'), filtros: f, generado: new Date().toISOString(), ...r });
 });
 
@@ -255,6 +257,7 @@ const NOTA_INTERNA = 'Registro INTERNO de gestión. No es un libro fiscal (IVA V
 
 informes.get('/contabilidad/libro-ventas', requirePerm('contabilidad.ver'), async (c) => {
   const s = c.get('sesion');
+  await autorizarExportacion(c, 'contabilidad-libro-ventas');
   const f = query(c, z.object({ desde: zFecha, hasta: zFecha, estado: z.string().optional() }));
   const filas = await all<any>(
     c.env.DB,
@@ -283,6 +286,7 @@ informes.get('/contabilidad/libro-ventas', requirePerm('contabilidad.ver'), asyn
 
 informes.get('/contabilidad/libro-compras', requirePerm('contabilidad.ver'), async (c) => {
   const s = c.get('sesion');
+  await autorizarExportacion(c, 'contabilidad-libro-compras');
   const f = query(c, z.object({ desde: zFecha, hasta: zFecha }));
   const [compras, facturas] = await Promise.all([
     all<any>(
@@ -317,6 +321,7 @@ informes.get('/contabilidad/libro-compras', requirePerm('contabilidad.ver'), asy
 
 informes.get('/contabilidad/resumen', requirePerm('contabilidad.ver'), async (c) => {
   const s = c.get('sesion');
+  await autorizarExportacion(c, 'contabilidad-resumen');
   const f = query(c, z.object({ desde: zFecha, hasta: zFecha }));
   const t = s.tallerId;
   const [rubros, bancarios, ventas, ivaCompras, ivaFacturas, porMes] = await Promise.all([
@@ -343,6 +348,7 @@ informes.get('/contabilidad/resumen', requirePerm('contabilidad.ver'), async (c)
 
 informes.get('/contabilidad/operaciones', requirePerm('contabilidad.ver'), async (c) => {
   const s = c.get('sesion');
+  await autorizarExportacion(c, 'contabilidad-operaciones');
   const f = query(c, z.object({ desde: zFecha, hasta: zFecha, tipo: z.string().optional(), q: z.string().optional(), limite: z.coerce.number().int().min(1).max(3000).default(1000) }));
   const t = s.tallerId;
   // Una fila por hecho económico. 'efecto' dice cómo mira el negocio ese hecho: ingreso/egreso (caja), devengado (a crédito), informativo o interno (movimiento entre cuentas).

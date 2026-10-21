@@ -4,11 +4,11 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, notFound, query, zFecha, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, run, uid, updateParcial } from '../lib/db';
-import { requirePerm } from '../lib/auth';
+import { requirePerm, requireRW, tiene } from '../lib/auth';
 import { ESTADOS_TURNO } from '../../shared/dominio';
 
 export const agenda = new Hono<AppEnv>();
-agenda.use('*', requirePerm('operacion'));
+agenda.use('*', requireRW('turnos.ver', 'turnos.gestionar'));
 
 const SELECT = `SELECT t.*, c.nombre AS cliente, c.telefono AS cliente_telefono, v.patente, ma.nombre AS marca, mo.nombre AS modelo,
     m.nombre AS mecanico, p.numero AS presupuesto_numero, o.numero AS orden_numero
@@ -51,10 +51,11 @@ agenda.get('/', async (c) => {
 });
 
 /** Presupuestos aprobados que todavía no tienen turno ni OT. */
-agenda.get('/pendientes', async (c) => {
+agenda.get('/pendientes', requirePerm('presupuestos.ver'), async (c) => {
   const s = c.get('sesion');
+  const sinImportes = !tiene(s, 'presupuestos.valorizados.ver');
   return c.json(
-    await all(
+    (await all<Record<string, unknown>>(
       c.env.DB,
       `SELECT p.id, p.numero, p.total, p.cliente_id, p.vehiculo_id, c.nombre AS cliente, v.patente FROM presupuestos p
          JOIN clientes c ON c.taller_id = p.taller_id AND c.id = p.cliente_id JOIN vehiculos v ON v.taller_id = p.taller_id AND v.id = p.vehiculo_id
@@ -62,7 +63,7 @@ agenda.get('/pendientes', async (c) => {
           AND NOT EXISTS (SELECT 1 FROM turnos t WHERE t.taller_id = p.taller_id AND t.presupuesto_id = p.id AND t.estado NOT IN ('cancelado','ausente'))
         ORDER BY p.numero`,
       s.tallerId,
-    ),
+    )).map((p) => (sinImportes ? { ...p, total: undefined } : p)),
   );
 });
 

@@ -5,7 +5,6 @@ import { ApiError, body } from '../lib/http';
 import { ahora, first, run } from '../lib/db';
 import { hashPassword, verificarPassword } from '../lib/crypto';
 import { cerrarSesion, crearSesion, requireAuth } from '../lib/auth';
-import { PERMISOS_POR_ROL, type Rol } from '../../shared/permisos';
 
 const MAX_INTENTOS = 5;
 const BLOQUEO_MIN = 15;
@@ -14,14 +13,15 @@ export const auth = new Hono<AppEnv>();
 
 auth.post('/login', async (c) => {
   const { email, password } = await body(c, z.object({ email: z.string().trim().email(), password: z.string().min(1).max(200) }));
-  const u = await first<{ id: string; taller_id: string; password_hash: string; activo: number; intentos_fallidos: number; bloqueado_hasta: string | null; taller_activo: number }>(
+  const u = await first<{ id: string; taller_id: string; password_hash: string; activo: number; acceso_erp: number; intentos_fallidos: number; bloqueado_hasta: string | null; taller_activo: number }>(
     c.env.DB,
-    `SELECT u.id, u.taller_id, u.password_hash, u.activo, u.intentos_fallidos, u.bloqueado_hasta, t.activo AS taller_activo
+    `SELECT u.id, u.taller_id, u.password_hash, u.activo, u.acceso_erp, u.intentos_fallidos, u.bloqueado_hasta, t.activo AS taller_activo
        FROM usuarios u JOIN talleres t ON t.id = u.taller_id WHERE u.email = ?`,
     email,
   );
   const error = new ApiError(401, 'credenciales_invalidas', 'Email o contraseña incorrectos');
-  if (!u) throw error;
+  // Las personas sin acceso al sistema (solo fichan con PIN) no tienen credenciales para ingresar.
+  if (!u || !u.acceso_erp) throw error;
   if (u.bloqueado_hasta && u.bloqueado_hasta > ahora()) {
     throw new ApiError(429, 'bloqueado', `Demasiados intentos fallidos. Probá de nuevo en ${BLOQUEO_MIN} minutos`);
   }
@@ -53,10 +53,13 @@ auth.get('/me', requireAuth, async (c) => {
     'SELECT plan, usuarios_incluidos, usuarios_adicionales, estado FROM licencias WHERE taller_id = ?',
     s.tallerId,
   );
+  const cfg = await first<{ zona_horaria: string; reloj_activo: number }>(c.env.DB, 'SELECT zona_horaria, reloj_activo FROM taller_config WHERE taller_id = ?', s.tallerId);
+  const yo = await first<{ pin_hash: string | null }>(c.env.DB, 'SELECT pin_hash FROM usuarios WHERE taller_id = ? AND id = ?', s.tallerId, s.usuarioId);
   return c.json({
-    usuario: { id: s.usuarioId, nombre: s.nombre, email: s.email, rol: s.rol },
-    permisos: PERMISOS_POR_ROL[s.rol as Rol],
-    taller,
+    usuario: { id: s.usuarioId, nombre: s.nombre, email: s.email, rol: s.rol, nivel: s.nivel, tiene_pin: !!yo?.pin_hash },
+    // Permisos efectivos (plantilla del rol + ajustes individuales): el frontend los usa solo para mostrar u ocultar opciones.
+    permisos: [...s.permisos],
+    taller: { ...taller, zona_horaria: cfg?.zona_horaria ?? 'America/Argentina/Buenos_Aires', reloj_activo: !!cfg?.reloj_activo },
     licencia,
   });
 });

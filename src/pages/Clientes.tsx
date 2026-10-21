@@ -13,13 +13,14 @@ import { CONDICION_IVA_LABEL, type CondicionIva } from '@shared/dominio';
 
 export function Clientes() {
   const nav = useNavigate();
+  const { puede } = useAuth();
   const [q, setQ] = useState('');
   const [alta, setAlta] = useState(false);
   const dq = useDebounce(q);
   const { data = [], isLoading, error, refetch } = useQuery({ queryKey: ['clientes', { q: dq }], queryFn: () => api.get<any[]>(`/clientes?q=${encodeURIComponent(dq)}&limite=300`) });
   return (
     <>
-      <Encabezado titulo="Clientes" subtitulo="Clientes del taller y sus vehículos" acciones={<Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setAlta(true)}>Nuevo cliente</Boton>} />
+      <Encabezado titulo="Clientes" subtitulo="Clientes del taller y sus vehículos" acciones={puede('clientes.crear') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setAlta(true)}>Nuevo cliente</Boton>} />
       <Buscador value={q} onChange={setQ} placeholder="Nombre, teléfono, documento o patente" className="mb-4" />
       {isLoading ? <Cargando /> : error ? <ErrorCaja error={error} reintentar={refetch} /> : (
         <Tarjeta sinPadding>
@@ -34,7 +35,7 @@ export function Clientes() {
               { clave: 't', titulo: 'Teléfono', render: (c) => c.telefono ?? '—', movil: 'subtitulo' },
               { clave: 'd', titulo: 'Documento', render: (c) => c.documento ?? '—', movil: 'oculta' },
               { clave: 'v', titulo: 'Vehículos', render: (c) => `${c.vehiculos} vehículo${c.vehiculos === 1 ? '' : 's'}`, movil: 'meta' },
-              { clave: 's', titulo: 'Saldo', alinear: 'derecha', render: (c) => (c.saldo > 0 ? <span className="font-semibold text-red-600">{money(c.saldo)}</span> : <span className="text-tenue">—</span>), movil: 'derecha' },
+              ...(puede('ventas.ver') ? [{ clave: 's', titulo: 'Saldo', alinear: 'derecha' as const, render: (c: any) => (c.saldo > 0 ? <span className="font-semibold text-red-600">{money(c.saldo)}</span> : <span className="text-tenue">—</span>), movil: 'derecha' as const }] : []),
             ]}
           />
         </Tarjeta>

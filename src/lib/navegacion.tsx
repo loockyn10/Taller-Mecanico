@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import {
   Banknote, BarChart3, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, PackageSearch, Package, PiggyBank,
   Receipt, Scale, ScrollText, Settings, ShoppingCart, Tags, Truck, UserCog, Users, Wallet, Wrench, KeyRound, Layers, ShieldCheck, History, UserRound, BadgeDollarSign, ShoppingBasket,
+  Clock, MonitorSmartphone, UsersRound, CalendarCheck, HardHat,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permiso } from '@shared/permisos';
@@ -17,6 +18,8 @@ export interface ItemNav {
   tab?: string;
   icono: ReactNode;
   permiso?: Permiso;
+  /** Condición adicional de visibilidad (por ejemplo, ocultar "Mis trabajos" a quien ya ve todas las órdenes). */
+  visible?: (puede: (p: Permiso) => boolean) => boolean;
   /** Palabras clave para el buscador de secciones (sin tildes ni mayúsculas no hace falta: se normalizan). */
   claves: string;
 }
@@ -28,10 +31,10 @@ export interface GrupoNav {
 }
 
 const ic = (I: LucideIcon) => <I className="size-[18px]" />;
-function item(id: string, texto: string, a: string, I: LucideIcon, claves: string, permiso?: Permiso, tabPorDefecto?: string): ItemNav {
+function item(id: string, texto: string, a: string, I: LucideIcon, claves: string, permiso?: Permiso, tabPorDefecto?: string, visible?: ItemNav['visible']): ItemNav {
   const [ruta, qs] = a.split('?');
   const tab = qs ? new URLSearchParams(qs).get('tab') ?? undefined : tabPorDefecto;
-  return { id, texto, a, ruta, tab, icono: ic(I), permiso, claves };
+  return { id, texto, a, ruta, tab, icono: ic(I), permiso, claves, visible };
 }
 
 export const GRUPOS: GrupoNav[] = [
@@ -39,13 +42,14 @@ export const GRUPOS: GrupoNav[] = [
   {
     id: 'taller', titulo: 'Taller', icono: ic(Wrench),
     items: [
-      item('ordenes', 'Órdenes de trabajo', '/ordenes', Wrench, 'ot reparaciones trabajos tablero kanban', 'operacion'),
-      item('presupuestos', 'Presupuestos', '/presupuestos', FileText, 'cotizacion cotizaciones', 'operacion'),
-      item('agenda', 'Agenda', '/agenda', CalendarDays, 'turnos calendario citas', 'operacion'),
-      item('clientes', 'Clientes', '/clientes', Users, 'cliente personas contactos', 'operacion'),
-      item('vehiculos', 'Vehículos', '/vehiculos', Car, 'autos patentes historial', 'operacion'),
-      item('recordatorios', 'Recordatorios', '/recordatorios', Bell, 'service vencimientos avisos mantenimiento', 'operacion'),
-      item('mecanicos', 'Mecánicos', '/configuracion?tab=mecanicos', UserCog, 'personal operarios equipo'),
+      item('mis-trabajos', 'Mis trabajos', '/mis-trabajos', HardHat, 'ot asignados reparaciones tareas mecanico celular', 'ordenes.asignadas', undefined, (puede) => !puede('ordenes.ver')),
+      item('ordenes', 'Órdenes de trabajo', '/ordenes', Wrench, 'ot reparaciones trabajos tablero kanban', 'ordenes.ver'),
+      item('presupuestos', 'Presupuestos', '/presupuestos', FileText, 'cotizacion cotizaciones', 'presupuestos.ver'),
+      item('agenda', 'Agenda', '/agenda', CalendarDays, 'turnos calendario citas', 'turnos.ver'),
+      item('clientes', 'Clientes', '/clientes', Users, 'cliente personas contactos', 'clientes.ver'),
+      item('vehiculos', 'Vehículos', '/vehiculos', Car, 'autos patentes historial', 'vehiculos.ver'),
+      item('recordatorios', 'Recordatorios', '/recordatorios', Bell, 'service vencimientos avisos mantenimiento', 'clientes.ver'),
+      item('mecanicos', 'Mecánicos sin usuario', '/configuracion?tab=mecanicos', UserCog, 'operarios equipo tercerizados', 'usuarios.gestionar'),
     ],
   },
   {
@@ -70,10 +74,10 @@ export const GRUPOS: GrupoNav[] = [
   {
     id: 'compras', titulo: 'Compras', icono: ic(ShoppingCart),
     items: [
-      item('oc', 'Órdenes de compra', '/ordenes-compra', ClipboardList, 'pedidos recepcion mercaderia recibir', 'compras.gestionar'),
-      item('compras', 'Compras', '/compras', ShoppingBasket, 'ingreso mercaderia compra directa', 'compras.gestionar'),
-      item('facturas', 'Facturas de proveedores', '/facturas-proveedor', FileText, 'comprobantes vencimientos deuda notas credito', 'compras.gestionar'),
-      item('proveedores', 'Proveedores', '/proveedores', Truck, 'pagos cuenta corriente deuda', 'catalogo.ver'),
+      item('oc', 'Órdenes de compra', '/ordenes-compra', ClipboardList, 'pedidos recepcion mercaderia recibir', 'compras.ver'),
+      item('compras', 'Compras', '/compras', ShoppingBasket, 'ingreso mercaderia compra directa', 'compras.ver'),
+      item('facturas', 'Facturas de proveedores', '/facturas-proveedor', FileText, 'comprobantes vencimientos deuda notas credito', 'compras.ver'),
+      item('proveedores', 'Proveedores', '/proveedores', Truck, 'pagos cuenta corriente deuda', 'compras.ver'),
     ],
   },
   {
@@ -81,7 +85,7 @@ export const GRUPOS: GrupoNav[] = [
     items: [
       item('caja', 'Caja diaria', '/caja', Banknote, 'caja efectivo arqueo cierre apertura', 'caja.operar'),
       item('tesoreria', 'Tesorería', '/tesoreria', Scale, 'disponible dinero liquidez flujo', 'tesoreria.ver'),
-      item('bancos', 'Bancos', '/bancos', Landmark, 'cuentas conciliacion transferencias depositos', 'bancos.gestionar'),
+      item('bancos', 'Bancos', '/bancos', Landmark, 'cuentas conciliacion transferencias depositos', 'bancos.ver'),
       item('cheques', 'Cheques y eCheq', '/cheques', ScrollText, 'cheque echeq cartera', 'cheques.gestionar'),
       item('gastos', 'Gastos y finanzas', '/finanzas', PiggyBank, 'gastos egresos resultado recurrentes', 'finanzas.ver'),
     ],
@@ -95,10 +99,18 @@ export const GRUPOS: GrupoNav[] = [
     ],
   },
   {
+    id: 'personal', titulo: 'Personal', icono: ic(UsersRound),
+    items: [
+      item('asistencia', 'Mi asistencia', '/asistencia', Clock, 'fichar entrada salida jornada horas reloj', 'asistencia.fichar'),
+      item('equipo', 'Equipo y permisos', '/personal/equipo', KeyRound, 'usuarios empleados roles permisos accesos pin', 'usuarios.gestionar'),
+      item('panel-asistencia', 'Panel de asistencia', '/personal/asistencia', CalendarCheck, 'presentes ausentes horas fichajes jornadas correcciones', 'asistencia.ver'),
+      item('reloj', 'Reloj compartido', '/personal/reloj', MonitorSmartphone, 'tablet fichaje pin dispositivos kiosco', 'reloj.administrar'),
+    ],
+  },
+  {
     id: 'admin', titulo: 'Administración', icono: ic(Settings),
     items: [
       item('config', 'Configuración', '/configuracion', Settings, 'taller datos parametros preferencias documentos medios de pago', undefined, 'taller'),
-      item('usuarios', 'Usuarios y permisos', '/configuracion?tab=usuarios', KeyRound, 'accesos roles empleados', 'usuarios.gestionar'),
       item('servicios', 'Servicios', '/configuracion?tab=servicios', Layers, 'mano de obra catalogo tarifas horas'),
       item('catalogos', 'Marcas y categorías', '/configuracion?tab=catalogos', Tags, 'catalogos marcas modelos categorias', 'catalogo.editar'),
       item('licencia', 'Licencia', '/configuracion?tab=licencia', ShieldCheck, 'plan suscripcion usuarios', 'licencia.ver'),
@@ -112,7 +124,7 @@ export const TODOS_LOS_ITEMS: ItemNav[] = GRUPOS.flatMap((g) => g.items);
 
 /** Grupos con sólo las secciones que el usuario puede ver (los grupos vacíos desaparecen). */
 export function gruposVisibles(puede: (p: Permiso) => boolean): GrupoNav[] {
-  return GRUPOS.map((g) => ({ ...g, items: g.items.filter((i) => !i.permiso || puede(i.permiso)) })).filter((g) => g.items.length);
+  return GRUPOS.map((g) => ({ ...g, items: g.items.filter((i) => (!i.permiso || puede(i.permiso)) && (!i.visible || i.visible(puede))) })).filter((g) => g.items.length);
 }
 
 export const normalizar = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();

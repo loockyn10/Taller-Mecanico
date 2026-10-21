@@ -56,6 +56,10 @@ export function traducirErrorDb(e: unknown): ApiError | null {
     if (msg.includes('idx_facturas_prov_dup')) return conflict('Esa factura del proveedor ya fue registrada', 'duplicado');
     if (msg.includes('idx_banco_mov_origen')) return conflict('El movimiento bancario ya fue registrado', 'duplicado');
     if (msg.includes('cuentas_bancarias')) return conflict('Ya existe una cuenta bancaria con ese nombre', 'duplicado');
+    if (msg.includes('usuarios.taller_id, usuarios.documento')) return conflict('Ya hay una persona del personal con ese documento', 'duplicado');
+    if (msg.includes('asistencias.taller_id, asistencias.usuario_id')) return conflict('Ya tenés una jornada abierta', 'jornada_abierta');
+    if (msg.includes('orden_tiempos.taller_id, orden_tiempos.usuario_id')) return conflict('Ya tenés el cronómetro en marcha en otra orden', 'cronometro_en_marcha');
+    if (msg.includes('mecanicos.taller_id, mecanicos.usuario_id')) return conflict('Ese usuario ya está vinculado a un mecánico', 'duplicado');
     if (msg.includes('codigo')) return conflict('Ya existe un registro con ese código', 'duplicado');
     if (msg.includes('nombre')) return conflict('Ya existe un registro con ese nombre', 'duplicado');
     return conflict('Registro duplicado', 'duplicado');

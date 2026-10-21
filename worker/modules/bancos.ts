@@ -7,8 +7,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, forbidden, notFound, query, zCentavos, zFecha, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, lotes, like, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
-import { requirePerm } from '../lib/auth';
-import { tienePermiso } from '../../shared/permisos';
+import { requirePerm, requireRW, tiene } from '../lib/auth';
 import { MONEDAS, TIPOS_CUENTA_BANCARIA, cuitValido } from '../../shared/dominio';
 import { guardCuentaActiva, saldosCuentas, sentenciaMovBanco, sentenciaReversosBanco, SIGNO_BANCO_SQL } from '../lib/banco';
 import { exigirCajaAbiertaSiCorresponde, guardCajaObligatoria, IMPORTE_FIRMADO_SQL, reversoDeOrigen, sentenciaMovimiento } from '../lib/caja';
@@ -24,7 +23,7 @@ bancos.get('/selector', requirePerm('caja.operar'), async (c) => {
 
 bancos.use('*', async (c, next) => {
   if (c.req.path.endsWith('/selector')) return next();
-  return requirePerm('bancos.gestionar')(c, next);
+  return requireRW('bancos.ver', 'bancos.gestionar')(c, next);
 });
 
 // ───────────── Cuentas ─────────────
@@ -315,7 +314,7 @@ bancos.post('/movimientos/:id/anular', async (c) => {
   if (!['manual', 'deposito', 'extraccion', 'ajuste'].includes(m.origen_tipo)) {
     throw conflict(m.origen_tipo.startsWith('transferencia') ? 'Las transferencias se anulan desde la transferencia completa.' : 'Este movimiento nace de un cobro, pago, gasto o cheque: se anula en su propio módulo.');
   }
-  if (m.origen_tipo === 'ajuste' && !tienePermiso(s.rol, 'bancos.ajustar')) throw forbidden('Sólo el propietario puede anular un ajuste');
+  if (m.origen_tipo === 'ajuste' && !tiene(s, 'bancos.ajustar')) throw forbidden('Sólo el propietario puede anular un ajuste');
   if (m.conciliado) throw conflict('El movimiento está conciliado: deshacé la conciliación primero', 'conciliado');
   if (await first(c.env.DB, "SELECT 1 FROM banco_movimientos WHERE taller_id = ? AND origen_tipo = 'reverso' AND origen_id = ?", s.tallerId, id)) throw conflict('El movimiento ya fue anulado');
   const conCaja = m.origen_tipo === 'deposito' || m.origen_tipo === 'extraccion';

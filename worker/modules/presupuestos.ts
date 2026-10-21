@@ -4,14 +4,15 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zFecha, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, like, SEQ_VALOR, seqIncrementar, uid } from '../lib/db';
-import { requirePerm } from '../lib/auth';
+import { requirePerm, requireRW } from '../lib/auth';
+import { exigirValorizado, limpiarDocumento, limpiarItems } from '../lib/privacidad';
 import { fechaComercial } from '../lib/fechas';
 import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
 import { normalizarPatente } from '../../shared/dominio';
 
 export const presupuestos = new Hono<AppEnv>();
-presupuestos.use('*', requirePerm('operacion'));
+presupuestos.use('*', requireRW('presupuestos.ver', 'presupuestos.gestionar'));
 
 const zPresupuesto = zParametrosTotales.extend({
   cliente_id: zId,
@@ -50,7 +51,7 @@ presupuestos.get('/', async (c) => {
   if (q) (cond.push('(c.nombre LIKE ? OR v.patente LIKE ? OR CAST(p.numero AS TEXT) = ?)'), params.push(like(q), like(normalizarPatente(q) || q), q.replace(/\D/g, '')));
   if (desde) (cond.push('p.fecha >= ?'), params.push(desde));
   if (hasta) (cond.push('p.fecha <= ?'), params.push(hasta));
-  return c.json(await all(c.env.DB, `${SELECT} WHERE ${cond.join(' AND ')} ORDER BY p.numero DESC LIMIT 300`, ...params));
+  return c.json((await all(c.env.DB, `${SELECT} WHERE ${cond.join(' AND ')} ORDER BY p.numero DESC LIMIT 300`, ...params)).map((p) => limpiarDocumento(s, p)));
 });
 
 presupuestos.get('/:id', async (c) => {
@@ -58,11 +59,12 @@ presupuestos.get('/:id', async (c) => {
   const p = await first(c.env.DB, `${SELECT} WHERE p.taller_id = ? AND p.id = ?`, s.tallerId, c.req.param('id'));
   if (!p) throw notFound('Presupuesto');
   const items = await all(c.env.DB, 'SELECT * FROM presupuesto_items WHERE taller_id = ? AND presupuesto_id = ? ORDER BY orden', s.tallerId, p.id);
-  return c.json({ ...p, items });
+  return c.json({ ...limpiarDocumento(s, p), items: limpiarItems(s, items) });
 });
 
 presupuestos.post('/', async (c) => {
   const s = c.get('sesion');
+  exigirValorizado(s);
   const d = await body(c, zPresupuesto);
   await validarClienteVehiculo(c.env.DB, s.tallerId, d.cliente_id, d.vehiculo_id);
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
@@ -82,12 +84,13 @@ presupuestos.post('/', async (c) => {
     ...(lista ? [sentenciaListaEnDocumento(c.env.DB, 'presupuestos', s.tallerId, id, lista)] : []),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'presupuesto', id, 'crear', { total: t.total }),
   ]);
-  return c.json(await first(c.env.DB, `${SELECT} WHERE p.taller_id = ? AND p.id = ?`, s.tallerId, id), 201);
+  return c.json(limpiarDocumento(s, (await first(c.env.DB, `${SELECT} WHERE p.taller_id = ? AND p.id = ?`, s.tallerId, id))!), 201);
 });
 
 presupuestos.put('/:id', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
+  exigirValorizado(s);
   const d = await body(c, zPresupuesto);
   const p = await first<{ estado: string; lista_precio_id: string | null; fecha: string }>(c.env.DB, 'SELECT estado, lista_precio_id, fecha FROM presupuestos WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!p) throw notFound('Presupuesto');
@@ -136,7 +139,7 @@ presupuestos.post('/:id/estado', async (c) => {
 });
 
 /** Convierte el presupuesto en OT copiando cliente, vehículo, ítems y condiciones. Atómico e irrepetible. */
-presupuestos.post('/:id/convertir', async (c) => {
+presupuestos.post('/:id/convertir', requirePerm('ordenes.crear'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const d = await body(c, z.object({ mecanico_id: zId.nullish(), fecha_prometida: zFecha.nullish(), km_ingreso: z.number().int().min(0).nullish() }));

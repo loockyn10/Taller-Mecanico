@@ -50,6 +50,15 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(() => db.exec("INSERT INTO cheques (id, taller_id, numero, direccion, banco, nro_cheque, importe, fecha_emision, fecha_pago, fecha_vencimiento) VALUES ('c2', 't1', 2, 'recibido', 'banco x', '10', 100, '2026-05-01', '2026-05-01', '2026-05-31')")).toThrow(/UNIQUE/);
     db.exec("UPDATE cheques SET estado = 'anulado' WHERE id = 'c1'");
     db.exec("INSERT INTO cheques (id, taller_id, numero, direccion, banco, nro_cheque, importe, fecha_emision, fecha_pago, fecha_vencimiento) VALUES ('c2', 't1', 2, 'recibido', 'banco x', '10', 100, '2026-05-01', '2026-05-01', '2026-05-31')");
+    // 0006: los usuarios existentes conservan su rol como plantilla, siguen con acceso y la zona horaria por defecto es la argentina
+    expect(uno("SELECT rol, plantilla, acceso_erp, permisos_ajustes FROM usuarios WHERE id = 'u1'")).toMatchObject({ rol: 'propietario', plantilla: 'propietario', acceso_erp: 1, permisos_ajustes: null });
+    expect(uno("SELECT zona_horaria, reloj_activo FROM taller_config WHERE taller_id = 't1'")).toMatchObject({ zona_horaria: 'America/Argentina/Buenos_Aires', reloj_activo: 0 });
+    // 0006: una sola jornada abierta por persona (a nivel base) y las jornadas cerradas no se ven afectadas
+    db.exec("INSERT INTO asistencias (id, taller_id, usuario_id, fecha, entrada_at, origen_entrada) VALUES ('as1', 't1', 'u1', '2026-05-01', '2026-05-01T11:00:00Z', 'app')");
+    expect(() => db.exec("INSERT INTO asistencias (id, taller_id, usuario_id, fecha, entrada_at, origen_entrada) VALUES ('as2', 't1', 'u1', '2026-05-01', '2026-05-01T11:05:00Z', 'app')")).toThrow(/UNIQUE/);
+    db.exec("UPDATE asistencias SET salida_at = '2026-05-01T15:00:00Z', duracion_seg = 14400 WHERE id = 'as1'");
+    db.exec("INSERT INTO asistencias (id, taller_id, usuario_id, fecha, entrada_at, origen_entrada) VALUES ('as2', 't1', 'u1', '2026-05-01', '2026-05-01T16:00:00Z', 'app')");
+    expect(() => db.exec("UPDATE asistencias SET salida_at = '2026-05-01T10:00:00Z' WHERE id = 'as2'")).toThrow(/CHECK/);
     // Integridad referencial intacta tras migrar
     expect(todos('PRAGMA foreign_key_check')).toEqual([]);
     // El libro impide registrar dos veces el mismo hecho de origen (antiduplicación a nivel base)

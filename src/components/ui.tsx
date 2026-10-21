@@ -94,11 +94,11 @@ export function Campo({ label, hint, error, requerido, children, className }: { 
   );
 }
 
-export function Check({ checked, onChange, label, className }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; className?: string }) {
+export function Check({ checked, onChange, label, className, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; className?: string; disabled?: boolean }) {
   return (
-    <label className={cn('inline-flex cursor-pointer select-none items-center gap-2 text-sm', className)}>
-      <input type="checkbox" className="size-4 rounded border-borde accent-marca-600" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      {label}
+    <label className={cn('inline-flex select-none items-start gap-2 text-sm', disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer', className)}>
+      <input type="checkbox" className="mt-0.5 size-4 shrink-0 rounded border-borde accent-marca-600" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}</span>
     </label>
   );
 }

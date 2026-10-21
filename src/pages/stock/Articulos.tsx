@@ -22,6 +22,9 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
   const { data: provs = [] } = useProveedores();
   const { data: cfg } = useQuery({ queryKey: ['config'], queryFn: () => api.get('/taller/config') });
   const margen = cfg?.config.margen_default ?? 40;
+  const { puede } = useAuth();
+  const verCosto = puede('precios.costo.ver');
+  const verPrecio = puede('precios.venta.ver');
   const [f, setF] = useState({
     codigo: inicial?.codigo ?? '',
     nombre: inicial?.nombre ?? '',
@@ -74,10 +77,12 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
             {provs.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </Select>
         </Campo>
-        <Campo label="Costo"><InputMoneda value={f.costo} onChange={(v) => set('costo', v)} /></Campo>
-        <Campo label="Precio de venta" hint={<button type="button" className="text-marca-700 underline" onClick={() => set('precio', Math.round((f.costo * (1 + margen / 100)) / 100) * 100)}>Calcular con margen {margen}%</button>}>
-          <InputMoneda value={f.precio} onChange={(v) => set('precio', v)} />
-        </Campo>
+        {verCosto && <Campo label="Costo"><InputMoneda value={f.costo} onChange={(v) => set('costo', v)} /></Campo>}
+        {verPrecio && (
+          <Campo label="Precio de venta" hint={verCosto && puede('margenes.ver') ? <button type="button" className="text-marca-700 underline" onClick={() => set('precio', Math.round((f.costo * (1 + margen / 100)) / 100) * 100)}>Calcular con margen {margen}%</button> : undefined}>
+            <InputMoneda value={f.precio} onChange={(v) => set('precio', v)} />
+          </Campo>
+        )}
         <Campo label="Alícuota IVA">
           <Select value={f.alicuota_iva} onChange={(e) => set('alicuota_iva', Number(e.target.value))}>
             {[0, 10.5, 21, 27].map((a) => <option key={a} value={a}>{a}%</option>)}
@@ -173,7 +178,7 @@ export function Articulos() {
               { clave: 'm', titulo: 'Marca', render: (a) => a.marca ?? '—', movil: 'subtitulo' },
               { clave: 'cat', titulo: 'Categoría', render: (a) => a.categoria ?? '—', movil: 'oculta' },
               { clave: 'u', titulo: 'Ubicación', render: (a) => a.ubicacion ?? '—', movil: 'oculta' },
-              { clave: 'p', titulo: 'Precio', alinear: 'derecha', render: (a) => money(a.precio), movil: 'meta' },
+              ...(puede('precios.venta.ver') ? [{ clave: 'p', titulo: 'Precio', alinear: 'derecha' as const, render: (a: any) => money(a.precio), movil: 'meta' as const }] : []),
               {
                 clave: 's', titulo: 'Stock', alinear: 'derecha', movil: 'derecha',
                 render: (a) => <Insignia tono={a.stock <= 0 ? 'rojo' : a.stock <= a.stock_minimo ? 'ambar' : 'verde'}>{cantidad(a.stock)} {a.unidad}</Insignia>,
@@ -194,10 +199,10 @@ export function ArticuloDetalle() {
   const [mov, setMov] = useState(false);
   const { data: a, isLoading, error, refetch } = useQuery({ queryKey: ['articulo', id], queryFn: () => api.get(`/articulos/${id}`) });
   const { data: costos } = useQuery({ queryKey: ['articulo', id, 'costos'], queryFn: () => api.get(`/inventario/costos/${id}`), enabled: puede('stock.valorizar') });
-  const { data: precios = [] } = useQuery({ queryKey: ['articulo', id, 'precios-lista'], queryFn: () => api.get<any[]>(`/articulos/${id}/precios-lista`) });
+  const { data: precios = [] } = useQuery({ queryKey: ['articulo', id, 'precios-lista'], queryFn: () => api.get<any[]>(`/articulos/${id}/precios-lista`), enabled: puede('precios.venta.ver') });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
-  const margen = a.costo > 0 ? Math.round(((a.precio - a.costo) / a.costo) * 100) : null;
+  const margen = a.costo != null && a.precio != null && a.costo > 0 ? Math.round(((a.precio - a.costo) / a.costo) * 100) : null;
   return (
     <>
       <Encabezado
@@ -232,9 +237,9 @@ export function ArticuloDetalle() {
             <Dato etiqueta="Stock actual"><span className="text-xl font-bold">{cantidad(a.stock)} {a.unidad}</span></Dato>
             <Dato etiqueta="Stock mínimo">{cantidad(a.stock_minimo)}</Dato>
             <Dato etiqueta="Stock ideal">{a.stock_objetivo != null ? cantidad(a.stock_objetivo) : `${cantidad(a.stock_minimo * 2)} (automático)`}</Dato>
-            <Dato etiqueta="Costo">{money(a.costo)}</Dato>
-            <Dato etiqueta="Precio">{money(a.precio)}</Dato>
-            <Dato etiqueta="Margen">{margen != null ? `${margen}%` : '—'}</Dato>
+            {a.costo !== undefined && <Dato etiqueta="Costo">{money(a.costo)}</Dato>}
+            {a.precio !== undefined && <Dato etiqueta="Precio">{money(a.precio)}</Dato>}
+            {puede('margenes.ver') && <Dato etiqueta="Margen">{margen != null ? `${margen}%` : '—'}</Dato>}
             <Dato etiqueta="IVA">{a.alicuota_iva}%</Dato>
             <Dato etiqueta="Proveedor">{a.proveedor}</Dato>
             <Dato etiqueta="Ubicación">{a.ubicacion}</Dato>

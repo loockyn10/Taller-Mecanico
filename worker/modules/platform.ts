@@ -23,7 +23,7 @@ platform.get('/talleres', async (c) => {
   const rows = await all(
     c.env.DB,
     `SELECT t.id, t.nombre, t.cuit, t.activo, t.created_at, l.plan, l.usuarios_incluidos, l.usuarios_adicionales, l.estado,
-            (SELECT COUNT(*) FROM usuarios u WHERE u.taller_id = t.id AND u.activo = 1) AS usuarios_activos
+            (SELECT COUNT(*) FROM usuarios u WHERE u.taller_id = t.id AND u.activo = 1 AND u.acceso_erp = 1) AS usuarios_activos
        FROM talleres t LEFT JOIN licencias l ON l.taller_id = t.id ORDER BY t.created_at`,
   );
   return c.json(rows);

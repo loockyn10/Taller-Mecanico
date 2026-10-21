@@ -4,38 +4,48 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { query, zFecha } from '../lib/http';
 import { all, first, hoy, like } from '../lib/db';
-import { requirePerm } from '../lib/auth';
-import { tienePermiso } from '../../shared/permisos';
+import { requirePerm, tiene } from '../lib/auth';
+import { limpiarDocumento } from '../lib/privacidad';
 import { normalizarPatente } from '../../shared/dominio';
 
 export const reportes = new Hono<AppEnv>();
 
-reportes.get('/dashboard', requirePerm('operacion'), async (c) => {
+/** Cada bloque del tablero se arma solo si la persona tiene permiso para ver ese tipo de información. */
+reportes.get('/dashboard', async (c) => {
   const s = c.get('sesion');
   const db = c.env.DB;
   const f = hoy();
   const mes = f.slice(0, 7);
+  const verOrdenes = tiene(s, 'ordenes.ver');
   const [porEstado, turnosHoy, stockBajo, presupuestos, ordenesRecientes] = await Promise.all([
-    all(db, 'SELECT estado, COUNT(*) AS cantidad FROM ordenes WHERE taller_id = ? GROUP BY estado', s.tallerId),
-    all(
-      db,
-      `SELECT t.id, t.hora, t.estado, t.motivo, c.nombre AS cliente, v.patente FROM turnos t JOIN clientes c ON c.taller_id = t.taller_id AND c.id = t.cliente_id
-         LEFT JOIN vehiculos v ON v.taller_id = t.taller_id AND v.id = t.vehiculo_id WHERE t.taller_id = ? AND t.fecha = ? ORDER BY t.hora`,
-      s.tallerId,
-      f,
-    ),
-    all(db, 'SELECT id, nombre, codigo, stock, stock_minimo, unidad FROM articulos WHERE taller_id = ? AND activo = 1 AND stock <= stock_minimo AND stock_minimo > 0 ORDER BY stock - stock_minimo LIMIT 8', s.tallerId),
-    first(db, "SELECT SUM(estado = 'pendiente') AS pendientes, SUM(estado = 'aprobado') AS aprobados FROM presupuestos WHERE taller_id = ?", s.tallerId),
-    all(
-      db,
-      `SELECT o.id, o.numero, o.estado, o.total, o.fecha_prometida, c.nombre AS cliente, v.patente FROM ordenes o
-         JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
-        WHERE o.taller_id = ? AND o.estado NOT IN ('entregada','cancelada') ORDER BY o.updated_at DESC LIMIT 8`,
-      s.tallerId,
-    ),
+    verOrdenes ? all(db, 'SELECT estado, COUNT(*) AS cantidad FROM ordenes WHERE taller_id = ? GROUP BY estado', s.tallerId) : Promise.resolve([]),
+    tiene(s, 'turnos.ver')
+      ? all(
+          db,
+          `SELECT t.id, t.hora, t.estado, t.motivo, c.nombre AS cliente, v.patente FROM turnos t JOIN clientes c ON c.taller_id = t.taller_id AND c.id = t.cliente_id
+             LEFT JOIN vehiculos v ON v.taller_id = t.taller_id AND v.id = t.vehiculo_id WHERE t.taller_id = ? AND t.fecha = ? ORDER BY t.hora`,
+          s.tallerId,
+          f,
+        )
+      : Promise.resolve([]),
+    tiene(s, 'stock.ver')
+      ? all(db, 'SELECT id, nombre, codigo, stock, stock_minimo, unidad FROM articulos WHERE taller_id = ? AND activo = 1 AND stock <= stock_minimo AND stock_minimo > 0 ORDER BY stock - stock_minimo LIMIT 8', s.tallerId)
+      : Promise.resolve([]),
+    tiene(s, 'presupuestos.ver')
+      ? first(db, "SELECT SUM(estado = 'pendiente') AS pendientes, SUM(estado = 'aprobado') AS aprobados FROM presupuestos WHERE taller_id = ?", s.tallerId)
+      : Promise.resolve(null),
+    verOrdenes
+      ? all(
+          db,
+          `SELECT o.id, o.numero, o.estado, o.total, o.fecha_prometida, c.nombre AS cliente, v.patente FROM ordenes o
+             JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
+            WHERE o.taller_id = ? AND o.estado NOT IN ('entregada','cancelada') ORDER BY o.updated_at DESC LIMIT 8`,
+          s.tallerId,
+        ).then((rows) => rows.map((o) => limpiarDocumento(s, o)))
+      : Promise.resolve([]),
   ]);
   let finanzas = null;
-  if (tienePermiso(s.rol, 'reportes.ver')) {
+  if (tiene(s, 'reportes.ver')) {
     finanzas = await first(
       db,
       `SELECT
@@ -97,17 +107,25 @@ reportes.get('/reportes', requirePerm('reportes.ver'), async (c) => {
     ),
     first(db, "SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total FROM compras WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?", s.tallerId, desde, hasta),
   ]);
-  return c.json({ resumen, porDia, porMedio, topServicios, topArticulos, porMecanico, ordenesPeriodo, compras });
+  // El costo (y con él, la ganancia) solo se informa a quien puede ver márgenes.
+  const conMargen = tiene(s, 'margenes.ver');
+  return c.json({
+    resumen, porDia, porMedio, topServicios, ordenesPeriodo, compras, porMecanico,
+    topArticulos: conMargen ? topArticulos : topArticulos.map((a) => ({ ...a, costo: undefined })),
+  });
 });
 
-reportes.get('/buscar', requirePerm('operacion'), async (c) => {
+reportes.get('/buscar', async (c) => {
   const s = c.get('sesion');
   const { q } = query(c, z.object({ q: z.string().trim().min(2).max(60) }));
   const pat = normalizarPatente(q);
   const num = q.replace(/\D/g, '');
+  const verOrdenes = tiene(s, 'ordenes.ver');
   const [clientes, vehiculos, ordenes] = await Promise.all([
-    all(c.env.DB, 'SELECT id, codigo, nombre, telefono FROM clientes WHERE taller_id = ? AND activo = 1 AND (nombre LIKE ? OR documento LIKE ? OR telefono LIKE ?) LIMIT 6', s.tallerId, like(q), like(q), like(q)),
-    pat.length >= 2
+    tiene(s, 'clientes.ver')
+      ? all(c.env.DB, 'SELECT id, codigo, nombre, telefono FROM clientes WHERE taller_id = ? AND activo = 1 AND (nombre LIKE ? OR documento LIKE ? OR telefono LIKE ?) LIMIT 6', s.tallerId, like(q), like(q), like(q))
+      : Promise.resolve([]),
+    tiene(s, 'vehiculos.ver') && pat.length >= 2
       ? all(
           c.env.DB,
           `SELECT v.id, v.patente, ma.nombre AS marca, mo.nombre AS modelo, c.nombre AS cliente FROM vehiculos v JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
@@ -117,14 +135,16 @@ reportes.get('/buscar', requirePerm('operacion'), async (c) => {
           like(pat),
         )
       : Promise.resolve([]),
-    num
+    num && (verOrdenes || tiene(s, 'ordenes.asignadas'))
       ? all(
           c.env.DB,
           `SELECT o.id, o.numero, o.estado, c.nombre AS cliente, v.patente FROM ordenes o JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id
-             JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id WHERE o.taller_id = ? AND CAST(o.numero AS TEXT) LIKE ? ORDER BY o.numero DESC LIMIT 6`,
+             JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id WHERE o.taller_id = ? AND CAST(o.numero AS TEXT) LIKE ?
+              ${verOrdenes ? '' : 'AND o.mecanico_id IN (SELECT m.id FROM mecanicos m WHERE m.taller_id = o.taller_id AND m.usuario_id = ?)'} ORDER BY o.numero DESC LIMIT 6`,
           s.tallerId,
           `${num}%`,
-        )
+          ...(verOrdenes ? [] : [s.usuarioId]),
+        ).then((rows) => rows.map((o) => limpiarDocumento(s, o)))
       : Promise.resolve([]),
   ]);
   return c.json({ clientes, vehiculos, ordenes });

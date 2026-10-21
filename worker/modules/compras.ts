@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCantidad, zCentavos, zFecha, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, like, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
-import { requirePerm } from '../lib/auth';
+import { requirePerm, requireRW, tiene } from '../lib/auth';
 import { agrupar, permiteNegativo, sentenciaOrigenCosto, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { sentenciasMedioEgreso, validarMedioEgreso, zMedioEgreso } from '../lib/pagos';
 import { reversoBancoDeOrigen, sentenciaReversosBanco } from '../lib/banco';
@@ -19,7 +19,7 @@ import { MEDIOS_PAGO, redondearCantidad } from '../../shared/dominio';
 
 export const compras = new Hono<AppEnv>();
 // Middleware acotado a las rutas propias: este router se monta en la raíz de /api.
-for (const ruta of ['/compras', '/compras/*', '/pagos-proveedor', '/pagos-proveedor/*', '/proveedores/:id/cuenta']) compras.use(ruta, requirePerm('compras.gestionar'));
+for (const ruta of ['/compras', '/compras/*', '/pagos-proveedor', '/pagos-proveedor/*', '/proveedores/:id/cuenta']) compras.use(ruta, requireRW('compras.ver', 'compras.gestionar'));
 
 const SELECT = `SELECT co.*, p.nombre AS proveedor,
     (SELECT COALESCE(SUM(pp.importe),0) FROM pagos_proveedor pp WHERE pp.taller_id = co.taller_id AND pp.compra_id = co.id AND pp.estado = 'registrado') AS pagado_contado
@@ -349,7 +349,7 @@ compras.get('/reposicion', requirePerm('stock.ver'), async (c) => {
   return c.json(
     filas.map((a) => {
       const objetivo = a.stock_objetivo ?? redondearCantidad(a.stock_minimo * 2);
-      return { ...a, en_camino: redondearCantidad(a.en_camino), objetivo, sugerido: Math.max(0, redondearCantidad(objetivo - a.stock - a.en_camino)) };
+      return { ...a, ...(tiene(c.get('sesion'), 'precios.costo.ver') ? {} : { costo: undefined }), en_camino: redondearCantidad(a.en_camino), objetivo, sugerido: Math.max(0, redondearCantidad(objetivo - a.stock - a.en_camino)) };
     }),
   );
 });

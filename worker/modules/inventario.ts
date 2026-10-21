@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCantidad, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
-import { requirePerm } from '../lib/auth';
+import { requirePerm, tiene } from '../lib/auth';
 import { permiteNegativo, sentenciasMovimiento } from '../lib/stock';
 import { calcularOC } from '../../shared/compras';
 import { redondearCantidad as r3 } from '../../shared/dominio';
@@ -168,9 +168,10 @@ inventario.get('/inventario/conteos/:id', requirePerm('stock.ver'), async (c) =>
        FROM conteo_items i JOIN articulos a ON a.taller_id = i.taller_id AND a.id = i.articulo_id WHERE i.taller_id = ? AND i.conteo_id = ? ORDER BY a.nombre COLLATE NOCASE`,
     s.tallerId, cn.id,
   );
-  const conValor = items.map((i) => ({ ...i, valor_diferencia: i.diferencia == null ? null : Math.round(i.diferencia * i.costo) }));
+  const conCosto = tiene(s, 'precios.costo.ver');
+  const conValor = items.map((i) => ({ ...i, costo: conCosto ? i.costo : undefined, valor_diferencia: !conCosto || i.diferencia == null ? null : Math.round(i.diferencia * i.costo) }));
   const movimientos = cn.estado === 'aplicado' ? await all(c.env.DB, "SELECT id, articulo_id, cantidad, stock_resultante, created_at FROM stock_movimientos WHERE taller_id = ? AND origen_tipo = 'conteo' AND origen_id = ?", s.tallerId, cn.id) : [];
-  return c.json({ ...cn, items: conValor, movimientos, valor_diferencia_total: conValor.reduce((a, i) => a + (i.valor_diferencia ?? 0), 0) });
+  return c.json({ ...cn, items: conValor, movimientos, valor_diferencia_total: conCosto ? conValor.reduce((a, i) => a + (i.valor_diferencia ?? 0), 0) : undefined });
 });
 
 inventario.put('/inventario/conteos/:id/items', requirePerm('stock.ajustar'), async (c) => {

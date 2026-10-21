@@ -4,7 +4,8 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, delTaller, first, like, run, SEQ_VALOR, seqIncrementar, uid, updateParcial } from '../lib/db';
-import { requirePerm } from '../lib/auth';
+import { requireAny, requirePerm, tiene } from '../lib/auth';
+import { limpiarDocumento } from '../lib/privacidad';
 import { CONDICIONES_IVA, normalizarPatente } from '../../shared/dominio';
 
 export const maestros = new Hono<AppEnv>();
@@ -22,7 +23,7 @@ const zCliente = z.object({
   notas: zTextoOpt(1000),
 });
 
-maestros.get('/clientes', requirePerm('operacion'), async (c) => {
+maestros.get('/clientes', requirePerm('clientes.ver'), async (c) => {
   const s = c.get('sesion');
   const { q, limite, inactivos } = query(c, z.object({ q: z.string().optional(), limite: z.coerce.number().int().min(1).max(500).default(100), inactivos: z.string().optional() }));
   const filtroQ = q ? 'AND (c.nombre LIKE ? OR c.documento LIKE ? OR c.telefono LIKE ? OR c.email LIKE ? OR EXISTS (SELECT 1 FROM vehiculos v WHERE v.taller_id = c.taller_id AND v.cliente_id = c.id AND v.patente LIKE ?))' : '';
@@ -39,10 +40,11 @@ maestros.get('/clientes', requirePerm('operacion'), async (c) => {
     ...params,
     limite,
   );
-  return c.json(rows);
+  // El saldo es información de cuenta corriente: solo para quien puede ver ventas y cobranzas.
+  return c.json(tiene(s, 'ventas.ver') ? rows : rows.map((r) => ({ ...r, saldo: undefined })));
 });
 
-maestros.get('/clientes/:id', requirePerm('operacion'), async (c) => {
+maestros.get('/clientes/:id', requirePerm('clientes.ver'), async (c) => {
   const s = c.get('sesion');
   const cli = await delTaller(c.env.DB, 'clientes', s.tallerId, c.req.param('id'));
   if (!cli) throw notFound('Cliente');
@@ -55,18 +57,22 @@ maestros.get('/clientes/:id', requirePerm('operacion'), async (c) => {
     s.tallerId,
     cli.id,
   );
-  const ordenes = await all(
-    c.env.DB,
-    `SELECT o.id, o.numero, o.estado, o.total, o.fecha_ingreso, v.patente FROM ordenes o JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
-      WHERE o.taller_id = ? AND o.cliente_id = ? ORDER BY o.numero DESC LIMIT 50`,
-    s.tallerId,
-    cli.id,
-  );
-  const saldo = await first<{ saldo: number }>(c.env.DB, "SELECT COALESCE(SUM(total - cobrado), 0) AS saldo FROM ventas WHERE taller_id = ? AND cliente_id = ? AND estado = 'emitida'", s.tallerId, cli.id);
-  return c.json({ ...cli, vehiculos, ordenes, saldo: saldo?.saldo ?? 0 });
+  const ordenes = tiene(s, 'ordenes.ver')
+    ? (await all(
+        c.env.DB,
+        `SELECT o.id, o.numero, o.estado, o.total, o.fecha_ingreso, v.patente FROM ordenes o JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
+          WHERE o.taller_id = ? AND o.cliente_id = ? ORDER BY o.numero DESC LIMIT 50`,
+        s.tallerId,
+        cli.id,
+      )).map((o) => limpiarDocumento(s, o))
+    : [];
+  const saldo = tiene(s, 'ventas.ver')
+    ? (await first<{ saldo: number }>(c.env.DB, "SELECT COALESCE(SUM(total - cobrado), 0) AS saldo FROM ventas WHERE taller_id = ? AND cliente_id = ? AND estado = 'emitida'", s.tallerId, cli.id))?.saldo ?? 0
+    : undefined;
+  return c.json({ ...cli, vehiculos, ordenes, saldo });
 });
 
-maestros.post('/clientes', requirePerm('operacion'), async (c) => {
+maestros.post('/clientes', requirePerm('clientes.crear'), async (c) => {
   const s = c.get('sesion');
   const d = await body(c, zCliente);
   const id = uid();
@@ -81,7 +87,7 @@ maestros.post('/clientes', requirePerm('operacion'), async (c) => {
   return c.json(await delTaller(c.env.DB, 'clientes', s.tallerId, id), 201);
 });
 
-maestros.put('/clientes/:id', requirePerm('operacion'), async (c) => {
+maestros.put('/clientes/:id', requirePerm('clientes.editar'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const d = await body(c, zCliente.partial().extend({ activo: z.boolean().optional() }));
@@ -139,7 +145,7 @@ const SELECT_VEHICULO = `SELECT v.*, ma.nombre AS marca, mo.nombre AS modelo, c.
   LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id
   LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id`;
 
-maestros.get('/vehiculos', requirePerm('operacion'), async (c) => {
+maestros.get('/vehiculos', requirePerm('vehiculos.ver'), async (c) => {
   const s = c.get('sesion');
   const { q, cliente_id } = query(c, z.object({ q: z.string().optional(), cliente_id: z.string().optional() }));
   const cond: string[] = ['v.taller_id = ?', 'v.activo = 1'];
@@ -149,10 +155,10 @@ maestros.get('/vehiculos', requirePerm('operacion'), async (c) => {
     cond.push('(v.patente LIKE ? OR c.nombre LIKE ? OR ma.nombre LIKE ? OR mo.nombre LIKE ?)');
     params.push(like(normalizarPatente(q) || q), like(q), like(q), like(q));
   }
-  return c.json(await all(c.env.DB, `${SELECT_VEHICULO} WHERE ${cond.join(' AND ')} ORDER BY v.patente LIMIT 200`, ...params));
+  return c.json((await all(c.env.DB, `${SELECT_VEHICULO} WHERE ${cond.join(' AND ')} ORDER BY v.patente LIMIT 200`, ...params)).map((v) => limpiarDocumento(s, v)));
 });
 
-maestros.get('/vehiculos/:id', requirePerm('operacion'), async (c) => {
+maestros.get('/vehiculos/:id', requirePerm('vehiculos.ver'), async (c) => {
   const s = c.get('sesion');
   const v = await first<Record<string, unknown>>(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, c.req.param('id'));
   if (!v) throw notFound('Vehículo');
@@ -173,9 +179,9 @@ maestros.get('/vehiculos/:id', requirePerm('operacion'), async (c) => {
     s.tallerId,
     v.id,
   );
-  const historial = ordenes.map((o) => ({ ...o, items: items.filter((i) => i.orden_id === o.id) }));
-  const proximos = await proximosServices(c.env.DB, s.tallerId, String(v.id));
-  return c.json({ ...v, historial, proximos });
+  const historial = ordenes.map((o) => limpiarDocumento(s, { ...o, items: items.filter((i) => i.orden_id === o.id) }));
+  const proximos = tiene(s, 'clientes.ver') ? await proximosServices(c.env.DB, s.tallerId, String(v.id)) : [];
+  return c.json({ ...limpiarDocumento(s, v), historial, proximos });
 });
 
 /** Próximos services según intervalos de los servicios realizados en OT entregadas/listas. */
@@ -217,13 +223,13 @@ export async function proximosServices(db: D1Database, tallerId: string, vehicul
     .sort((a, b) => (a.estado === b.estado ? 0 : a.estado === 'vencido' ? -1 : b.estado === 'vencido' ? 1 : a.estado === 'proximo' ? -1 : 1));
 }
 
-maestros.get('/recordatorios', requirePerm('operacion'), async (c) => {
+maestros.get('/recordatorios', requirePerm('vehiculos.ver', 'clientes.ver'), async (c) => {
   const s = c.get('sesion');
   const todos = await proximosServices(c.env.DB, s.tallerId);
   return c.json(todos.filter((r) => r.estado !== 'al_dia'));
 });
 
-maestros.post('/vehiculos', requirePerm('operacion'), async (c) => {
+maestros.post('/vehiculos', requirePerm('vehiculos.crear'), async (c) => {
   const s = c.get('sesion');
   const d = await body(c, zVehiculo);
   const patente = normalizarPatente(d.patente);
@@ -244,10 +250,10 @@ maestros.post('/vehiculos', requirePerm('operacion'), async (c) => {
     ).bind(id, s.tallerId, d.cliente_id, patente, d.marca_id ?? null, d.modelo_id ?? null, d.anio ?? null, d.color, d.vin, d.motor, d.combustible, d.km_actual, d.notas),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'vehiculo', id, 'crear', { patente }),
   ]);
-  return c.json(await first(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id), 201);
+  return c.json(limpiarDocumento(s, (await first(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id))!), 201);
 });
 
-maestros.put('/vehiculos/:id', requirePerm('operacion'), async (c) => {
+maestros.put('/vehiculos/:id', requirePerm('vehiculos.editar'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const d = await body(c, zVehiculo.partial());
@@ -260,7 +266,7 @@ maestros.put('/vehiculos/:id', requirePerm('operacion'), async (c) => {
   if (d.km_actual !== undefined && d.km_actual < v.km_actual) throw badRequest(`El kilometraje no puede ser menor al registrado (${v.km_actual} km)`);
   const st = updateParcial(c.env.DB, 'vehiculos', s.tallerId, id, datos, ['cliente_id', 'patente', 'marca_id', 'modelo_id', 'anio', 'color', 'vin', 'motor', 'combustible', 'km_actual', 'notas']);
   if (st) await c.env.DB.batch([st, auditar(c.env.DB, s.tallerId, s.usuarioId, 'vehiculo', id, 'modificar')]);
-  return c.json(await first(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id));
+  return c.json(limpiarDocumento(s, (await first(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id))!));
 });
 
 maestros.delete('/vehiculos/:id', requirePerm('registros.eliminar'), async (c) => {
@@ -275,7 +281,7 @@ maestros.delete('/vehiculos/:id', requirePerm('registros.eliminar'), async (c) =
 });
 
 // ───────────── Marcas y modelos ─────────────
-maestros.get('/marcas', requirePerm('operacion'), async (c) => {
+maestros.get('/marcas', requireAny('vehiculos.ver', 'catalogo.ver'), async (c) => {
   const s = c.get('sesion');
   const marcas = await all<{ id: string; nombre: string }>(c.env.DB, 'SELECT id, nombre FROM marcas WHERE taller_id = ? ORDER BY nombre', s.tallerId);
   const modelos = await all<{ id: string; marca_id: string; nombre: string; motor: string | null }>(
@@ -286,7 +292,7 @@ maestros.get('/marcas', requirePerm('operacion'), async (c) => {
   return c.json(marcas.map((m) => ({ ...m, modelos: modelos.filter((x) => x.marca_id === m.id) })));
 });
 
-maestros.post('/marcas', requirePerm('operacion'), async (c) => {
+maestros.post('/marcas', requireAny('vehiculos.crear', 'vehiculos.editar', 'catalogo.editar'), async (c) => {
   const s = c.get('sesion');
   const { nombre } = await body(c, z.object({ nombre: z.string().trim().min(1).max(60) }));
   const id = uid();
@@ -294,7 +300,7 @@ maestros.post('/marcas', requirePerm('operacion'), async (c) => {
   return c.json({ id, nombre }, 201);
 });
 
-maestros.post('/modelos', requirePerm('operacion'), async (c) => {
+maestros.post('/modelos', requireAny('vehiculos.crear', 'vehiculos.editar', 'catalogo.editar'), async (c) => {
   const s = c.get('sesion');
   const d = await body(c, z.object({ marca_id: zId, nombre: z.string().trim().min(1).max(80), motor: zTextoOpt(80) }));
   if (!(await delTaller(c.env.DB, 'marcas', s.tallerId, d.marca_id, 'id'))) throw badRequest('Marca inexistente');
@@ -322,7 +328,7 @@ maestros.delete('/marcas/:id', requirePerm('catalogo.editar'), async (c) => {
 // ───────────── Mecánicos ─────────────
 const zMecanico = z.object({ nombre: z.string().trim().min(2).max(120), telefono: zTextoOpt(40), especialidad: zTextoOpt(120), activo: z.boolean().optional() });
 
-maestros.get('/mecanicos', requirePerm('operacion'), async (c) => {
+maestros.get('/mecanicos', requireAny('ordenes.ver', 'ordenes.crear', 'turnos.ver', 'presupuestos.ver', 'usuarios.gestionar'), async (c) => {
   const s = c.get('sesion');
   return c.json(
     await all(
@@ -334,7 +340,7 @@ maestros.get('/mecanicos', requirePerm('operacion'), async (c) => {
   );
 });
 
-maestros.post('/mecanicos', requirePerm('catalogo.editar'), async (c) => {
+maestros.post('/mecanicos', requirePerm('usuarios.gestionar'), async (c) => {
   const s = c.get('sesion');
   const d = await body(c, zMecanico);
   const id = uid();
@@ -342,7 +348,7 @@ maestros.post('/mecanicos', requirePerm('catalogo.editar'), async (c) => {
   return c.json({ id }, 201);
 });
 
-maestros.put('/mecanicos/:id', requirePerm('catalogo.editar'), async (c) => {
+maestros.put('/mecanicos/:id', requirePerm('usuarios.gestionar'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const d = await body(c, zMecanico.partial());

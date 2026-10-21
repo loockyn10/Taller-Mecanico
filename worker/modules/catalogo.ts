@@ -4,7 +4,8 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCentavos, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, delTaller, first, like, run, uid, updateParcial } from '../lib/db';
-import { requirePerm } from '../lib/auth';
+import { requireAny, requirePerm, tiene } from '../lib/auth';
+import { exigirPermisoDePrecios, limpiarArticulo, limpiarMovimiento, limpiarServicio } from '../lib/privacidad';
 import { permiteNegativo, sentenciasMovimiento } from '../lib/stock';
 import { TIPOS_VEHICULO, CONDICIONES_IVA, MOTIVOS_AJUSTE, redondearCantidad, esCantidadValida } from '../../shared/dominio';
 import { precioArticuloEnLista, precioServicioEnLista, type ReglaLista } from '../../shared/precios';
@@ -66,7 +67,7 @@ catalogo.get('/servicios', requirePerm('catalogo.ver'), async (c) => {
     s.tallerId,
     ...(q ? [like(q)] : []),
   );
-  return c.json(rows.map((r) => ({ ...r, checks: JSON.parse(String(r.checks ?? '[]')), ...(reglaLista ? { precio_lista: precioServicioEnLista(reglaLista, r.precio as number) } : {}) })));
+  return c.json(rows.map((r) => limpiarServicio(s, { ...r, checks: JSON.parse(String(r.checks ?? '[]')), ...(reglaLista ? { precio_lista: precioServicioEnLista(reglaLista, r.precio as number) } : {}) })));
 });
 
 async function validarCategoriaServicio(db: D1Database, tallerId: string, id?: string | null) {
@@ -76,6 +77,7 @@ async function validarCategoriaServicio(db: D1Database, tallerId: string, id?: s
 catalogo.post('/servicios', requirePerm('catalogo.editar'), async (c) => {
   const s = c.get('sesion');
   const d = await body(c, zServicio);
+  exigirPermisoDePrecios(s, { precio: d.precio || undefined });
   await validarCategoriaServicio(c.env.DB, s.tallerId, d.categoria_id);
   const id = uid();
   await run(
@@ -90,6 +92,7 @@ catalogo.put('/servicios/:id', requirePerm('catalogo.editar'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const d = await body(c, zServicio.partial());
+  exigirPermisoDePrecios(s, { precio: d.precio });
   if (!(await delTaller(c.env.DB, 'servicios', s.tallerId, id, 'id'))) throw notFound('Servicio');
   await validarCategoriaServicio(c.env.DB, s.tallerId, d.categoria_id);
   const datos: Record<string, unknown> = { ...d };
@@ -100,7 +103,7 @@ catalogo.put('/servicios/:id', requirePerm('catalogo.editar'), async (c) => {
   return c.json({ ok: true });
 });
 
-catalogo.post('/servicios/ajuste-masivo', requirePerm('catalogo.editar'), async (c) => {
+catalogo.post('/servicios/ajuste-masivo', requirePerm('catalogo.editar', 'precios.gestionar'), async (c) => {
   const s = c.get('sesion');
   const d = await body(
     c,
@@ -163,15 +166,16 @@ const zProveedor = z.object({
   activo: z.boolean().optional(),
 });
 
-catalogo.get('/proveedores', requirePerm('catalogo.ver'), async (c) => {
+catalogo.get('/proveedores', requireAny('catalogo.ver', 'compras.ver'), async (c) => {
   const s = c.get('sesion');
+  const conSaldo = tiene(s, 'compras.ver');
   return c.json(
-    await all(
+    (await all<Record<string, unknown>>(
       c.env.DB,
       `SELECT p.*, ${SALDO_PROVEEDOR_FILA_SQL} AS saldo
          FROM proveedores p WHERE p.taller_id = ? ORDER BY p.activo DESC, p.nombre`,
       s.tallerId,
-    ),
+    )).map((p) => (conSaldo ? p : { ...p, saldo: undefined })),
   );
 });
 catalogo.post('/proveedores', requirePerm('compras.gestionar'), async (c) => {
@@ -239,9 +243,9 @@ catalogo.get('/articulos', requirePerm('catalogo.ver'), async (c) => {
     ...params,
     limite,
   );
-  if (!lst) return c.json(filas);
+  if (!lst) return c.json(filas.map((a) => limpiarArticulo(s, a)));
   // La lista no modifica el artículo: agrega `precio_lista` (fijo de la lista o calculado por su regla).
-  return c.json(filas.map((a) => ({ ...a, precio_lista: precioArticuloEnLista(lst, a, a.precio_fijo ?? null).precio })));
+  return c.json(filas.map((a) => limpiarArticulo(s, { ...a, precio_lista: precioArticuloEnLista(lst, a, a.precio_fijo ?? null).precio })));
 });
 
 catalogo.get('/articulos/:id', requirePerm('catalogo.ver'), async (c) => {
@@ -263,7 +267,7 @@ catalogo.get('/articulos/:id', requirePerm('catalogo.ver'), async (c) => {
     s.tallerId,
     c.req.param('id'),
   );
-  return c.json({ ...a, movimientos });
+  return c.json({ ...limpiarArticulo(s, a), movimientos: movimientos.map((m) => limpiarMovimiento(s, m)) });
 });
 
 async function validarRefsArticulo(db: D1Database, tallerId: string, d: { categoria_id?: string | null; proveedor_id?: string | null }) {
@@ -274,6 +278,7 @@ async function validarRefsArticulo(db: D1Database, tallerId: string, d: { catego
 catalogo.post('/articulos', requirePerm('catalogo.editar'), async (c) => {
   const s = c.get('sesion');
   const d = await body(c, zArticulo);
+  exigirPermisoDePrecios(s, { costo: d.costo || undefined, precio: d.precio || undefined });
   await validarRefsArticulo(c.env.DB, s.tallerId, d);
   const id = uid();
   const stmts = [
@@ -295,6 +300,7 @@ catalogo.put('/articulos/:id', requirePerm('catalogo.editar'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const d = await body(c, zArticulo.omit({ stock_inicial: true }).partial());
+  exigirPermisoDePrecios(s, { costo: d.costo, precio: d.precio });
   if (!(await delTaller(c.env.DB, 'articulos', s.tallerId, id, 'id'))) throw notFound('Artículo');
   await validarRefsArticulo(c.env.DB, s.tallerId, d);
   const datos: Record<string, unknown> = { ...d };
@@ -316,14 +322,14 @@ catalogo.get('/stock/movimientos', requirePerm('stock.ver'), async (c) => {
   if (desde) (cond.push('m.created_at >= ?'), params.push(desde));
   if (hasta) (cond.push('m.created_at < ?'), params.push(`${hasta}T23:59:59.999Z`));
   return c.json(
-    await all(
+    (await all(
       c.env.DB,
       `SELECT m.*, a.nombre AS articulo, a.codigo, u.nombre AS usuario FROM stock_movimientos m
          JOIN articulos a ON a.taller_id = m.taller_id AND a.id = m.articulo_id
          LEFT JOIN usuarios u ON u.id = m.usuario_id AND u.taller_id = m.taller_id
         WHERE ${cond.join(' AND ')} ORDER BY m.created_at DESC LIMIT 300`,
       ...params,
-    ),
+    )).map((m) => limpiarMovimiento(s, m)),
   );
 });
 

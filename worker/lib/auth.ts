@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppEnv, Sesion } from '../env';
-import { tienePermiso, type Permiso, type Rol } from '../../shared/permisos';
+import { esRol, leerAjustes, nivelDeRol, permisosEfectivos, type Nivel, type Permiso, type Rol } from '../../shared/permisos';
 import { ApiError, forbidden } from './http';
 import { sha256Hex, tokenAleatorio } from './crypto';
 import { ahora, first, run } from './db';
@@ -49,11 +49,11 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const token = getCookie(c, COOKIE);
   if (!token) throw new ApiError(401, 'no_autenticado', 'Iniciá sesión para continuar');
   const fila = await first<{
-    usuario_id: string; taller_id: string; expires_at: string; rol: Rol; nombre: string; email: string;
-    usuario_activo: number; taller_activo: number; licencia_estado: string | null;
+    usuario_id: string; taller_id: string; expires_at: string; rol: Nivel; plantilla: string | null; permisos_ajustes: string | null; acceso_erp: number;
+    nombre: string; apellido: string | null; email: string; usuario_activo: number; taller_activo: number; licencia_estado: string | null;
   }>(
     c.env.DB,
-    `SELECT s.usuario_id, s.taller_id, s.expires_at, u.rol, u.nombre, u.email, u.activo AS usuario_activo,
+    `SELECT s.usuario_id, s.taller_id, s.expires_at, u.rol, u.plantilla, u.permisos_ajustes, u.acceso_erp, u.nombre, u.apellido, u.email, u.activo AS usuario_activo,
             t.activo AS taller_activo, l.estado AS licencia_estado
        FROM sesiones s
        JOIN usuarios u ON u.id = s.usuario_id AND u.taller_id = s.taller_id
@@ -62,16 +62,20 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       WHERE s.token_hash = ?`,
     await sha256Hex(token),
   );
-  if (!fila || fila.expires_at < ahora() || !fila.usuario_activo || !fila.taller_activo) {
+  if (!fila || fila.expires_at < ahora() || !fila.usuario_activo || !fila.taller_activo || !fila.acceso_erp) {
     deleteCookie(c, COOKIE, { path: '/' });
     throw new ApiError(401, 'sesion_invalida', 'Tu sesión expiró. Iniciá sesión nuevamente');
   }
+  // El rol de plantilla y los ajustes individuales se leen de la base en cada solicitud: un cambio de permisos rige de inmediato.
+  const rol: Rol = esRol(fila.plantilla) && nivelDeRol(fila.plantilla) === fila.rol ? fila.plantilla : fila.rol;
   const sesion: Sesion = {
     usuarioId: fila.usuario_id,
     tallerId: fila.taller_id,
-    rol: fila.rol,
-    nombre: fila.nombre,
+    rol,
+    nivel: fila.rol,
+    nombre: fila.apellido ? `${fila.nombre} ${fila.apellido}` : fila.nombre,
     email: fila.email,
+    permisos: new Set(permisosEfectivos(rol, leerAjustes(fila.permisos_ajustes))),
     licenciaActiva: fila.licencia_estado === 'activa',
   };
   // Con la licencia suspendida el taller conserva acceso de solo lectura a sus datos.
@@ -82,10 +86,33 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+/** ¿La sesión tiene el permiso? (permisos efectivos de la plantilla + ajustes individuales) */
+export const tiene = (s: Sesion, p: Permiso): boolean => s.permisos.has(p);
+
+/** Exige TODOS los permisos indicados. */
 export function requirePerm(...permisos: Permiso[]): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const s = c.get('sesion');
-    if (!permisos.every((p) => tienePermiso(s.rol, p))) throw forbidden();
+    if (!permisos.every((p) => tiene(s, p))) throw forbidden();
+    await next();
+  };
+}
+
+/** Exige AL MENOS UNO de los permisos indicados. */
+export function requireAny(...permisos: Permiso[]): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const s = c.get('sesion');
+    if (!permisos.some((p) => tiene(s, p))) throw forbidden();
+    await next();
+  };
+}
+
+/** Separa lectura y escritura: las consultas (GET/HEAD) piden `lectura`; todo lo demás pide `escritura`. */
+export function requireRW(lectura: Permiso, escritura: Permiso): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const s = c.get('sesion');
+    const necesario = c.req.method === 'GET' || c.req.method === 'HEAD' ? lectura : escritura;
+    if (!tiene(s, necesario)) throw forbidden();
     await next();
   };
 }

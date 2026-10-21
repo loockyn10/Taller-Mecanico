@@ -8,8 +8,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, forbidden, notFound, query, zCentavos, zFecha, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, like, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
-import { requirePerm } from '../lib/auth';
-import { tienePermiso } from '../../shared/permisos';
+import { requirePerm, tiene } from '../lib/auth';
 import { MEDIOS_PAGO } from '../../shared/dominio';
 import { estadoCaja, guardCajaObligatoria, IMPORTE_FIRMADO_SQL, reversoDeOrigen, sentenciaMovimiento } from '../lib/caja';
 import { fechaComercial } from '../lib/fechas';
@@ -137,7 +136,7 @@ caja.get('/movimientos', requirePerm('caja.operar'), async (c) => {
   );
   const cond = ['m.taller_id = ?'];
   const params: unknown[] = [s.tallerId];
-  if (tienePermiso(s.rol, 'finanzas.ver')) {
+  if (tiene(s, 'finanzas.ver')) {
     if (f.sesion_id) (cond.push('m.sesion_id = ?'), params.push(f.sesion_id));
     if (f.desde) (cond.push('m.fecha >= ?'), params.push(f.desde));
     if (f.hasta) (cond.push('m.fecha <= ?'), params.push(f.hasta));
@@ -319,7 +318,7 @@ caja.get('/sesiones/:id', requirePerm('caja.operar'), async (c) => {
   if (!det) throw notFound('Caja');
   // Las cajas ya cerradas son historial: las ve quien tiene permiso de finanzas o quien participó en ella.
   const participa = det.abierta_por === s.usuarioId || det.cerrada_por === s.usuarioId;
-  if (det.estado === 'cerrada' && !tienePermiso(s.rol, 'finanzas.ver') && !participa) throw forbidden();
+  if (det.estado === 'cerrada' && !tiene(s, 'finanzas.ver') && !participa) throw forbidden();
   return c.json(det);
 });
 

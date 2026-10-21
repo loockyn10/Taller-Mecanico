@@ -22,6 +22,9 @@ import { bancos } from './modules/bancos';
 import { cheques } from './modules/cheques';
 import { tesoreria } from './modules/tesoreria';
 import { abastecimiento } from './modules/abastecimiento';
+import { personal } from './modules/personal';
+import { asistencia } from './modules/asistencia';
+import { relojAdmin, relojPublico } from './modules/reloj';
 
 const app = new Hono<AppEnv>();
 
@@ -35,11 +38,16 @@ app.use('/api/*', requireJson);
 app.get('/api/salud', (c) => c.json({ ok: true, version: '0.1.0' }));
 app.route('/api/auth', auth);
 app.route('/api/platform', platform);
+// Pantalla del reloj compartido: se autentica con el token del dispositivo, no con una sesión de usuario.
+app.route('/api/reloj', relojPublico);
 
 // Todo lo siguiente requiere sesión: el taller se toma SIEMPRE de la sesión.
 const api = new Hono<AppEnv>();
 api.use('*', requireAuth);
 api.route('/taller', taller);
+api.route('/taller', personal);
+api.route('/asistencia', asistencia);
+api.route('/asistencia', relojAdmin);
 api.route('/', maestros);
 api.route('/', catalogo);
 api.route('/presupuestos', presupuestos);

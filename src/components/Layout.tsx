@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays, ChevronDown, ChevronRight, Gauge, LogOut, Menu, Search, Users, Wrench, X } from 'lucide-react';
+import { CalendarDays, ChevronDown, ChevronRight, Clock, Gauge, HardHat, LogOut, Menu, Search, Users, Wrench, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { buscarSecciones, gruposVisibles, resaltar, ubicar, type ItemNav } from '@/lib/navegacion';
@@ -208,6 +208,7 @@ function Usuario() {
 
 /** Búsqueda global por patente, cliente o número de OT (atajo Ctrl+K). */
 function BusquedaGlobal({ abierto, onCerrar }: { abierto: boolean; onCerrar: () => void }) {
+  const { soloMecanico } = useAuth();
   const [q, setQ] = useState('');
   const dq = useDebounce(q, 250);
   const nav = useNavigate();
@@ -233,7 +234,7 @@ function BusquedaGlobal({ abierto, onCerrar }: { abierto: boolean; onCerrar: () 
           {dq.trim().length < 2 && <p className="px-3 py-6 text-center text-tenue">Escribí al menos 2 caracteres</p>}
           {vacio && <p className="px-3 py-6 text-center text-tenue">Sin resultados para “{dq}”</p>}
           {data?.vehiculos.length > 0 && <Grupo titulo="Vehículos">{data.vehiculos.map((v: any) => <Resultado key={v.id} onClick={() => ir(`/vehiculos/${v.id}`)} titulo={v.patente} detalle={`${[v.marca, v.modelo].filter(Boolean).join(' ')} · ${v.cliente}`} />)}</Grupo>}
-          {data?.ordenes.length > 0 && <Grupo titulo="Órdenes">{data.ordenes.map((o: any) => <Resultado key={o.id} onClick={() => ir(`/ordenes/${o.id}`)} titulo={`OT #${String(o.numero).padStart(4, '0')}`} detalle={`${o.patente} · ${o.cliente}`} />)}</Grupo>}
+          {data?.ordenes.length > 0 && <Grupo titulo="Órdenes">{data.ordenes.map((o: any) => <Resultado key={o.id} onClick={() => ir(soloMecanico ? `/mis-trabajos/${o.id}` : `/ordenes/${o.id}`)} titulo={`OT #${String(o.numero).padStart(4, '0')}`} detalle={[o.patente, o.cliente].filter(Boolean).join(' · ')} />)}</Grupo>}
           {data?.clientes.length > 0 && <Grupo titulo="Clientes">{data.clientes.map((c: any) => <Resultado key={c.id} onClick={() => ir(`/clientes/${c.id}`)} titulo={c.nombre} detalle={c.telefono ?? ''} />)}</Grupo>}
         </div>
       </div>
@@ -260,9 +261,19 @@ function Resultado({ titulo, detalle, onClick }: { titulo: string; detalle: stri
 export function Layout() {
   const [menu, setMenu] = useState(false);
   const [busqueda, setBusqueda] = useState(false);
-  const { me } = useAuth();
+  const { me, puede, soloMecanico } = useAuth();
   const loc = useLocation();
   useEffect(() => setMenu(false), [loc.pathname]);
+  const puedeBuscar = puede('clientes.ver') || puede('vehiculos.ver') || puede('ordenes.ver') || puede('ordenes.asignadas');
+  // Atajos de la barra inferior (celular/tablet) según lo que la persona puede hacer.
+  const atajos = [
+    { a: '/', t: 'Inicio', i: <Gauge className="size-5" />, ok: !soloMecanico },
+    { a: '/mis-trabajos', t: 'Mis trabajos', i: <HardHat className="size-5" />, ok: soloMecanico },
+    { a: '/ordenes', t: 'Órdenes', i: <Wrench className="size-5" />, ok: puede('ordenes.ver') },
+    { a: '/agenda', t: 'Agenda', i: <CalendarDays className="size-5" />, ok: puede('turnos.ver') },
+    { a: '/clientes', t: 'Clientes', i: <Users className="size-5" />, ok: puede('clientes.ver') },
+    { a: '/asistencia', t: 'Asistencia', i: <Clock className="size-5" />, ok: puede('asistencia.fichar') },
+  ].filter((x) => x.ok).slice(0, 4);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -302,15 +313,17 @@ export function Layout() {
         <header className="no-print sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-borde bg-white/90 px-3 backdrop-blur sm:px-5">
           <Boton variante="fantasma" tam="sm" className="lg:hidden" onClick={() => setMenu(true)} icono={<Menu className="size-5" />} aria-label="Abrir menú" />
           <div className="lg:hidden"><img src="/icon.svg" alt="Fierro" className="size-7" /></div>
-          <button
-            type="button"
-            onClick={() => setBusqueda(true)}
-            className="ml-1 flex h-9 max-w-md flex-1 items-center gap-2 rounded-lg border border-borde bg-slate-50 px-3 text-left text-sm text-slate-400 hover:bg-slate-100"
-          >
-            <Search className="size-4" />
-            <span className="flex-1 truncate">Buscar patente, cliente u OT…</span>
-            <kbd className="hidden rounded border border-borde bg-white px-1.5 text-[11px] text-tenue sm:inline">Ctrl K</kbd>
-          </button>
+          {puedeBuscar && (
+            <button
+              type="button"
+              onClick={() => setBusqueda(true)}
+              className="ml-1 flex h-9 max-w-md flex-1 items-center gap-2 rounded-lg border border-borde bg-slate-50 px-3 text-left text-sm text-slate-400 hover:bg-slate-100"
+            >
+              <Search className="size-4" />
+              <span className="flex-1 truncate">Buscar patente, cliente u OT…</span>
+              <kbd className="hidden rounded border border-borde bg-white px-1.5 text-[11px] text-tenue sm:inline">Ctrl K</kbd>
+            </button>
+          )}
           <div className="ml-auto hidden text-right text-xs leading-tight text-tenue sm:block">
             <div className="font-medium text-texto">{me?.taller.nombre}</div>
             {me?.licencia?.estado === 'suspendida' && <div className="font-medium text-red-600">Licencia suspendida · solo lectura</div>}
@@ -327,13 +340,8 @@ export function Layout() {
         </main>
 
         {/* Navegación inferior (móvil) */}
-        <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-borde bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
-          {[
-            { a: '/', t: 'Inicio', i: <Gauge className="size-5" /> },
-            { a: '/ordenes', t: 'Órdenes', i: <Wrench className="size-5" /> },
-            { a: '/agenda', t: 'Agenda', i: <CalendarDays className="size-5" /> },
-            { a: '/clientes', t: 'Clientes', i: <Users className="size-5" /> },
-          ].map((x) => (
+        <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid border-t border-borde bg-white pb-[env(safe-area-inset-bottom)] lg:hidden" style={{ gridTemplateColumns: `repeat(${Math.max(atajos.length, 1)}, minmax(0, 1fr))` }}>
+          {atajos.map((x) => (
             <NavLink key={x.a} to={x.a} end={x.a === '/'} className={({ isActive }) => cn('flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium', isActive ? 'text-marca-700' : 'text-slate-500')}>
               {x.i}
               {x.t}

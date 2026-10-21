@@ -7,12 +7,12 @@ import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { descargarCSV, pesosCSV } from '@/lib/csv';
 import { fecha, hoyISO, money, numero } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, Encabezado, ErrorCaja, Select, Tarjeta, useDebounce, Vacio } from '@/components/ui';
+import { Aviso, Boton, Buscador, Campo, Cargando, Encabezado, ErrorCaja, Select, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
 import { primerDiaMes, SelectorPeriodo } from '@/components/Periodo';
 import { ESTADO_OT_LABEL, ESTADOS_OT, MEDIO_PAGO_LABEL, type EstadoOT, type MedioPago } from '@shared/dominio';
 
 type Filtro = 'cliente' | 'proveedor' | 'articulo' | 'categoria' | 'categoria_gasto' | 'mecanico' | 'estado_ot' | 'estado_doc' | 'agrupar' | 'q';
-interface Def { clave: string; titulo: string; grupo: string; filtros: Filtro[]; agrupar?: Array<[string, string]>; periodo?: boolean; permiso?: 'stock.valorizar' | 'finanzas.ver'; estados?: Array<[string, string]> }
+interface Def { clave: string; titulo: string; grupo: string; filtros: Filtro[]; agrupar?: Array<[string, string]>; periodo?: boolean; permiso?: 'stock.valorizar' | 'finanzas.ver' | 'margenes.ver'; estados?: Array<[string, string]> }
 
 const INFORMES: Def[] = [
   { clave: 'ventas', titulo: 'Ventas por período', grupo: 'Ventas', filtros: ['cliente', 'agrupar', 'estado_doc'], agrupar: [['dia', 'Por día'], ['mes', 'Por mes'], ['detalle', 'Por comprobante']], estados: [['emitida', 'Vigentes'], ['anulada', 'Anuladas']] },
@@ -20,7 +20,7 @@ const INFORMES: Def[] = [
   { clave: 'ventas-categoria', titulo: 'Ventas por categoría', grupo: 'Ventas', filtros: ['cliente', 'proveedor', 'q'] },
   { clave: 'mas-vendidos', titulo: 'Productos más vendidos', grupo: 'Ventas', filtros: ['cliente', 'categoria', 'proveedor'] },
   { clave: 'servicios', titulo: 'Servicios más realizados', grupo: 'Ventas', filtros: ['cliente', 'q'] },
-  { clave: 'rentabilidad', titulo: 'Rentabilidad por artículo', grupo: 'Ventas', filtros: ['cliente', 'categoria', 'proveedor', 'articulo'], permiso: 'stock.valorizar' },
+  { clave: 'rentabilidad', titulo: 'Rentabilidad por artículo', grupo: 'Ventas', filtros: ['cliente', 'categoria', 'proveedor', 'articulo'], permiso: 'margenes.ver' },
   { clave: 'cobranzas', titulo: 'Cobranzas', grupo: 'Cobranzas', filtros: ['cliente', 'agrupar', 'estado_doc'], agrupar: [['detalle', 'Por recibo'], ['medio', 'Por medio de pago']], estados: [['registrado', 'Vigentes'], ['anulado', 'Anulados']] },
   { clave: 'deudores', titulo: 'Deudores', grupo: 'Cobranzas', filtros: ['cliente'], periodo: false },
   { clave: 'compras', titulo: 'Compras', grupo: 'Compras', filtros: ['proveedor', 'articulo', 'agrupar', 'estado_doc'], agrupar: [['detalle', 'Por compra'], ['proveedor', 'Por proveedor']], estados: [['registrada', 'Vigentes'], ['anulada', 'Anuladas']] },
@@ -88,8 +88,16 @@ export function Informes() {
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['informes', def.clave, params], queryFn: () => api.get(`/informes/${def.clave}${params}`), enabled: !!valido });
   const grupos = useMemo(() => [...new Set(disponibles.map((i) => i.grupo))], [disponibles]);
 
-  const exportar = () => {
+  const toast = useToast();
+  const exportar = async () => {
     if (!data) return;
+    // La exportación es una acción con permiso propio: el servidor la autoriza y la deja registrada.
+    try {
+      await api.get(`/informes/${def.clave}${params}&exportar=1`);
+    } catch (e) {
+      toast.error(e);
+      return;
+    }
     const cols: Col[] = data.columnas;
     const filas = data.filas.map((r: any) => cols.map((c) => paraCSV(c, r[c.clave])));
     if (data.totales) filas.push(cols.map((c, i) => (i === 0 ? 'TOTAL' : data.totales[c.clave] != null ? paraCSV(c, data.totales[c.clave]) : '')));
@@ -98,7 +106,7 @@ export function Informes() {
 
   return (
     <>
-      <Encabezado titulo="Informes" subtitulo="Reportes con datos reales, exportables a Excel (CSV) y a PDF" acciones={<><Boton icono={<Download className="size-4" />} onClick={exportar} disabled={!data?.filas.length}>CSV (Excel)</Boton><Boton icono={<Printer className="size-4" />} onClick={() => window.print()} disabled={!data}>Imprimir / PDF</Boton></>} />
+      <Encabezado titulo="Informes" subtitulo="Reportes con datos reales, exportables a Excel (CSV) y a PDF" acciones={<>{puede('informes.exportar') && <Boton icono={<Download className="size-4" />} onClick={exportar} disabled={!data?.filas.length}>CSV (Excel)</Boton>}<Boton icono={<Printer className="size-4" />} onClick={() => window.print()} disabled={!data}>Imprimir / PDF</Boton></>} />
       <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
         <nav className="no-print space-y-4 lg:sticky lg:top-4 lg:self-start">
           {grupos.map((g) => (

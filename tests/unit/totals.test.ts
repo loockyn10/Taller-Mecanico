@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { aCentavos, calcularTotales } from '../../shared/totals';
 import { normalizarPatente, TRANSICIONES_OT } from '../../shared/dominio';
-import { tienePermiso } from '../../shared/permisos';
+import { permisosEfectivos, tienePermiso } from '../../shared/permisos';
 
 describe('calcularTotales', () => {
   it('reproduce el caso verificado en la auditoría (IVA 21% + recargo 3% sobre neto)', () => {
@@ -58,9 +58,10 @@ describe('utilidades de dominio', () => {
     expect(TRANSICIONES_OT.entregada).toEqual(['lista']);
   });
   it('el empleado no gestiona usuarios ni configuración', () => {
-    expect(tienePermiso('empleado', 'usuarios.gestionar')).toBe(false);
-    expect(tienePermiso('empleado', 'config.editar')).toBe(false);
-    expect(tienePermiso('empleado', 'operacion')).toBe(true);
-    expect(tienePermiso('administrador', 'usuarios.gestionar')).toBe(true);
+    const emp = permisosEfectivos('empleado');
+    expect(tienePermiso(emp, 'usuarios.gestionar')).toBe(false);
+    expect(tienePermiso(emp, 'config.editar')).toBe(false);
+    expect(tienePermiso(emp, 'ordenes.crear')).toBe(true);
+    expect(tienePermiso(permisosEfectivos('administrador'), 'usuarios.gestionar')).toBe(true);
   });
 });

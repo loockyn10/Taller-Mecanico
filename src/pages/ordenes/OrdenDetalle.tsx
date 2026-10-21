@@ -8,6 +8,7 @@ import { fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, ResumenTotales, type ItemUI, type ParamsUI } from '@/components/EditorItems';
+import { Cronometro, NotasTecnicas, Tareas } from '@/components/TrabajoMecanico';
 import { useMecanicos } from '@/components/selectores';
 import { ModalCobro, ModalEmitirCobrar } from '@/components/Cobro';
 import { SelectorLista } from '@/components/SelectorLista';
@@ -83,12 +84,12 @@ function Checklist({ orden }: { orden: any }) {
   );
 }
 
-function CambiarEstado({ orden, onCerrar }: { orden: any; onCerrar: () => void }) {
+function CambiarEstado({ orden, onCerrar, soloTaller }: { orden: any; onCerrar: () => void; soloTaller?: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [destino, setDestino] = useState<EstadoOT | null>(null);
   const [nota, setNota] = useState('');
-  const opciones = TRANSICIONES_OT[orden.estado as EstadoOT];
+  const opciones = TRANSICIONES_OT[orden.estado as EstadoOT].filter((e) => !soloTaller || ['diagnostico', 'en_reparacion', 'esperando_repuestos', 'lista'].includes(e));
   const m = useMutation({
     mutationFn: () => api.post(`/ordenes/${orden.id}/estado`, { estado: destino, nota }),
     onSuccess: (r) => {
@@ -118,6 +119,21 @@ function CambiarEstado({ orden, onCerrar }: { orden: any; onCerrar: () => void }
   );
 }
 
+/** Lista de trabajos y repuestos sin importes (para quien no tiene permiso para ver presupuestos valorizados). */
+function ItemsSinImportes({ items }: { items: any[] }) {
+  if (!items.length) return <p className="text-sm text-tenue">La orden no tiene trabajos ni repuestos cargados.</p>;
+  return (
+    <ul className="divide-y divide-borde text-sm">
+      {items.map((i) => (
+        <li key={i.id} className="flex items-center justify-between gap-3 py-2.5">
+          <span className="min-w-0 truncate">{i.descripcion}</span>
+          <span className="shrink-0 tabular-nums text-tenue">{i.tipo === 'articulo' ? 'Repuesto' : 'Trabajo'} · ×{i.cantidad}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function OrdenDetalle() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -127,7 +143,7 @@ export function OrdenDetalle() {
   const { confirmar, dialogo } = useConfirmar();
   const { data: o, isLoading, error, refetch } = useQuery({ queryKey: ['orden', id], queryFn: () => api.get(`/ordenes/${id}`) });
   const { data: mecanicos = [] } = useMecanicos();
-  const [tab, setTab] = useState<'trabajo' | 'checklist' | 'historial' | 'cobro'>('trabajo');
+  const [tab, setTab] = useState<'trabajo' | 'tareas' | 'checklist' | 'historial' | 'cobro'>('trabajo');
   const [editando, setEditando] = useState(false);
   const [estadoModal, setEstadoModal] = useState(false);
   const [cobro, setCobro] = useState(false);
@@ -191,13 +207,18 @@ export function OrdenDetalle() {
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
 
-  const editable = ESTADOS_OT_EDITABLES.includes(o.estado);
+  const valorizado = puede('presupuestos.valorizados.ver') && o.total !== undefined;
+  const puedeModificar = puede('ordenes.modificar');
+  const cerrada = o.estado === 'entregada' || o.estado === 'cancelada';
+  const puedeTrabajar = !cerrada && (puedeModificar || (puede('ordenes.trabajar_asignadas') && o.asignada_a_mi));
+  // Editar ítems exige ver precios e importes (el servidor también lo verifica).
+  const editable = ESTADOS_OT_EDITABLES.includes(o.estado) && puedeModificar && valorizado && puede('precios.venta.ver');
   const saldo = o.venta_id ? o.venta_total - o.venta_cobrado : null;
   const vehiculo = [o.marca, o.modelo, o.anio].filter(Boolean).join(' ');
-  const wa = whatsapp(
+  const wa = !o.cliente ? null : whatsapp(
     o.cliente_telefono,
     o.estado === 'lista'
-      ? `Hola ${o.cliente}! Te avisamos de ${me?.taller.nombre} que tu vehículo ${o.patente} ya está listo para retirar. Total: ${money(o.total)}.`
+      ? `Hola ${o.cliente}! Te avisamos de ${me?.taller.nombre} que tu vehículo ${o.patente} ya está listo para retirar.${valorizado ? ` Total: ${money(o.total)}.` : ''}`
       : `Hola ${o.cliente}! Te escribimos de ${me?.taller.nombre} por tu vehículo ${o.patente} (OT #${numero(o.numero)}). Estado: ${ESTADO_OT_LABEL[o.estado as EstadoOT]}.`,
   );
 
@@ -207,13 +228,13 @@ export function OrdenDetalle() {
       <Encabezado
         volver="/ordenes"
         titulo={<span className="flex flex-wrap items-center gap-3">OT #{numero(o.numero)} <EstadoOTBadge estado={o.estado} /></span>}
-        subtitulo={<>{o.patente} · {vehiculo || 'Vehículo'} · {o.cliente}</>}
+        subtitulo={<>{[o.patente, vehiculo || 'Vehículo', o.cliente].filter(Boolean).join(' · ')}</>}
         acciones={
           <>
             {wa && <a href={wa} target="_blank" rel="noreferrer"><Boton icono={<MessageCircle className="size-4" />}>WhatsApp</Boton></a>}
             <Boton icono={<Printer className="size-4" />} onClick={() => window.open(`/imprimir/orden/${o.id}`, '_blank')}>Imprimir</Boton>
             <Boton icono={<Printer className="size-4" />} onClick={() => window.open(`/imprimir/orden-taller/${o.id}`, '_blank')} title="Orden para el mecánico, sin precios">Hoja taller</Boton>
-            <Boton variante="primario" icono={<ArrowRight className="size-4" />} onClick={() => setEstadoModal(true)}>Cambiar estado</Boton>
+            {puedeTrabajar && <Boton variante="primario" icono={<ArrowRight className="size-4" />} onClick={() => setEstadoModal(true)}>Cambiar estado</Boton>}
           </>
         }
       />
@@ -225,8 +246,9 @@ export function OrdenDetalle() {
             onCambio={setTab}
             items={[
               { clave: 'trabajo', titulo: 'Trabajo' },
+              { clave: 'tareas', titulo: 'Tareas y notas', contador: o.tareas.length || undefined },
               { clave: 'checklist', titulo: 'Check-list de ingreso' },
-              { clave: 'cobro', titulo: 'Comprobante y cobro' },
+              ...(puede('ventas.ver') ? [{ clave: 'cobro' as const, titulo: 'Comprobante y cobro' }] : []),
               { clave: 'historial', titulo: 'Historial', contador: o.eventos.length },
             ]}
           />
@@ -245,8 +267,10 @@ export function OrdenDetalle() {
                 ))
               }
             >
-              {!editable && <Aviso className="mb-4">La OT está “{ESTADO_OT_LABEL[o.estado as EstadoOT]}”: los ítems no se pueden modificar. Para corregirlos, volvela a “En reparación”{o.venta_id ? ' (antes hay que anular el comprobante)' : ''}.</Aviso>}
-              {editando ? (
+              {!ESTADOS_OT_EDITABLES.includes(o.estado) && <Aviso className="mb-4">La OT está “{ESTADO_OT_LABEL[o.estado as EstadoOT]}”: los ítems no se pueden modificar. Para corregirlos, volvela a “En reparación”{o.venta_id ? ' (antes hay que anular el comprobante)' : ''}.</Aviso>}
+              {!valorizado ? (
+                <ItemsSinImportes items={o.items} />
+              ) : editando ? (
                 <div className="space-y-5">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Campo label="Mecánico">
@@ -268,6 +292,13 @@ export function OrdenDetalle() {
                 <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} soloLectura />
               )}
             </Tarjeta>
+          )}
+          {tab === 'tareas' && (
+            <div className="space-y-5">
+              <Tarjeta titulo="Tareas del trabajo"><Tareas orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
+              <Tarjeta titulo="Diagnóstico y observaciones técnicas"><NotasTecnicas orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
+              <Tarjeta titulo="Tiempo dedicado a la reparación" subtitulo="Aparte de las horas de asistencia al taller"><Cronometro orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
+            </div>
           )}
           {tab === 'checklist' && <Tarjeta titulo="Check-list de ingreso"><Checklist orden={o} /></Tarjeta>}
           {tab === 'historial' && (
@@ -291,7 +322,7 @@ export function OrdenDetalle() {
                   puede('ventas.emitir') ? (
                     <div className="space-y-4">
                       <p className="text-sm text-tenue">Generá el comprobante interno con los ítems de la OT para registrar la deuda del cliente y cobrarla.</p>
-                      <ResumenTotales t={calcularTotales(o.items, o)} params={o} />
+                      {valorizado && <ResumenTotales t={calcularTotales(o.items, o)} params={o} />}
                       <div className="flex flex-wrap gap-2">
                         {puede('cobros.registrar') && <Boton variante="primario" icono={<Wallet className="size-4" />} cargando={comprobante.isPending} onClick={() => setEmitirCobrar(true)}>Emitir y cobrar ({money(o.total)})</Boton>}
                         <Boton icono={<Receipt className="size-4" />} disabled={o.cliente_codigo === 0} title={o.cliente_codigo === 0 ? 'La cuenta corriente requiere un cliente identificado' : undefined} cargando={comprobante.isPending} onClick={() => comprobante.mutate({ condicion: 'cuenta_corriente' })}>Emitir a cuenta corriente</Boton>
@@ -323,9 +354,9 @@ export function OrdenDetalle() {
         <div className="space-y-5">
           <Tarjeta titulo="Datos">
             <dl className="grid grid-cols-2 gap-4">
-              <Dato etiqueta="Cliente"><Link className="text-marca-700" to={`/clientes/${o.cliente_id}`}>{o.cliente}</Link></Dato>
-              <Dato etiqueta="Teléfono">{o.cliente_telefono}</Dato>
-              <Dato etiqueta="Vehículo"><Link className="text-marca-700" to={`/vehiculos/${o.vehiculo_id}`}>{o.patente}</Link></Dato>
+              {o.cliente !== undefined && <Dato etiqueta="Cliente"><Link className="text-marca-700" to={`/clientes/${o.cliente_id}`}>{o.cliente}</Link></Dato>}
+              {o.cliente !== undefined && <Dato etiqueta="Teléfono">{o.cliente_telefono}</Dato>}
+              <Dato etiqueta="Vehículo">{puede('vehiculos.ver') ? <Link className="text-marca-700" to={`/vehiculos/${o.vehiculo_id}`}>{o.patente}</Link> : o.patente}</Dato>
               <Dato etiqueta="Km de ingreso">{km(o.km_ingreso)}</Dato>
               <Dato etiqueta="Mecánico">{o.mecanico}</Dato>
               <Dato etiqueta="Ingreso">{fecha(o.fecha_ingreso)}</Dato>
@@ -338,12 +369,14 @@ export function OrdenDetalle() {
               {o.lista_precio_nombre && <Dato etiqueta="Lista de precios" className="col-span-2">{o.lista_precio_nombre}</Dato>}
             </dl>
           </Tarjeta>
-          <Tarjeta titulo="Importe">
-            <div className="text-3xl font-bold tabular-nums">{money(o.total)}</div>
-            {o.venta_id ? <div className="mt-2"><EstadoCobroBadge total={o.venta_total} cobrado={o.venta_cobrado} /></div> : <p className="mt-1 text-sm text-tenue">Sin comprobante emitido</p>}
-            {o.stock_aplicado ? <p className="mt-2 text-xs text-tenue">Repuestos descontados del stock.</p> : null}
-          </Tarjeta>
-          {o.estado === 'cancelada' && puede('operacion') && (
+          {valorizado ? (
+            <Tarjeta titulo="Importe">
+              <div className="text-3xl font-bold tabular-nums">{money(o.total)}</div>
+              {o.venta_id ? <div className="mt-2"><EstadoCobroBadge total={o.venta_total} cobrado={o.venta_cobrado} /></div> : <p className="mt-1 text-sm text-tenue">Sin comprobante emitido</p>}
+              {o.stock_aplicado ? <p className="mt-2 text-xs text-tenue">Repuestos descontados del stock.</p> : null}
+            </Tarjeta>
+          ) : null}
+          {o.estado === 'cancelada' && puedeModificar && (
             <Boton
               className="w-full"
               onClick={async () => {
@@ -360,7 +393,7 @@ export function OrdenDetalle() {
         </div>
       </div>
 
-      {estadoModal && <CambiarEstado orden={o} onCerrar={() => setEstadoModal(false)} />}
+      {estadoModal && <CambiarEstado orden={o} soloTaller={!puedeModificar} onCerrar={() => setEstadoModal(false)} />}
       {cobro && <ModalCobro abierto onCerrar={() => setCobro(false)} clienteId={o.cliente_id} ventaId={o.venta_id} />}
       {emitirCobrar && <ModalEmitirCobrar total={o.total} cargando={comprobante.isPending} onCerrar={() => setEmitirCobrar(false)} onConfirmar={(cobro) => comprobante.mutate({ condicion: 'contado', cobro })} />}
     </>

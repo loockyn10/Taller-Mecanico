@@ -1,53 +1,326 @@
-// Roles y permisos. La API los verifica en cada endpoint; el frontend solo los usa para ocultar opciones.
-
-export const ROLES = ['propietario', 'administrador', 'empleado'] as const;
-export type Rol = (typeof ROLES)[number];
+// Roles, permisos granulares y plantillas. Un rol es una PLANTILLA de permisos; cada usuario puede además tener ajustes
+// individuales (permisos otorgados y revocados respecto de su plantilla). La API los verifica en cada endpoint;
+// el frontend solo los usa para ocultar opciones.
 
 export const PERMISOS = [
-  'operacion', // clientes, vehículos, presupuestos, órdenes, turnos, check-list
+  // ── Clientes y vehículos
+  'clientes.ver',
+  'clientes.crear',
+  'clientes.editar',
+  'vehiculos.ver',
+  'vehiculos.crear',
+  'vehiculos.editar',
+  // ── Presupuestos, órdenes de trabajo y agenda
+  'presupuestos.ver',
+  'presupuestos.gestionar', // crear, modificar, cambiar de estado y convertir en OT
+  'ordenes.ver', // todas las órdenes de trabajo
+  'ordenes.asignadas', // solo las órdenes asignadas a la persona (vista simplificada para mecánicos)
+  'ordenes.trabajar_asignadas', // actualizar tareas, estado y observaciones técnicas de sus órdenes asignadas
+  'ordenes.crear',
+  'ordenes.modificar', // editar ítems, cambiar estados y completar el check-list de cualquier orden
+  'turnos.ver',
+  'turnos.gestionar',
+  // ── Precios (visibilidad)
+  'precios.venta.ver', // precios de venta de servicios y artículos
+  'precios.costo.ver', // costos de artículos
+  'margenes.ver', // márgenes de ganancia y rentabilidad
+  'presupuestos.valorizados.ver', // importes de presupuestos, órdenes y documentos valorizados
+  'precios.gestionar', // listas de precios y ajustes masivos
+  // ── Catálogo e inventario
   'catalogo.ver',
-  'catalogo.editar', // servicios, artículos, categorías, marcas/modelos, mecánicos
+  'catalogo.editar', // servicios, artículos, categorías, marcas y modelos
   'stock.ver',
   'stock.ajustar',
+  'stock.valorizar', // inventario valorizado e historial de costos
+  // ── Ventas y cobranzas
   'ventas.ver',
   'ventas.emitir',
   'ventas.anular',
   'cobros.registrar',
   'cobros.anular',
+  // ── Compras
+  'compras.ver',
   'compras.gestionar',
-  'reportes.ver',
-  'config.editar',
-  'usuarios.gestionar',
-  'licencia.ver',
-  'registros.eliminar',
+  // ── Dinero
   'caja.operar', // abrir/cerrar caja, arqueo, ingresos y egresos manuales
   'finanzas.ver', // historial de cajas, resúmenes y reportes financieros, listado de gastos
   'gastos.gestionar', // categorías, gastos recurrentes, anulación de gastos y movimientos manuales
-  'precios.gestionar', // listas de precios y ajustes masivos
-  'fechas.retroactivas', // cargar comprobantes con fecha pasada
+  'bancos.ver', // consultar cuentas y movimientos bancarios
   'bancos.gestionar', // cuentas bancarias, movimientos, transferencias y conciliación
-  'bancos.ajustar', // ajustes manuales de saldo bancario (sólo propietario)
+  'bancos.ajustar', // ajustes manuales de saldo bancario
   'cheques.gestionar', // cartera de cheques y eCheq
   'tesoreria.ver', // tablero de tesorería
   'contabilidad.ver', // registros internos, libros de ventas y compras
-  'stock.valorizar', // inventario valorizado e historial de costos
+  // ── Informes
+  'reportes.ver', // estadísticas e informes
+  'informes.exportar', // exportar informes y listados
+  // ── Personal y asistencia
+  'usuarios.gestionar', // administrar empleados
+  'permisos.gestionar', // asignar roles y personalizar permisos
+  'asistencia.fichar', // registrar la propia entrada y salida
+  'asistencia.ver', // panel de asistencia de todo el personal
+  'asistencia.corregir', // correcciones manuales de fichajes
+  'reloj.administrar', // dispositivos de reloj compartido y PIN del personal
+  // ── Administración del taller
+  'config.editar',
+  'licencia.ver',
+  'registros.eliminar',
+  'fechas.retroactivas', // cargar comprobantes con fecha pasada
 ] as const;
 export type Permiso = (typeof PERMISOS)[number];
 
-const EMPLEADO: Permiso[] = ['operacion', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar'];
+export const PERMISOS_VALIDOS: ReadonlySet<string> = new Set(PERMISOS);
+export const esPermiso = (x: unknown): x is Permiso => typeof x === 'string' && PERMISOS_VALIDOS.has(x);
 
-export const PERMISOS_POR_ROL: Record<Rol, readonly Permiso[]> = {
-  propietario: PERMISOS,
-  administrador: PERMISOS.filter((p) => p !== 'bancos.ajustar'),
-  empleado: EMPLEADO,
+/** Dependencias: tener el permiso de la izquierda exige tener los de la derecha (escribir implica poder leer). */
+export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
+  'clientes.crear': ['clientes.ver'],
+  'clientes.editar': ['clientes.ver'],
+  'vehiculos.crear': ['vehiculos.ver'],
+  'vehiculos.editar': ['vehiculos.ver'],
+  'presupuestos.gestionar': ['presupuestos.ver'],
+  'ordenes.crear': ['ordenes.ver'],
+  'ordenes.modificar': ['ordenes.ver'],
+  'ordenes.ver': ['ordenes.asignadas'],
+  'ordenes.trabajar_asignadas': ['ordenes.asignadas'],
+  'turnos.gestionar': ['turnos.ver'],
+  'margenes.ver': ['precios.venta.ver', 'precios.costo.ver'],
+  'stock.valorizar': ['precios.costo.ver'],
+  'catalogo.editar': ['catalogo.ver'],
+  'stock.ajustar': ['stock.ver'],
+  'ventas.emitir': ['ventas.ver'],
+  'ventas.anular': ['ventas.ver'],
+  'cobros.registrar': ['ventas.ver'],
+  'cobros.anular': ['ventas.ver'],
+  'compras.gestionar': ['compras.ver'],
+  'bancos.gestionar': ['bancos.ver'],
+  'bancos.ajustar': ['bancos.gestionar'],
+  'permisos.gestionar': ['usuarios.gestionar'],
+  'asistencia.corregir': ['asistencia.ver'],
+  'reloj.administrar': ['asistencia.ver'],
 };
 
-export function tienePermiso(rol: Rol, p: Permiso): boolean {
-  return PERMISOS_POR_ROL[rol].includes(p);
+// ───────────────────────── Roles (plantillas) ─────────────────────────
+
+export const ROLES = ['propietario', 'administrador', 'recepcion', 'mecanico', 'deposito', 'caja', 'empleado'] as const;
+export type Rol = (typeof ROLES)[number];
+
+/** Nivel de privilegio guardado en usuarios.rol (la base lo restringe a estos tres valores). */
+export type Nivel = 'propietario' | 'administrador' | 'empleado';
+export const nivelDeRol = (r: Rol): Nivel => (r === 'propietario' ? 'propietario' : r === 'administrador' ? 'administrador' : 'empleado');
+
+const SIN_BANCOS_AJUSTE = (p: Permiso) => p !== 'bancos.ajustar' && p !== 'permisos.gestionar';
+
+const RECEPCION: Permiso[] = [
+  'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
+  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'turnos.ver', 'turnos.gestionar',
+  'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'asistencia.fichar',
+];
+const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'asistencia.fichar'];
+const DEPOSITO: Permiso[] = [
+  'catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'compras.ver', 'compras.gestionar', 'precios.venta.ver', 'precios.costo.ver',
+  'ordenes.ver', 'vehiculos.ver', 'asistencia.fichar',
+];
+const CAJA: Permiso[] = [
+  'clientes.ver', 'clientes.crear', 'vehiculos.ver', 'ordenes.ver', 'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver',
+  'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar', 'asistencia.fichar',
+];
+/** Plantilla anterior a este sprint: se conserva para los usuarios ya creados (mismos accesos que tenían). */
+const EMPLEADO: Permiso[] = [
+  'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
+  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'turnos.ver', 'turnos.gestionar',
+  'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar',
+  'asistencia.fichar',
+];
+
+export interface Plantilla {
+  etiqueta: string;
+  descripcion: string;
+  permisos: readonly Permiso[];
+  /** No se ofrece al crear usuarios nuevos (existe solo para los usuarios anteriores al sprint). */
+  heredada?: boolean;
 }
 
-export const ROL_LABEL: Record<Rol, string> = {
-  propietario: 'Propietario',
-  administrador: 'Administrador',
-  empleado: 'Empleado',
+export const PLANTILLAS: Record<Rol, Plantilla> = {
+  propietario: { etiqueta: 'Propietario', descripcion: 'Acceso total, incluidos la licencia, los usuarios y los permisos.', permisos: PERMISOS },
+  administrador: {
+    etiqueta: 'Administrador',
+    descripcion: 'Acceso a toda la operación, finanzas, compras, informes y administración de empleados. No gestiona permisos ni ajusta saldos bancarios.',
+    permisos: PERMISOS.filter(SIN_BANCOS_AJUSTE),
+  },
+  recepcion: { etiqueta: 'Recepción', descripcion: 'Recibe clientes y vehículos, arma presupuestos y órdenes y gestiona la agenda. Ve precios de venta; no ve costos ni márgenes.', permisos: RECEPCION },
+  mecanico: { etiqueta: 'Mecánico', descripcion: 'Ve y trabaja sus órdenes asignadas. No ve precios, costos, facturación, caja ni estadísticas.', permisos: MECANICO },
+  deposito: { etiqueta: 'Depósito / Repuestos', descripcion: 'Administra artículos, inventario y compras. Ve precios de venta y costos de los repuestos.', permisos: DEPOSITO },
+  caja: { etiqueta: 'Caja / Ventas', descripcion: 'Vende en mostrador, emite comprobantes, cobra y opera la caja diaria.', permisos: CAJA },
+  empleado: { etiqueta: 'Empleado (general)', descripcion: 'Rol anterior: operación completa de recepción más ventas, cobros y caja.', permisos: EMPLEADO, heredada: true },
 };
+
+export const ROL_LABEL: Record<Rol, string> = Object.fromEntries(ROLES.map((r) => [r, PLANTILLAS[r].etiqueta])) as Record<Rol, string>;
+export const esRol = (x: unknown): x is Rol => typeof x === 'string' && (ROLES as readonly string[]).includes(x);
+
+// ───────────────────────── Permisos efectivos ─────────────────────────
+
+/** Ajustes individuales respecto de la plantilla: g = permisos otorgados de más, r = permisos retirados. */
+export interface AjustesPermisos {
+  g: Permiso[];
+  r: Permiso[];
+}
+export const SIN_AJUSTES: AjustesPermisos = { g: [], r: [] };
+
+/** Lee el JSON guardado en la base; ignora permisos desconocidos (por ejemplo de versiones futuras). */
+export function leerAjustes(json: string | null | undefined): AjustesPermisos {
+  if (!json) return { g: [], r: [] };
+  try {
+    const o = JSON.parse(json);
+    return { g: (Array.isArray(o?.g) ? o.g : []).filter(esPermiso), r: (Array.isArray(o?.r) ? o.r : []).filter(esPermiso) };
+  } catch {
+    return { g: [], r: [] };
+  }
+}
+
+/** Agrega las dependencias faltantes de cada permiso presente. */
+function conDependencias(base: Set<Permiso>): Set<Permiso> {
+  let cambio = true;
+  while (cambio) {
+    cambio = false;
+    for (const p of [...base]) for (const q of REQUIERE[p] ?? []) if (!base.has(q)) (base.add(q), (cambio = true));
+  }
+  return base;
+}
+
+/** Quita los permisos cuyas dependencias ya no están. */
+function sinHuerfanos(s: Set<Permiso>): Set<Permiso> {
+  let cambio = true;
+  while (cambio) {
+    cambio = false;
+    for (const p of [...s]) if ((REQUIERE[p] ?? []).some((q) => !s.has(q))) (s.delete(p), (cambio = true));
+  }
+  return s;
+}
+
+/**
+ * Permisos de un usuario = plantilla + otorgados − retirados, respetando las dependencias.
+ * El propietario siempre conserva todos (no se le pueden retirar permisos).
+ */
+export function permisosEfectivos(rol: Rol, ajustes: AjustesPermisos = SIN_AJUSTES): Permiso[] {
+  if (rol === 'propietario') return [...PERMISOS];
+  const s = conDependencias(new Set<Permiso>([...(PLANTILLAS[rol]?.permisos ?? []), ...ajustes.g]));
+  for (const p of ajustes.r) s.delete(p);
+  sinHuerfanos(s);
+  return PERMISOS.filter((p) => s.has(p));
+}
+
+/**
+ * Convierte una lista deseada de permisos en ajustes respecto de la plantilla del rol (lo mínimo que se debe guardar).
+ * La lista se toma literal: si falta un permiso del que otros dependen (por ejemplo "ver clientes"), esos otros se descartan.
+ */
+export function ajustesDesde(rol: Rol, deseados: readonly Permiso[]): AjustesPermisos {
+  const base = new Set(permisosEfectivos(rol, SIN_AJUSTES));
+  const quiero = sinHuerfanos(new Set(deseados));
+  return { g: PERMISOS.filter((p) => quiero.has(p) && !base.has(p)), r: PERMISOS.filter((p) => base.has(p) && !quiero.has(p)) };
+}
+
+export const tienePermiso = (permisos: readonly Permiso[] | ReadonlySet<Permiso>, p: Permiso): boolean =>
+  Array.isArray(permisos) ? (permisos as readonly Permiso[]).includes(p) : (permisos as ReadonlySet<Permiso>).has(p);
+
+// ───────────────────────── Catálogo para la pantalla de permisos ─────────────────────────
+
+export interface InfoPermiso {
+  etiqueta: string;
+  /** Aclaración corta para quien configura permisos. */
+  ayuda?: string;
+}
+export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
+  'clientes.ver': { etiqueta: 'Ver clientes' },
+  'clientes.crear': { etiqueta: 'Crear clientes' },
+  'clientes.editar': { etiqueta: 'Editar clientes' },
+  'vehiculos.ver': { etiqueta: 'Ver vehículos', ayuda: 'Incluye el historial de reparaciones del vehículo' },
+  'vehiculos.crear': { etiqueta: 'Crear vehículos' },
+  'vehiculos.editar': { etiqueta: 'Editar vehículos' },
+  'presupuestos.ver': { etiqueta: 'Ver presupuestos' },
+  'presupuestos.gestionar': { etiqueta: 'Crear y modificar presupuestos', ayuda: 'Requiere ver presupuestos valorizados y precios de venta' },
+  'ordenes.ver': { etiqueta: 'Ver todas las órdenes de trabajo' },
+  'ordenes.asignadas': { etiqueta: 'Ver órdenes asignadas', ayuda: 'Solo las órdenes donde la persona figura como mecánico' },
+  'ordenes.trabajar_asignadas': { etiqueta: 'Actualizar órdenes asignadas', ayuda: 'Tareas, estado y observaciones técnicas de sus órdenes' },
+  'ordenes.crear': { etiqueta: 'Crear órdenes de trabajo' },
+  'ordenes.modificar': { etiqueta: 'Modificar órdenes de trabajo', ayuda: 'Editar ítems, estados y check-list. La edición de ítems requiere ver precios y presupuestos valorizados' },
+  'turnos.ver': { etiqueta: 'Ver agenda de turnos' },
+  'turnos.gestionar': { etiqueta: 'Gestionar turnos' },
+  'precios.venta.ver': { etiqueta: 'Ver precios de venta' },
+  'precios.costo.ver': { etiqueta: 'Ver precios de costo' },
+  'margenes.ver': { etiqueta: 'Ver márgenes de ganancia', ayuda: 'Implica ver precios de venta y de costo' },
+  'presupuestos.valorizados.ver': { etiqueta: 'Ver presupuestos y órdenes valorizados', ayuda: 'Importes y totales de presupuestos, órdenes y listados' },
+  'precios.gestionar': { etiqueta: 'Gestionar listas de precios y ajustes masivos' },
+  'catalogo.ver': { etiqueta: 'Consultar catálogo (servicios y artículos)' },
+  'catalogo.editar': { etiqueta: 'Modificar catálogo', ayuda: 'Servicios, artículos, categorías, marcas y modelos' },
+  'stock.ver': { etiqueta: 'Consultar inventario' },
+  'stock.ajustar': { etiqueta: 'Modificar inventario', ayuda: 'Movimientos, ajustes y conteos' },
+  'stock.valorizar': { etiqueta: 'Inventario valorizado e historial de costos' },
+  'ventas.ver': { etiqueta: 'Ver ventas, cobranzas y cuentas corrientes' },
+  'ventas.emitir': { etiqueta: 'Emitir ventas y comprobantes' },
+  'ventas.anular': { etiqueta: 'Anular ventas' },
+  'cobros.registrar': { etiqueta: 'Registrar cobros' },
+  'cobros.anular': { etiqueta: 'Anular cobros' },
+  'compras.ver': { etiqueta: 'Consultar compras y proveedores' },
+  'compras.gestionar': { etiqueta: 'Gestionar compras', ayuda: 'Órdenes de compra, recepciones, facturas y pagos a proveedores' },
+  'caja.operar': { etiqueta: 'Gestionar caja', ayuda: 'Abrir, cerrar, arquear y registrar ingresos y egresos' },
+  'finanzas.ver': { etiqueta: 'Ver finanzas y gastos' },
+  'gastos.gestionar': { etiqueta: 'Gestionar gastos', ayuda: 'Categorías, gastos recurrentes y anulaciones' },
+  'bancos.ver': { etiqueta: 'Consultar bancos' },
+  'bancos.gestionar': { etiqueta: 'Gestionar bancos', ayuda: 'Movimientos, transferencias y conciliación' },
+  'bancos.ajustar': { etiqueta: 'Ajustar saldos bancarios' },
+  'cheques.gestionar': { etiqueta: 'Gestionar cheques y eCheq' },
+  'tesoreria.ver': { etiqueta: 'Ver tesorería' },
+  'contabilidad.ver': { etiqueta: 'Ver registros contables internos' },
+  'reportes.ver': { etiqueta: 'Ver estadísticas e informes' },
+  'informes.exportar': { etiqueta: 'Exportar informes' },
+  'usuarios.gestionar': { etiqueta: 'Administrar empleados', ayuda: 'Crear, editar y desactivar usuarios (no cambia permisos)' },
+  'permisos.gestionar': { etiqueta: 'Gestionar permisos', ayuda: 'Asignar roles y personalizar permisos. Solo puede otorgar los permisos que ya tiene' },
+  'asistencia.fichar': { etiqueta: 'Registrar su propia asistencia' },
+  'asistencia.ver': { etiqueta: 'Ver asistencia del personal' },
+  'asistencia.corregir': { etiqueta: 'Corregir fichajes' },
+  'reloj.administrar': { etiqueta: 'Administrar reloj compartido y PIN' },
+  'config.editar': { etiqueta: 'Configurar el taller' },
+  'licencia.ver': { etiqueta: 'Ver la licencia' },
+  'registros.eliminar': { etiqueta: 'Eliminar clientes y vehículos' },
+  'fechas.retroactivas': { etiqueta: 'Cargar operaciones con fecha anterior' },
+};
+
+export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
+  { titulo: 'Clientes y vehículos', permisos: ['clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar'] },
+  { titulo: 'Presupuestos, órdenes y agenda', permisos: ['presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.crear', 'ordenes.modificar', 'turnos.ver', 'turnos.gestionar'] },
+  { titulo: 'Precios y márgenes', permisos: ['precios.venta.ver', 'precios.costo.ver', 'margenes.ver', 'presupuestos.valorizados.ver', 'precios.gestionar'] },
+  { titulo: 'Catálogo e inventario', permisos: ['catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'stock.valorizar'] },
+  { titulo: 'Ventas y cobranzas', permisos: ['ventas.ver', 'ventas.emitir', 'ventas.anular', 'cobros.registrar', 'cobros.anular'] },
+  { titulo: 'Compras', permisos: ['compras.ver', 'compras.gestionar'] },
+  { titulo: 'Caja, bancos y finanzas', permisos: ['caja.operar', 'finanzas.ver', 'gastos.gestionar', 'bancos.ver', 'bancos.gestionar', 'bancos.ajustar', 'cheques.gestionar', 'tesoreria.ver', 'contabilidad.ver'] },
+  { titulo: 'Informes', permisos: ['reportes.ver', 'informes.exportar'] },
+  { titulo: 'Personal y asistencia', permisos: ['usuarios.gestionar', 'permisos.gestionar', 'asistencia.fichar', 'asistencia.ver', 'asistencia.corregir', 'reloj.administrar'] },
+  { titulo: 'Administración', permisos: ['config.editar', 'licencia.ver', 'registros.eliminar', 'fechas.retroactivas'] },
+];
+
+/** Zonas horarias ofrecidas para el taller (la hora siempre se registra en el servidor, en UTC). */
+export const ZONAS_HORARIAS: ReadonlyArray<readonly [string, string]> = [
+  ['America/Argentina/Buenos_Aires', 'Argentina (Buenos Aires)'],
+  ['America/Montevideo', 'Uruguay (Montevideo)'],
+  ['America/Santiago', 'Chile (Santiago)'],
+  ['America/Asuncion', 'Paraguay (Asunción)'],
+  ['America/La_Paz', 'Bolivia (La Paz)'],
+  ['America/Sao_Paulo', 'Brasil (São Paulo)'],
+  ['America/Lima', 'Perú (Lima)'],
+  ['America/Bogota', 'Colombia (Bogotá)'],
+  ['America/Mexico_City', 'México (Ciudad de México)'],
+  ['Europe/Madrid', 'España (Madrid)'],
+];
+export const ZONA_HORARIA_DEFECTO = 'America/Argentina/Buenos_Aires';
+
+/** Marca o desmarca un permiso en una selección, arrastrando sus dependencias (marcar "editar" marca "ver"; desmarcar "ver" desmarca lo que depende). */
+export function alternarPermiso(seleccion: ReadonlySet<Permiso>, p: Permiso, activar: boolean): Set<Permiso> {
+  const s = new Set(seleccion);
+  if (activar) {
+    s.add(p);
+    return conDependencias(s);
+  }
+  s.delete(p);
+  return sinHuerfanos(s);
+}

@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router-dom';
-import { KeyRound, Plus, Trash2 } from 'lucide-react';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fechaHora, money } from '@/lib/format';
 import { Aviso, Boton, Campo, Cargando, Check, Encabezado, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { useMarcas } from '@/components/selectores';
 import { CONDICIONES_IVA, CONDICION_IVA_LABEL, MEDIO_PAGO_LABEL, MEDIOS_PAGO, TIPOS_VEHICULO, TIPO_VEHICULO_LABEL } from '@shared/dominio';
-import { ROL_LABEL, type Rol } from '@shared/permisos';
+import { ZONAS_HORARIAS } from '@shared/permisos';
 
 function DatosTaller() {
   const qc = useQueryClient();
@@ -76,7 +76,7 @@ function DatosTaller() {
             <Select value={c.iva_default} onChange={nc('iva_default')}>{[0, 10.5, 21, 27].map((v) => <option key={v} value={v}>{v ? `${String(v).replace('.', ',')} %` : 'Sin IVA'}</option>)}</Select>
           </Campo>
           <Campo label="Recargo por defecto (%)" hint="Por ejemplo, recargo por pago con tarjeta"><Input type="number" min={0} max={100} step="any" value={c.recargo_default} onChange={nc('recargo_default')} /></Campo>
-          <Campo label="Margen sugerido sobre costo (%)"><Input type="number" min={0} value={c.margen_default} onChange={nc('margen_default')} /></Campo>
+          {c.margen_default !== undefined && <Campo label="Margen sugerido sobre costo (%)"><Input type="number" min={0} value={c.margen_default} onChange={nc('margen_default')} /></Campo>}
           <Campo label="Validez de presupuestos (días)"><Input type="number" min={1} value={c.validez_presupuesto_dias} onChange={nc('validez_presupuesto_dias')} /></Campo>
         </fieldset>
       </Tarjeta>
@@ -113,7 +113,12 @@ function DatosTaller() {
         </fieldset>
       </Tarjeta>
       <Tarjeta titulo="Preferencias generales">
-        <fieldset disabled={ro}>
+        <fieldset disabled={ro} className="space-y-4">
+          <Campo label="Zona horaria del taller" hint="Define el día y la hora con que se muestran los fichajes y se arman los reportes de asistencia. La hora siempre la registra el servidor.">
+            <Select value={c.zona_horaria ?? 'America/Argentina/Buenos_Aires'} onChange={sc('zona_horaria')} className="max-w-sm">
+              {ZONAS_HORARIAS.map(([z, n]) => <option key={z} value={z}>{n}</option>)}
+            </Select>
+          </Campo>
           <Check checked={c.permitir_stock_negativo} onChange={(v) => setC({ ...c, permitir_stock_negativo: v })} label="Permitir stock negativo (no recomendado)" />
         </fieldset>
       </Tarjeta>
@@ -122,99 +127,6 @@ function DatosTaller() {
         <p className="text-sm text-tenue">No disponible en esta versión. Los comprobantes que emite Fierro son internos. El modelo de datos ya separa comprobantes internos y fiscales para incorporar la emisión con CAE sin modificar ventas ni cobros.</p>
       </Tarjeta>
     </div>
-  );
-}
-
-function Usuarios() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const { me } = useAuth();
-  const { confirmar, dialogo } = useConfirmar();
-  const { data, isLoading } = useQuery({ queryKey: ['usuarios'], queryFn: () => api.get('/taller/usuarios') });
-  const [nuevo, setNuevo] = useState(false);
-  const [reset, setReset] = useState<any>(null);
-  const [f, setF] = useState({ nombre: '', email: '', rol: 'empleado', password: '' });
-  const [pass, setPass] = useState('');
-  const inv = () => qc.invalidateQueries({ queryKey: ['usuarios'] });
-  const crear = useMutation({
-    mutationFn: () => api.post('/taller/usuarios', f),
-    onSuccess: () => { inv(); setNuevo(false); setF({ nombre: '', email: '', rol: 'empleado', password: '' }); toast.ok('Usuario creado'); },
-    onError: toast.error,
-  });
-  const patch = useMutation({
-    mutationFn: ({ id, d }: { id: string; d: any }) => api.patch(`/taller/usuarios/${id}`, d),
-    onSuccess: () => { inv(); toast.ok('Usuario actualizado'); setReset(null); setPass(''); },
-    onError: toast.error,
-  });
-  if (isLoading) return <Cargando />;
-  const lic = data.licencia;
-  return (
-    <>
-      {dialogo}
-      <Tarjeta
-        titulo="Usuarios con acceso"
-        subtitulo={`${lic.usuarios_activos} de ${lic.usuarios_max} usuarios activos según la licencia`}
-        sinPadding
-        acciones={<Boton variante="primario" tam="sm" icono={<Plus className="size-4" />} disabled={lic.disponibles <= 0} onClick={() => setNuevo(true)}>Nuevo usuario</Boton>}
-      >
-        {lic.disponibles <= 0 && <Aviso tono="ambar" className="m-4">Alcanzaste el límite de usuarios de la licencia. Para sumar usuarios, contratá usuarios adicionales.</Aviso>}
-        <Tabla
-          filas={data.usuarios}
-          clave={(u: any) => u.id}
-          columnas={[
-            { clave: 'n', titulo: 'Nombre', render: (u: any) => <span className="font-medium">{u.nombre}{u.id === me?.usuario.id ? ' (vos)' : ''}</span>, movil: 'titulo' },
-            { clave: 'e', titulo: 'Email', render: (u: any) => u.email, movil: 'subtitulo' },
-            {
-              clave: 'r', titulo: 'Rol', movil: 'meta',
-              render: (u: any) => u.rol === 'propietario' ? <Insignia tono="violeta">Propietario</Insignia> : (
-                <Select value={u.rol} onChange={(e) => patch.mutate({ id: u.id, d: { rol: e.target.value } })} className="h-8 w-40">
-                  <option value="administrador">Administrador</option>
-                  <option value="empleado">Empleado</option>
-                </Select>
-              ),
-            },
-            { clave: 'l', titulo: 'Último ingreso', render: (u: any) => fechaHora(u.ultimo_login), movil: 'oculta' },
-            { clave: 'a', titulo: 'Estado', render: (u: any) => <Insignia tono={u.activo ? 'verde' : 'gris'}>{u.activo ? 'Activo' : 'Inactivo'}</Insignia>, movil: 'meta' },
-            {
-              clave: 'x', titulo: '', movil: 'meta',
-              render: (u: any) => u.rol === 'propietario' && u.id !== me?.usuario.id ? null : (
-                <div className="flex gap-1">
-                  <Boton tam="sm" variante="fantasma" icono={<KeyRound className="size-4" />} onClick={() => setReset(u)}>Clave</Boton>
-                  {u.rol !== 'propietario' && u.id !== me?.usuario.id && (
-                    <Boton tam="sm" variante="fantasma" onClick={async () => { if (u.activo ? await confirmar('Desactivar usuario', `${u.nombre} no podrá ingresar y se cerrarán sus sesiones.`, true) : true) patch.mutate({ id: u.id, d: { activo: !u.activo } }); }}>
-                      {u.activo ? 'Desactivar' : 'Activar'}
-                    </Boton>
-                  )}
-                </div>
-              ),
-            },
-          ]}
-        />
-      </Tarjeta>
-      <Tarjeta titulo="Permisos por rol" className="mt-5">
-        <ul className="space-y-2 text-sm">
-          <li><strong>{ROL_LABEL.propietario}:</strong> acceso total, incluida la licencia y los usuarios.</li>
-          <li><strong>{ROL_LABEL.administrador}:</strong> acceso total a la operación, el catálogo, compras, reportes, configuración y usuarios (salvo el propietario).</li>
-          <li><strong>{ROL_LABEL.empleado}:</strong> clientes, vehículos, presupuestos, órdenes, agenda, check-list, emitir comprobantes, registrar cobros, operar la caja (abrir, cerrar, arquear, registrar gastos e ingresos) y consultar el stock. Sólo carga operaciones con la fecha de hoy. No ve reportes financieros ni compras, no modifica precios ni configuración y no anula.</li>
-        </ul>
-      </Tarjeta>
-      <Modal abierto={nuevo} onCerrar={() => setNuevo(false)} titulo="Nuevo usuario" pie={<><Boton onClick={() => setNuevo(false)}>Cancelar</Boton><Boton variante="primario" cargando={crear.isPending} onClick={() => crear.mutate()}>Crear</Boton></>}>
-        <div className="grid gap-3">
-          <Campo label="Nombre" requerido><Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></Campo>
-          <Campo label="Email (usuario de ingreso)" requerido><Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Campo>
-          <Campo label="Rol">
-            <Select value={f.rol} onChange={(e) => setF({ ...f, rol: e.target.value as Rol })}>
-              <option value="empleado">Empleado</option>
-              <option value="administrador">Administrador</option>
-            </Select>
-          </Campo>
-          <Campo label="Contraseña inicial" requerido hint="Mínimo 8 caracteres. Pedile que la cambie al ingresar."><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" /></Campo>
-        </div>
-      </Modal>
-      <Modal abierto={!!reset} onCerrar={() => setReset(null)} titulo={`Nueva contraseña · ${reset?.nombre ?? ''}`} ancho="sm" pie={<><Boton onClick={() => setReset(null)}>Cancelar</Boton><Boton variante="primario" disabled={pass.length < 8} onClick={() => patch.mutate({ id: reset.id, d: { password: pass } })}>Guardar</Boton></>}>
-        <Campo label="Contraseña" hint="Mínimo 8 caracteres. Se cerrarán sus sesiones abiertas."><Input type="password" value={pass} onChange={(e) => setPass(e.target.value)} autoComplete="new-password" /></Campo>
-      </Modal>
-    </>
   );
 }
 
@@ -263,11 +175,11 @@ function Mecanicos() {
   });
   return (
     <>
-      <Tarjeta titulo="Mecánicos" subtitulo="Personal al que se asignan las órdenes (no necesitan usuario)" sinPadding acciones={puede('catalogo.editar') && <Boton tam="sm" variante="primario" icono={<Plus className="size-4" />} onClick={() => setF({ nombre: '', telefono: '', especialidad: '', activo: true })}>Nuevo</Boton>}>
+      <Tarjeta titulo="Mecánicos sin usuario" subtitulo="Personas a las que se asignan órdenes y que no usan el sistema. Los mecánicos con usuario se administran en Personal → Equipo y permisos." sinPadding acciones={puede('usuarios.gestionar') && <Boton tam="sm" variante="primario" icono={<Plus className="size-4" />} onClick={() => setF({ nombre: '', telefono: '', especialidad: '', activo: true })}>Nuevo</Boton>}>
         <Tabla
           filas={data}
           clave={(x) => x.id}
-          onFila={puede('catalogo.editar') ? (x) => setF({ ...x, activo: !!x.activo }) : undefined}
+          onFila={puede('usuarios.gestionar') ? (x) => setF({ ...x, activo: !!x.activo }) : undefined}
           vacio={<p className="px-4 py-6 text-center text-sm text-tenue">Todavía no cargaste mecánicos</p>}
           columnas={[
             { clave: 'n', titulo: 'Nombre', render: (x) => <span className="font-medium">{x.nombre}</span>, movil: 'titulo' },
@@ -484,16 +396,15 @@ function Auditoria() {
   );
 }
 
-type Tab = 'taller' | 'usuarios' | 'mecanicos' | 'servicios' | 'catalogos' | 'licencia' | 'cuenta' | 'auditoria';
+type Tab = 'taller' | 'mecanicos' | 'servicios' | 'catalogos' | 'licencia' | 'cuenta' | 'auditoria';
 
 export function Configuracion() {
   const { puede } = useAuth();
   const [sp, setSp] = useSearchParams();
   const items: Array<{ clave: Tab; titulo: string; ok: boolean }> = [
     { clave: 'taller', titulo: 'Taller y preferencias', ok: true },
-    { clave: 'usuarios', titulo: 'Usuarios y permisos', ok: puede('usuarios.gestionar') },
-    { clave: 'mecanicos', titulo: 'Mecánicos', ok: true },
-    { clave: 'servicios', titulo: 'Servicios', ok: true },
+    { clave: 'mecanicos', titulo: 'Mecánicos sin usuario', ok: puede('usuarios.gestionar') },
+    { clave: 'servicios', titulo: 'Servicios', ok: puede('catalogo.ver') },
     { clave: 'catalogos', titulo: 'Marcas y categorías', ok: puede('catalogo.editar') },
     { clave: 'licencia', titulo: 'Licencia', ok: puede('licencia.ver') },
     { clave: 'auditoria', titulo: 'Actividad', ok: puede('config.editar') },
@@ -501,6 +412,8 @@ export function Configuracion() {
   ];
   // La pestaña viaja en la dirección (?tab=…) para poder enlazarla desde el menú lateral.
   const pedido = sp.get('tab');
+  // Los usuarios y permisos se administran ahora en Personal → Equipo y permisos.
+  if (pedido === 'usuarios') return <Navigate to="/personal/equipo" replace />;
   const tab: Tab = items.some((i) => i.ok && i.clave === pedido) ? (pedido as Tab) : 'taller';
   const setTab = (k: Tab) => setSp(k === 'taller' ? {} : { tab: k }, { replace: true });
   return (
@@ -508,7 +421,6 @@ export function Configuracion() {
       <Encabezado titulo="Configuración" />
       <Pestanas items={items.filter((i) => i.ok).map(({ clave, titulo }) => ({ clave, titulo }))} activo={tab} onCambio={setTab} />
       {tab === 'taller' && <DatosTaller />}
-      {tab === 'usuarios' && <Usuarios />}
       {tab === 'mecanicos' && <Mecanicos />}
       {tab === 'servicios' && <Servicios />}
       {tab === 'catalogos' && <Catalogos />}

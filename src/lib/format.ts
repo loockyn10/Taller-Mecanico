@@ -1,4 +1,36 @@
-export { formatoMoneda as money, aCentavos } from '@shared/totals';
+import { formatoMoneda } from '@shared/totals';
+export { aCentavos } from '@shared/totals';
+
+/** Importe en pesos. Si la API no lo envió (la persona no tiene permiso para verlo) muestra un guion. */
+export const money = (centavos?: number | null): string => (centavos == null ? '—' : formatoMoneda(centavos));
+
+// ───── Horarios en la zona del taller (los instantes llegan en UTC desde el servidor) ─────
+const ZONA_DEFECTO = 'America/Argentina/Buenos_Aires';
+export function horaZona(iso?: string | null, zona = ZONA_DEFECTO): string {
+  if (!iso) return '—';
+  return new Intl.DateTimeFormat('es-AR', { timeZone: zona, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+}
+export function fechaZona(iso?: string | null, zona = ZONA_DEFECTO): string {
+  if (!iso) return '—';
+  return new Intl.DateTimeFormat('es-AR', { timeZone: zona, day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(iso));
+}
+export function fechaHoraZona(iso?: string | null, zona = ZONA_DEFECTO): string {
+  if (!iso) return '—';
+  return `${fechaZona(iso, zona)} ${horaZona(iso, zona)}`;
+}
+/** Día de la semana y fecha de un AAAA-MM-DD ("lun 20/10"). */
+export function diaCorto(f: string): string {
+  return new Date(`${f}T12:00:00`).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+}
+/** Duración en horas y minutos ("7 h 32 min"). */
+export function duracion(seg?: number | null): string {
+  if (seg == null) return '—';
+  const m = Math.floor(seg / 60);
+  const h = Math.floor(m / 60);
+  return h ? `${h} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
+}
+/** Horas decimales para planillas ("7,53"). */
+export const horasDecimal = (seg: number): string => (seg / 3600).toFixed(2).replace('.', ',');
 
 export function fecha(iso?: string | null): string {
   if (!iso) return '—';

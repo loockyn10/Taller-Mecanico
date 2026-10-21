@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCantidad, zCentavos, zFecha, zId, zPct, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, like, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
-import { requirePerm } from '../lib/auth';
+import { requireRW } from '../lib/auth';
 import { agrupar, permiteNegativo, sentenciaOrigenCosto, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { fechaComercial, sumarDias } from '../lib/fechas';
 import { deudaProveedores } from '../lib/proveedores';
@@ -19,7 +19,7 @@ import { redondearCantidad as r3 } from '../../shared/dominio';
 
 export const abastecimiento = new Hono<AppEnv>();
 for (const ruta of ['/ordenes-compra', '/ordenes-compra/*', '/recepciones', '/recepciones/*', '/facturas-proveedor', '/facturas-proveedor/*', '/deuda-proveedores', '/vencimientos-proveedores'])
-  abastecimiento.use(ruta, requirePerm('compras.gestionar'));
+  abastecimiento.use(ruta, requireRW('compras.ver', 'compras.gestionar'));
 
 // ═════════════════════════ Órdenes de compra ═════════════════════════
 const SELECT_OC = `SELECT oc.*, p.nombre AS proveedor, p.cuit AS proveedor_cuit,

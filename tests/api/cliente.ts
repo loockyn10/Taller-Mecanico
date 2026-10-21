@@ -70,7 +70,7 @@ export const idem = () => `k-${Math.random().toString(36).slice(2)}-${Date.now()
 
 let nu = 0;
 /** Crea un usuario del rol indicado en el taller del propietario `owner` y devuelve su sesión (el taller debe tener cupo de licencia). */
-export async function nuevoUsuario(owner: Api, rol: 'administrador' | 'empleado') {
+export async function nuevoUsuario(owner: Api, rol: 'administrador' | 'empleado' | 'recepcion' | 'mecanico' | 'deposito' | 'caja') {
   nu++;
   const email = `${rol}${nu}-${Date.now()}@test.local`;
   const r = await owner.post('/api/taller/usuarios', { nombre: `${rol} ${nu}`, email, rol, password: 'clave-segura-1' });
@@ -87,3 +87,14 @@ export async function ventaConSaldo(api: Api, clienteId: string, total = 100000)
   if (r.status !== 201) throw new Error(`venta falló: ${JSON.stringify(r.body)}`);
   return r.body;
 }
+
+/** Crea una persona del personal con el rol (plantilla) indicado y devuelve su sesión, su id y su correo. */
+export async function nuevoPersonal(owner: Api, rol: string, extra: Record<string, unknown> = {}) {
+  nu++;
+  const email = `${rol}${nu}-${Date.now()}@test.local`;
+  const r = await owner.post('/api/taller/usuarios', { nombre: `${rol} ${nu}`, email, rol, password: 'clave-segura-1', ...extra });
+  if (r.status !== 201) throw new Error(`alta de personal falló: ${JSON.stringify(r.body)}`);
+  return { api: await Api.login(email, 'clave-segura-1'), id: r.body.id as string, email };
+}
+
+export const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));

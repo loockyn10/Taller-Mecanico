@@ -202,7 +202,7 @@ function paramsAjuste(porcentaje: number, _paso: number): number[] {
 }
 
 /** Precios resueltos de un conjunto de artículos/servicios en una lista (para recalcular los ítems de un documento al cambiar de lista). */
-precios.post('/listas-precios/:id/precios', requirePerm('catalogo.ver'), async (c) => {
+precios.post('/listas-precios/:id/precios', requirePerm('catalogo.ver', 'precios.venta.ver'), async (c) => {
   const s = c.get('sesion');
   // 'base' = sin lista: devuelve los precios base de artículos y servicios.
   const l: Lista = c.req.param('id') === 'base' ? { id: 'base', nombre: 'Precio base', descripcion: null, base: 'precio', porcentaje: 0, redondeo: 0, servicios_pct: null, es_default: 0, activa: 1 } : await lista(c.env.DB, s.tallerId, c.req.param('id'));
@@ -270,7 +270,7 @@ precios.post('/articulos/ajuste-masivo', requirePerm('precios.gestionar'), async
 });
 
 /** Precio de un artículo en cada lista activa (ficha del artículo). */
-precios.get('/articulos/:id/precios-lista', requirePerm('catalogo.ver'), async (c) => {
+precios.get('/articulos/:id/precios-lista', requirePerm('catalogo.ver', 'precios.venta.ver'), async (c) => {
   const s = c.get('sesion');
   const a = await first<{ costo: number; precio: number }>(c.env.DB, 'SELECT costo, precio FROM articulos WHERE taller_id = ? AND id = ?', s.tallerId, c.req.param('id'));
   if (!a) throw notFound('Artículo');

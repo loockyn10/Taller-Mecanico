@@ -28,17 +28,17 @@ export function Inicio() {
         subtitulo={new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
         acciones={
           <>
-            <Boton icono={<FileText className="size-4" />} onClick={() => nav('/presupuestos/nuevo')}>Presupuesto</Boton>
-            <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/ordenes/nueva')}>Nueva OT</Boton>
+            {puede('presupuestos.gestionar') && <Boton icono={<FileText className="size-4" />} onClick={() => nav('/presupuestos/nuevo')}>Presupuesto</Boton>}
+            {puede('ordenes.crear') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/ordenes/nueva')}>Nueva OT</Boton>}
           </>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Indicador titulo="OT abiertas" valor={abiertas} detalle={`${cant('en_reparacion')} en reparación`} icono={<Wrench className="size-5" />} onClick={() => nav('/ordenes')} />
-        <Indicador titulo="Listas p/ entregar" valor={cant('lista')} icono={<CheckCircle2 className="size-5" />} tono="verde" onClick={() => nav('/ordenes?estado=lista')} />
-        <Indicador titulo="Turnos hoy" valor={data.turnosHoy.length} icono={<CalendarDays className="size-5" />} tono="violeta" onClick={() => nav('/agenda')} />
-        <Indicador titulo="Presupuestos" valor={data.presupuestos?.pendientes ?? 0} detalle={`${data.presupuestos?.aprobados ?? 0} aprobados`} icono={<FileText className="size-5" />} tono="ambar" onClick={() => nav('/presupuestos')} />
+        {puede('ordenes.ver') && <Indicador titulo="OT abiertas" valor={abiertas} detalle={`${cant('en_reparacion')} en reparación`} icono={<Wrench className="size-5" />} onClick={() => nav('/ordenes')} />}
+        {puede('ordenes.ver') && <Indicador titulo="Listas p/ entregar" valor={cant('lista')} icono={<CheckCircle2 className="size-5" />} tono="verde" onClick={() => nav('/ordenes?estado=lista')} />}
+        {puede('turnos.ver') && <Indicador titulo="Turnos hoy" valor={data.turnosHoy.length} icono={<CalendarDays className="size-5" />} tono="violeta" onClick={() => nav('/agenda')} />}
+        {puede('presupuestos.ver') && <Indicador titulo="Presupuestos" valor={data.presupuestos?.pendientes ?? 0} detalle={`${data.presupuestos?.aprobados ?? 0} aprobados`} icono={<FileText className="size-5" />} tono="ambar" onClick={() => nav('/presupuestos')} />}
         {caja && (
           <Indicador
             titulo="Caja"
@@ -59,7 +59,7 @@ export function Inicio() {
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
-        <Tarjeta titulo="Trabajos en curso" className="lg:col-span-2" sinPadding acciones={<Link to="/ordenes" className="text-sm font-medium text-marca-700">Ver tablero</Link>}>
+        {puede('ordenes.ver') && <Tarjeta titulo="Trabajos en curso" className="lg:col-span-2" sinPadding acciones={<Link to="/ordenes" className="text-sm font-medium text-marca-700">Ver tablero</Link>}>
           {data.ordenesRecientes.length === 0 ? (
             <Vacio icono={<Wrench className="size-5" />} titulo="No hay órdenes abiertas" accion={<Boton variante="primario" onClick={() => nav('/ordenes/nueva')}>Crear orden de trabajo</Boton>} />
           ) : (
@@ -72,21 +72,21 @@ export function Inicio() {
                         <span className="font-semibold tracking-wide">{o.patente}</span>
                         <span className="text-xs text-tenue">OT #{numero(o.numero)}</span>
                       </div>
-                      <div className="truncate text-sm text-tenue">{o.cliente}</div>
+                      <div className="truncate text-sm text-tenue">{o.cliente ?? ''}</div>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       <EstadoOTBadge estado={o.estado} />
-                      <span className="text-sm tabular-nums">{money(o.total)}</span>
+                      {o.total !== undefined && <span className="text-sm tabular-nums">{money(o.total)}</span>}
                     </div>
                   </Link>
                 </li>
               ))}
             </ul>
           )}
-        </Tarjeta>
+        </Tarjeta>}
 
         <div className="space-y-5">
-          <Tarjeta titulo="Agenda de hoy" sinPadding acciones={<Link to="/agenda" className="text-sm font-medium text-marca-700">Abrir agenda</Link>}>
+          {puede('turnos.ver') && <Tarjeta titulo="Agenda de hoy" sinPadding acciones={<Link to="/agenda" className="text-sm font-medium text-marca-700">Abrir agenda</Link>}>
             {data.turnosHoy.length === 0 ? (
               <p className="px-4 py-6 text-center text-sm text-tenue">Sin turnos para hoy</p>
             ) : (
@@ -102,9 +102,9 @@ export function Inicio() {
                 ))}
               </ul>
             )}
-          </Tarjeta>
+          </Tarjeta>}
 
-          <Tarjeta titulo="Estado del taller">
+          {puede('ordenes.ver') && <Tarjeta titulo="Estado del taller">
             <ul className="space-y-2 text-sm">
               {ESTADOS_OT_ABIERTOS.map((e) => (
                 <li key={e} className="flex items-center justify-between">
@@ -113,9 +113,9 @@ export function Inicio() {
                 </li>
               ))}
             </ul>
-          </Tarjeta>
+          </Tarjeta>}
 
-          {puede('catalogo.ver') && data.stockBajo.length > 0 && (
+          {puede('stock.ver') && data.stockBajo.length > 0 && (
             <Tarjeta titulo="Stock bajo" sinPadding acciones={<Link to="/articulos?bajo=1" className="text-sm font-medium text-marca-700">Ver</Link>}>
               <ul className="divide-y divide-borde">
                 {data.stockBajo.map((a: any) => (
