@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowDownUp, Package, Pencil, Plus, ShoppingCart } from 'lucide-react';
+import { buscarPorCodigo } from '@/lib/lector';
 import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cantidad, fechaHora, money } from '@/lib/format';
+import { SelectorDeposito } from '@/components/SelectorDeposito';
 import { Boton, Buscador, Campo, Cargando, Check, Dato, Encabezado, ErrorCaja, Input, InputMoneda, Insignia, Modal, Select, Tabla, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
 import { MOTIVO_AJUSTE_LABEL, MOTIVOS_AJUSTE, TIPOS_MOVIMIENTO_STOCK_LABEL } from '@shared/dominio';
 
@@ -27,6 +29,7 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
   const verPrecio = puede('precios.venta.ver');
   const [f, setF] = useState({
     codigo: inicial?.codigo ?? '',
+    codigo_barras: inicial?.codigo_barras ?? '',
     nombre: inicial?.nombre ?? '',
     marca: inicial?.marca ?? '',
     categoria_id: inicial?.categoria_id ?? '',
@@ -41,6 +44,7 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
     ubicacion: inicial?.ubicacion ?? '',
   });
   const set = (k: keyof typeof f, v: any) => setF({ ...f, [k]: v });
+  const [deposito, setDeposito] = useState('');
   const m = useMutation({
     mutationFn: () => {
       const d: any = { ...f, categoria_id: f.categoria_id || null, proveedor_id: f.proveedor_id || null, stock_minimo: Number(f.stock_minimo), stock_objetivo: f.stock_objetivo === '' ? null : Number(f.stock_objetivo), alicuota_iva: Number(f.alicuota_iva) };
@@ -49,6 +53,7 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
         return api.put(`/articulos/${inicial.id}`, d).then(() => ({ id: inicial.id }));
       }
       d.stock_inicial = Number(f.stock_inicial);
+      d.deposito_id = deposito || null;
       return api.post('/articulos', d);
     },
     onSuccess: (r) => {
@@ -64,6 +69,7 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo label="Nombre" requerido className="sm:col-span-2"><Input value={f.nombre} onChange={(e) => set('nombre', e.target.value)} autoFocus /></Campo>
         <Campo label="Código / SKU"><Input value={f.codigo} onChange={(e) => set('codigo', e.target.value)} /></Campo>
+        <Campo label="Código de barras" hint="Escaneá con el lector USB (funciona como teclado)"><Input value={f.codigo_barras} onChange={(e) => set('codigo_barras', e.target.value.trim())} inputMode="numeric" /></Campo>
         <Campo label="Marca"><Input value={f.marca} onChange={(e) => set('marca', e.target.value)} /></Campo>
         <Campo label="Categoría">
           <Select value={f.categoria_id} onChange={(e) => set('categoria_id', e.target.value)}>
@@ -94,6 +100,7 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
           </Select>
         </Campo>
         {!inicial?.id && <Campo label="Stock inicial" hint="Queda registrado como movimiento de entrada"><Input type="number" min={0} step="any" value={f.stock_inicial} onChange={(e) => set('stock_inicial', e.target.value)} /></Campo>}
+        {!inicial?.id && <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito del stock inicial" />}
         <Campo label="Stock mínimo (alerta)"><Input type="number" min={0} step="any" value={f.stock_minimo} onChange={(e) => set('stock_minimo', e.target.value)} /></Campo>
         <Campo label="Stock ideal (opcional)" hint="Hasta cuánto reponer. Vacío = el doble del mínimo"><Input type="number" min={0} step="any" value={f.stock_objetivo} onChange={(e) => set('stock_objetivo', e.target.value)} /></Campo>
         <Campo label="Ubicación"><Input value={f.ubicacion} onChange={(e) => set('ubicacion', e.target.value)} placeholder="Estante A2" /></Campo>
@@ -111,8 +118,11 @@ export function ModalMovimiento({ articulo, onCerrar }: { articulo: any; onCerra
   const [notas, setNotas] = useState('');
   const [motivo, setMotivo] = useState('conteo');
   const [clave] = useState(nuevaClave());
+  const [deposito, setDeposito] = useState('');
+  const deps: Array<{ id: string; nombre: string; es_principal: number; stock: number }> = articulo.depositos ?? [];
+  const dep = deposito ? deps.find((d) => d.id === deposito) : deps.find((d) => d.es_principal);
   const m = useMutation({
-    mutationFn: () => api.post('/stock/movimientos', { articulo_id: articulo.id, tipo, cantidad: Number(cant), notas, motivo: tipo === 'entrada' ? null : motivo, idem_key: clave }),
+    mutationFn: () => api.post('/stock/movimientos', { articulo_id: articulo.id, tipo, cantidad: Number(cant), notas, motivo: tipo === 'entrada' ? null : motivo, deposito_id: deposito || null, idem_key: clave }),
     onSuccess: (r) => {
       ['articulos', 'articulo', 'movimientos', 'dashboard'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       toast.ok(`Stock actualizado: ${r.stock} ${articulo.unidad}`);
@@ -123,7 +133,8 @@ export function ModalMovimiento({ articulo, onCerrar }: { articulo: any; onCerra
   return (
     <Modal abierto onCerrar={onCerrar} titulo={`Movimiento de stock · ${articulo.nombre}`} ancho="sm" pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="primario" disabled={cant === '' || (tipo !== 'entrada' && motivo === 'otro' && !notas.trim())} cargando={m.isPending} onClick={() => m.mutate()}>Registrar</Boton></>}>
       <div className="space-y-3">
-        <p className="text-sm">Stock actual: <strong>{cantidad(articulo.stock)} {articulo.unidad}</strong></p>
+        <SelectorDeposito valor={deposito} onCambio={setDeposito} />
+        <p className="text-sm">Stock actual{dep && deps.length > 1 ? ` en ${dep.nombre}` : ''}: <strong>{cantidad(dep && deps.length > 1 ? dep.stock : articulo.stock)} {articulo.unidad}</strong>{deps.length > 1 ? <span className="text-tenue"> · total {cantidad(articulo.stock)}</span> : null}</p>
         <Campo label="Tipo">
           <Select value={tipo} onChange={(e) => setTipo(e.target.value as any)}>
             <option value="entrada">Entrada (ingreso de mercadería)</option>
@@ -158,7 +169,7 @@ export function Articulos() {
     <>
       <Encabezado titulo="Artículos y stock" subtitulo="Repuestos, lubricantes e insumos" acciones={<>{puede('stock.ver') && <Boton icono={<ShoppingCart className="size-4" />} onClick={() => nav('/reposicion')}>Reposición</Boton>}{puede('catalogo.editar') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setForm(true)}>Nuevo artículo</Boton>}</>} />
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Buscador value={q} onChange={setQ} placeholder="Nombre, código o marca" className="min-w-56 flex-1" />
+        <Buscador value={q} onChange={setQ} placeholder="Nombre, código, marca o código de barras" className="min-w-56 flex-1" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (a) nav(`/articulos/${a.id}`); }} />
         <Select value={cat} onChange={(e) => setCat(e.target.value)} className="w-auto">
           <option value="">Todas las categorías</option>
           {cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
@@ -235,6 +246,7 @@ export function ArticuloDetalle() {
         <Tarjeta titulo="Datos">
           <dl className="grid grid-cols-2 gap-4">
             <Dato etiqueta="Stock actual"><span className="text-xl font-bold">{cantidad(a.stock)} {a.unidad}</span></Dato>
+            {a.codigo_barras && <Dato etiqueta="Código de barras"><span className="font-mono text-sm">{a.codigo_barras}</span></Dato>}
             <Dato etiqueta="Stock mínimo">{cantidad(a.stock_minimo)}</Dato>
             <Dato etiqueta="Stock ideal">{a.stock_objetivo != null ? cantidad(a.stock_objetivo) : `${cantidad(a.stock_minimo * 2)} (automático)`}</Dato>
             {a.costo !== undefined && <Dato etiqueta="Costo">{money(a.costo)}</Dato>}
@@ -245,6 +257,13 @@ export function ArticuloDetalle() {
             <Dato etiqueta="Ubicación">{a.ubicacion}</Dato>
           </dl>
         </Tarjeta>
+        {a.depositos?.length > 1 && (
+          <Tarjeta titulo="Stock por depósito" subtitulo="El stock total es la suma de todos los depósitos" className="lg:col-span-3" sinPadding>
+            <ul className="divide-y divide-borde text-sm">
+              {a.depositos.map((d: any) => <li key={d.id} className="flex justify-between px-4 py-2"><span>{d.nombre}{d.es_principal ? <Insignia tono="azul" className="ml-2">Principal</Insignia> : null}</span><span className="font-medium tabular-nums">{cantidad(d.stock)} {a.unidad}</span></li>)}
+            </ul>
+          </Tarjeta>
+        )}
         {costos && costos.historial.length > 0 && (
           <Tarjeta titulo="Historial de costos" subtitulo="Cada cambio del costo queda registrado, venga de una compra, una recepción o una edición" className="lg:col-span-3" sinPadding>
             <ul className="divide-y divide-borde text-sm">

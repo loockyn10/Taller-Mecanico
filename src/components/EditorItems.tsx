@@ -7,7 +7,8 @@ import { money } from '@/lib/format';
 import { useDefectosDocumento } from '@/lib/config';
 import { calcularTotales } from '@shared/totals';
 import { formatearMinutos } from '@shared/tempario';
-import { Boton, Buscador, Campo, cn, Input, InputMoneda, Insignia, Select, useDebounce } from './ui';
+import { buscarPorCodigo } from '@/lib/lector';
+import { Boton, Buscador, Campo, cn, Input, InputMoneda, Insignia, Select, useDebounce, useToast } from './ui';
 
 export interface ItemUI {
   key: string;
@@ -118,19 +119,27 @@ function AgregarServicio({ onAgregar, listaId, vehiculoId }: { onAgregar: (i: It
             </button>
           </li>
         ))}
-        {!lista.length && <li className="px-3 py-3 text-tenue">No hay servicios. Cargalos en Configuración → Servicios.</li>}
+        {!lista.length && <li className="px-3 py-3 text-tenue">No hay servicios. Cargalos en el Tempario.</li>}
       </ul>
     </div>
   );
 }
 
 function AgregarArticulo({ onAgregar, listaId }: { onAgregar: (i: ItemUI) => void; listaId?: string | null }) {
+  const toast = useToast();
   const [q, setQ] = useState('');
+  // Lector de códigos de barras (USB, como teclado): el código seguido de Enter agrega el artículo directamente.
+  const leer = async (codigo: string) => {
+    const a = await buscarPorCodigo(codigo).catch(() => null);
+    if (!a) return toast.error(new Error(`No hay ningún artículo con el código ${codigo}`));
+    onAgregar({ key: k(), tipo: 'articulo', articulo_id: a.id, descripcion: a.nombre, cantidad: 1, precio_unitario: a.precio_lista ?? a.precio, desc_pct: 0, stock: a.stock });
+    setQ('');
+  };
   const dq = useDebounce(q);
   const { data = [] } = useQuery({ queryKey: ['articulos', { q: dq, sel: 1, listaId: listaId ?? null }], queryFn: () => api.get<any[]>(`/articulos?limite=20&q=${encodeURIComponent(dq)}${listaId ? `&lista_id=${listaId}` : ''}`), enabled: dq.length >= 1 });
   return (
     <div className="space-y-2">
-      <Buscador value={q} onChange={setQ} placeholder="Buscar repuesto por nombre, código o marca…" autoFocus />
+      <Buscador value={q} onChange={setQ} onEnter={leer} placeholder="Buscar repuesto por nombre, código o marca… (o escaneá el código de barras)" autoFocus />
       {dq && (
         <ul className="max-h-60 divide-y divide-borde overflow-y-auto rounded-lg border border-borde bg-white text-sm">
           {data.map((a) => (

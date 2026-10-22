@@ -6,7 +6,7 @@ import { badRequest, body, conflict, forbidden, notFound, query, zCentavos, zId,
 import { all, auditar, delTaller, first, like, run, uid, updateParcial } from '../lib/db';
 import { requireAny, requirePerm, tiene } from '../lib/auth';
 import { exigirPermisoDePrecios, limpiarArticulo, limpiarMovimiento, limpiarServicio } from '../lib/privacidad';
-import { permiteNegativo, sentenciasMovimiento } from '../lib/stock';
+import { permiteNegativo, resolverDeposito, sentenciasMovimiento } from '../lib/stock';
 import { TIPOS_VEHICULO, CONDICIONES_IVA, MOTIVOS_AJUSTE, redondearCantidad, esCantidadValida } from '../../shared/dominio';
 import { precioArticuloEnLista, precioServicioEnLista, type ReglaLista } from '../../shared/precios';
 import { resolverLista } from '../lib/listas';
@@ -250,6 +250,10 @@ catalogo.put('/proveedores/:id', requirePerm('compras.gestionar'), async (c) => 
 // ───────────── Artículos ─────────────
 const zArticulo = z.object({
   codigo: zTextoOpt(60),
+  /** Código de barras (EAN/UPC/propio): los lectores USB estándar lo escriben como un teclado. */
+  codigo_barras: zTextoOpt(60),
+  /** Depósito del stock inicial (sin indicar: el principal). */
+  deposito_id: zId.nullish(),
   nombre: z.string().trim().min(2).max(200),
   marca: zTextoOpt(80),
   categoria_id: zId.nullish(),
@@ -275,7 +279,7 @@ catalogo.get('/articulos', requirePerm('catalogo.ver'), async (c) => {
   if (lista_id && !lst) throw badRequest('Lista de precios inexistente');
   const cond = ['a.taller_id = ?', 'a.activo = 1'];
   const params: unknown[] = [s.tallerId];
-  if (q) (cond.push('(a.nombre LIKE ? OR a.codigo LIKE ? OR a.marca LIKE ?)'), params.push(like(q), like(q), like(q)));
+  if (q) (cond.push('(a.nombre LIKE ? OR a.codigo LIKE ? OR a.marca LIKE ? OR a.codigo_barras LIKE ?)'), params.push(like(q), like(q), like(q), like(q)));
   if (categoria_id) (cond.push('a.categoria_id = ?'), params.push(categoria_id));
   if (bajo_stock) cond.push('a.stock <= a.stock_minimo');
   const filas = await all<{ costo: number; precio: number; precio_fijo?: number | null }>(
@@ -292,6 +296,24 @@ catalogo.get('/articulos', requirePerm('catalogo.ver'), async (c) => {
   if (!lst) return c.json(filas.map((a) => limpiarArticulo(s, a)));
   // La lista no modifica el artículo: agrega `precio_lista` (fijo de la lista o calculado por su regla).
   return c.json(filas.map((a) => limpiarArticulo(s, { ...a, precio_lista: precioArticuloEnLista(lst, a, a.precio_fijo ?? null).precio })));
+});
+
+/**
+ * Búsqueda exacta por lector de códigos de barras (o por el código interno): devuelve el artículo o 404.
+ * Los lectores USB estándar escriben el código como un teclado y terminan con Enter.
+ */
+catalogo.get('/articulos/lector/:codigo', requirePerm('catalogo.ver'), async (c) => {
+  const s = c.get('sesion');
+  const codigo = c.req.param('codigo').trim();
+  if (!codigo) throw badRequest('Código vacío');
+  const a = await first<Record<string, unknown>>(
+    c.env.DB,
+    `SELECT a.*, ca.nombre AS categoria FROM articulos a LEFT JOIN categorias_articulo ca ON ca.taller_id = a.taller_id AND ca.id = a.categoria_id
+      WHERE a.taller_id = ? AND a.activo = 1 AND (a.codigo_barras = ? OR a.codigo = ?) ORDER BY (a.codigo_barras = ?) DESC LIMIT 1`,
+    s.tallerId, codigo, codigo, codigo,
+  );
+  if (!a) throw notFound('Artículo con ese código');
+  return c.json(limpiarArticulo(s, a));
 });
 
 catalogo.get('/articulos/:id', requirePerm('catalogo.ver'), async (c) => {
@@ -313,7 +335,14 @@ catalogo.get('/articulos/:id', requirePerm('catalogo.ver'), async (c) => {
     s.tallerId,
     c.req.param('id'),
   );
-  return c.json({ ...limpiarArticulo(s, a), movimientos: movimientos.map((m) => limpiarMovimiento(s, m)) });
+  const depositos = await all(
+    c.env.DB,
+    `SELECT d.id, d.nombre, d.es_principal, COALESCE(sd.stock, 0) AS stock FROM depositos d
+       LEFT JOIN stock_depositos sd ON sd.taller_id = d.taller_id AND sd.deposito_id = d.id AND sd.articulo_id = ?
+      WHERE d.taller_id = ? AND (d.activo = 1 OR COALESCE(sd.stock, 0) <> 0) ORDER BY d.es_principal DESC, d.nombre`,
+    c.req.param('id'), s.tallerId,
+  );
+  return c.json({ ...limpiarArticulo(s, a), depositos, movimientos: movimientos.map((m) => limpiarMovimiento(s, m)) });
 });
 
 async function validarRefsArticulo(db: D1Database, tallerId: string, d: { categoria_id?: string | null; proveedor_id?: string | null }) {
@@ -326,16 +355,17 @@ catalogo.post('/articulos', requirePerm('catalogo.editar'), async (c) => {
   const d = await body(c, zArticulo);
   exigirPermisoDePrecios(s, { costo: d.costo || undefined, precio: d.precio || undefined });
   await validarRefsArticulo(c.env.DB, s.tallerId, d);
+  const deposito = await resolverDeposito(c.env.DB, s.tallerId, d.deposito_id);
   const id = uid();
   const stmts = [
     c.env.DB.prepare(
-      `INSERT INTO articulos (id, taller_id, codigo, nombre, marca, categoria_id, proveedor_id, costo, precio, alicuota_iva, stock, stock_minimo, stock_objetivo, unidad, ubicacion)
-       VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)`,
-    ).bind(id, s.tallerId, d.codigo, d.nombre, d.marca, d.categoria_id ?? null, d.proveedor_id ?? null, d.costo, d.precio, d.alicuota_iva, redondearCantidad(d.stock_minimo), d.stock_objetivo ?? null, d.unidad, d.ubicacion),
+      `INSERT INTO articulos (id, taller_id, codigo, codigo_barras, nombre, marca, categoria_id, proveedor_id, costo, precio, alicuota_iva, stock, stock_minimo, stock_objetivo, unidad, ubicacion)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)`,
+    ).bind(id, s.tallerId, d.codigo, d.codigo_barras, d.nombre, d.marca, d.categoria_id ?? null, d.proveedor_id ?? null, d.costo, d.precio, d.alicuota_iva, redondearCantidad(d.stock_minimo), d.stock_objetivo ?? null, d.unidad, d.ubicacion),
   ];
   // El stock inicial queda registrado como movimiento (trazabilidad completa del inventario).
   if (d.stock_inicial > 0) {
-    stmts.push(...sentenciasMovimiento(c.env.DB, s.tallerId, { articuloId: id, delta: d.stock_inicial, tipo: 'entrada', notas: 'Stock inicial', usuarioId: s.usuarioId, costoUnitario: d.costo }, true));
+    stmts.push(...sentenciasMovimiento(c.env.DB, s.tallerId, { articuloId: id, depositoId: deposito, delta: d.stock_inicial, tipo: 'entrada', notas: 'Stock inicial', usuarioId: s.usuarioId, costoUnitario: d.costo }, true));
   }
   stmts.push(auditar(c.env.DB, s.tallerId, s.usuarioId, 'articulo', id, 'crear'));
   await c.env.DB.batch(stmts);
@@ -345,14 +375,14 @@ catalogo.post('/articulos', requirePerm('catalogo.editar'), async (c) => {
 catalogo.put('/articulos/:id', requirePerm('catalogo.editar'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const d = await body(c, zArticulo.omit({ stock_inicial: true }).partial());
+  const d = await body(c, zArticulo.omit({ stock_inicial: true, deposito_id: true }).partial());
   exigirPermisoDePrecios(s, { costo: d.costo, precio: d.precio });
   if (!(await delTaller(c.env.DB, 'articulos', s.tallerId, id, 'id'))) throw notFound('Artículo');
   await validarRefsArticulo(c.env.DB, s.tallerId, d);
   const datos: Record<string, unknown> = { ...d };
   if (d.activo !== undefined) datos.activo = d.activo ? 1 : 0;
   // El stock NO se edita directamente: solo mediante movimientos.
-  const st = updateParcial(c.env.DB, 'articulos', s.tallerId, id, datos, ['codigo', 'nombre', 'marca', 'categoria_id', 'proveedor_id', 'costo', 'precio', 'alicuota_iva', 'stock_minimo', 'stock_objetivo', 'unidad', 'ubicacion', 'activo']);
+  const st = updateParcial(c.env.DB, 'articulos', s.tallerId, id, datos, ['codigo', 'codigo_barras', 'nombre', 'marca', 'categoria_id', 'proveedor_id', 'costo', 'precio', 'alicuota_iva', 'stock_minimo', 'stock_objetivo', 'unidad', 'ubicacion', 'activo']);
   if (st) await c.env.DB.batch([st, auditar(c.env.DB, s.tallerId, s.usuarioId, 'articulo', id, 'modificar')]);
   return c.json({ ok: true });
 });
@@ -360,9 +390,11 @@ catalogo.put('/articulos/:id', requirePerm('catalogo.editar'), async (c) => {
 // ───────────── Movimientos de stock ─────────────
 catalogo.get('/stock/movimientos', requirePerm('stock.ver'), async (c) => {
   const s = c.get('sesion');
-  const { articulo_id, tipo, desde, hasta } = query(c, z.object({ articulo_id: z.string().optional(), tipo: z.string().optional(), desde: z.string().optional(), hasta: z.string().optional() }));
+  const { articulo_id, tipo, desde, hasta, deposito_id } = query(c, z.object({ articulo_id: z.string().optional(), tipo: z.string().optional(), desde: z.string().optional(), hasta: z.string().optional(), deposito_id: z.string().optional() }));
   const cond = ['m.taller_id = ?'];
   const params: unknown[] = [s.tallerId];
+  // Los movimientos anteriores a los depósitos (deposito_id vacío) pertenecen al depósito principal.
+  if (deposito_id) (cond.push("COALESCE(m.deposito_id, (SELECT id FROM depositos WHERE taller_id = m.taller_id AND es_principal = 1)) = ?"), params.push(deposito_id));
   if (articulo_id) (cond.push('m.articulo_id = ?'), params.push(articulo_id));
   if (tipo) (cond.push('m.tipo = ?'), params.push(tipo));
   if (desde) (cond.push('m.created_at >= ?'), params.push(desde));
@@ -370,8 +402,9 @@ catalogo.get('/stock/movimientos', requirePerm('stock.ver'), async (c) => {
   return c.json(
     (await all(
       c.env.DB,
-      `SELECT m.*, a.nombre AS articulo, a.codigo, u.nombre AS usuario FROM stock_movimientos m
+      `SELECT m.*, a.nombre AS articulo, a.codigo, u.nombre AS usuario, dp.nombre AS deposito FROM stock_movimientos m
          JOIN articulos a ON a.taller_id = m.taller_id AND a.id = m.articulo_id
+         LEFT JOIN depositos dp ON dp.taller_id = m.taller_id AND dp.id = COALESCE(m.deposito_id, (SELECT id FROM depositos WHERE taller_id = m.taller_id AND es_principal = 1))
          LEFT JOIN usuarios u ON u.id = m.usuario_id AND u.taller_id = m.taller_id
         WHERE ${cond.join(' AND ')} ORDER BY m.created_at DESC LIMIT 300`,
       ...params,
@@ -389,14 +422,25 @@ catalogo.post('/stock/movimientos', requirePerm('stock.ajustar'), async (c) => {
       cantidad: z.number().min(0).max(1e9).refine(esCantidadValida, 'admite hasta 3 decimales'), // entrada/salida: cantidad; ajuste: stock final contado
       motivo: z.enum(MOTIVOS_AJUSTE).nullish(),
       notas: zTextoOpt(300),
+      /** Depósito del movimiento (sin indicar: el principal). */
+      deposito_id: zId.nullish(),
       idem_key: z.string().min(8).max(80),
     }),
   );
+  const deposito = await resolverDeposito(c.env.DB, s.tallerId, d.deposito_id);
   // Toda salida o ajuste de inventario deja su motivo: es lo que permite auditar mermas, roturas y diferencias.
   if (d.tipo !== 'entrada' && !d.motivo) throw badRequest('Indicá el motivo del ajuste');
   if (d.motivo === 'otro' && !(d.notas ?? '').trim()) throw badRequest('Con el motivo "otro" explicá qué pasó en las notas');
-  const a = await delTaller<{ stock: number; costo: number }>(c.env.DB, 'articulos', s.tallerId, d.articulo_id, 'stock, costo');
-  if (!a) throw notFound('Artículo');
+  const art = await delTaller<{ costo: number }>(c.env.DB, 'articulos', s.tallerId, d.articulo_id, 'costo');
+  if (!art) throw notFound('Artículo');
+  // Las cantidades se controlan contra el stock del depósito elegido (el total del artículo es la suma de todos).
+  const a = {
+    stock: (await first<{ stock: number }>(
+      c.env.DB,
+      `SELECT COALESCE((SELECT stock FROM stock_depositos WHERE taller_id = ? AND articulo_id = ? AND deposito_id = COALESCE(?, (SELECT id FROM depositos WHERE taller_id = ? AND es_principal = 1))), 0) AS stock`,
+      s.tallerId, d.articulo_id, deposito, s.tallerId,
+    ))!.stock,
+  };
   const delta = redondearCantidad(d.tipo === 'entrada' ? d.cantidad : d.tipo === 'salida' ? -d.cantidad : d.cantidad - a.stock);
   if (d.tipo !== 'ajuste' && d.cantidad <= 0) throw badRequest('La cantidad debe ser mayor a cero');
   if (delta === 0) throw badRequest('El movimiento no modifica el stock');
@@ -405,13 +449,17 @@ catalogo.post('/stock/movimientos', requirePerm('stock.ajustar'), async (c) => {
   const stmts = [];
   if (d.tipo === 'ajuste') {
     // El ajuste fija el stock contado: si otro movimiento ocurrió entre la lectura y la escritura, se aborta.
-    stmts.push(c.env.DB.prepare('INSERT INTO tx_guard (ok) SELECT 0 WHERE (SELECT stock FROM articulos WHERE taller_id = ? AND id = ?) <> ?').bind(s.tallerId, d.articulo_id, a.stock));
+    stmts.push(
+      c.env.DB.prepare(
+        'INSERT INTO tx_guard (ok) SELECT 0 WHERE COALESCE((SELECT stock FROM stock_depositos WHERE taller_id = ? AND articulo_id = ? AND deposito_id = COALESCE(?, (SELECT id FROM depositos WHERE taller_id = ? AND es_principal = 1))), 0) <> ?',
+      ).bind(s.tallerId, d.articulo_id, deposito, s.tallerId, a.stock),
+    );
   }
   stmts.push(
     ...sentenciasMovimiento(
       c.env.DB,
       s.tallerId,
-      { articuloId: d.articulo_id, delta, tipo: d.tipo, notas: d.notas, motivo: d.motivo ?? null, usuarioId: s.usuarioId, idemKey: `manual:${d.idem_key}`, origenTipo: 'manual' },
+      { articuloId: d.articulo_id, depositoId: deposito, delta, tipo: d.tipo, notas: d.notas, motivo: d.motivo ?? null, usuarioId: s.usuarioId, idemKey: `manual:${d.idem_key}`, origenTipo: 'manual' },
       negativo,
     ),
   );

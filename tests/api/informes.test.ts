@@ -41,8 +41,8 @@ describe('venta → reportes (datos reales)', () => {
     const cat = (await informe('ventas-categoria')).body;
     expect(cat.filas.map((f: any) => f.categoria).sort()).toEqual(['Frenos y más', 'Servicios y mano de obra']);
     const ren = (await informe('rentabilidad')).body;
-    // El costo del artículo pasó a 10000 con la compra: 5 u × 10000
-    expect(ren.filas[0]).toMatchObject({ total: 50000, costo: 50000, margen: 0 });
+    // Las ventas conservan el costo con el que se emitieron (4000); la compra posterior subió el costo a 10000 pero no cambia la rentabilidad ya vendida
+    expect(ren.filas[0]).toMatchObject({ total: 50000, costo: 20000, margen: 30000 });
     expect(ren.columnas.map((c: any) => c.clave)).toContain('margen_pct');
     const top = (await informe('mas-vendidos')).body;
     expect(top.filas[0].articulo).toBe('Pastillas Informe');

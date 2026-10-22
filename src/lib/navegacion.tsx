@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import {
   Banknote, BarChart3, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, PackageSearch, Package, PiggyBank,
   Receipt, Scale, ScrollText, Settings, ShoppingCart, Tags, Truck, UserCog, Users, Wallet, Wrench, KeyRound, ShieldCheck, History, UserRound, BadgeDollarSign, ShoppingBasket,
-  Clock, MonitorSmartphone, UsersRound, CalendarCheck, HardHat, Timer, Activity,
+  Warehouse, Clock, MonitorSmartphone, UsersRound, CalendarCheck, HardHat, Timer, Activity,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permiso } from '@shared/permisos';
@@ -59,6 +59,7 @@ export const GRUPOS: GrupoNav[] = [
       item('articulos', 'Artículos', '/articulos', Package, 'stock repuestos productos existencias', 'catalogo.ver'),
       item('stock', 'Movimientos de stock', '/stock', Boxes, 'stock entradas salidas ajustes', 'stock.ver'),
       item('reposicion', 'Reposición', '/reposicion', PackageSearch, 'stock faltantes minimo pedir', 'stock.ver'),
+      item('depositos', 'Depósitos y transferencias', '/depositos', Warehouse, 'depositos transferencias sucursal almacen camioneta mostrador stock ubicacion', 'stock.ver'),
       item('inventario', 'Control de inventario', '/inventario', ClipboardCheck, 'stock conteo fisico valorizado existencias', 'stock.ver'),
       item('listas', 'Listas de precios', '/listas-precios', Tags, 'precio precios margen mayorista', 'precios.gestionar'),
     ],

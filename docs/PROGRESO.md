@@ -1,6 +1,6 @@
 # Progreso del desarrollo · Fierro v0.1.0
 
-Última actualización: 2026-10-21 (ver la sección 27 en adelante: Sprint 07, gestión mecánica avanzada). Documento para retomar el trabajo en nuevas sesiones.
+Última actualización: 2026-10-21 (ver la sección 33 en adelante: Sprint 08, integración comercial y control de stock). Documento para retomar el trabajo en nuevas sesiones.
 
 ## 1. Arquitectura implementada
 - **Un único Worker** (`worker/index.ts`, Hono) sirve la API en `/api/*` y la SPA compilada (assets estáticos). En desarrollo, Vite sirve la SPA y redirige `/api` a `wrangler dev`.
@@ -53,7 +53,7 @@
 ## 3. Módulos pendientes o fuera de alcance de v0.1
 - **Facturación electrónica ARCA** (WSAA/WSFE, CAE, notas de crédito). El modelo de datos está preparado; no hay integración.
 - Bancos, cheques y eCheq, contabilidad de partida doble: excluidos a propósito (ver la auditoría 07_VIABILIDAD). La caja diaria, los gastos y las listas de precios se implementaron en la expansión 01 (sección 8).
-- Multi-depósito y remitos internos.
+- ~~Multi-depósito~~ (resuelto en el Sprint 08); remitos internos de transferencia siguen pendientes.
 - Fotos y firma del cliente en el check-list (requiere R2 para archivos).
 - Cronómetro y horas por mecánico, comisiones.
 - Exportación a Excel/CSV e importación masiva de artículos o clientes.
@@ -400,3 +400,49 @@ Usuarios, roles y 53 permisos del Sprint 06 (se sumaron 4: `ordenes.asignar`, `m
 - Los avisos de mantenimiento son manuales (enlace de WhatsApp): no hay envío automático por WhatsApp, SMS o correo.
 - El historial no registra fotos ni archivos (requiere almacenamiento de archivos).
 - Sin pruebas de interfaz automatizadas (E2E); la verificación visual fue manual en una instancia aislada.
+
+---
+
+# Sprint 08 — Integración comercial y control de stock
+
+Trabajo directo sobre `main` (sin ramas, PR ni `gh`). Primero se revisó qué circuitos ya funcionaban (con las pruebas existentes) y se implementó solo lo que faltaba. **Sin ARCA** (los comprobantes siguen diciendo "documento no válido como factura"), sin cambios en licencias y sin integraciones externas.
+
+## 33. Qué ya existía y se verificó (sin reimplementar)
+- **Compras**: orden de compra con estados (borrador, pendiente, parcial, recibida, cancelada), recepciones totales y parciales con remito único y cantidades pendientes controladas por `CHECK`, stock por recepción, facturas de proveedor (la deuda nace una sola vez), pagos parciales imputados al comprobante más antiguo, cheques propios y endosados, anulaciones que revierten stock, costo y caja, idempotencia por clave en todo lo que mueve stock o dinero.
+- **Ventas**: presupuesto → OT (conversión única) → comprobante interno (uno vigente por OT) → cobros completos y parciales con varios medios → caja, banco o cheque; venta de mostrador contado o a cuenta corriente; anulación con permiso (exige anular antes los cobros).
+- **Inventario**: movimientos con motivo y usuario, stock mínimo y reposición, valorización, historial de costos, conteo físico, stock decimal exacto, y la regla de la OT (ver 34).
+- **Precios**: listas de precios, ajustes masivos con simulación, descuentos, recargos; cada documento guarda los precios con los que se emitió (cambiar el precio de un artículo no modifica documentos ya emitidos).
+- **Documentos**: presupuesto, OT, hoja de taller sin precios, comprobante interno, recibo, estado de cuenta de cliente, orden de compra y estado de cuenta de proveedor, con datos del taller y respeto de permisos de precios; CSV en la mayoría de los listados e informes.
+
+## 34. Qué se completó
+- **Depósitos por taller** (antes no existían). Cada taller tiene su *Depósito principal* y puede crear los que necesite (mostrador, camioneta, etc.); nada que ver con los talleres del SaaS. Existencias por depósito (`stock_depositos`), transferencias internas con historial, anulables y atómicas, y selección de depósito en: venta de mostrador, OT, compra directa, recepción de mercadería, movimientos manuales y conteo físico (que ahora cuenta un depósito). Pantalla `/depositos` (depósitos con su stock y valor al costo, transferencias, control de consistencia). El selector solo aparece si el taller tiene más de un depósito.
+  - **Invariante**: `articulos.stock` sigue siendo el stock total y es **siempre la suma de los depósitos**; todo movimiento pasa por `worker/lib/stock.ts`, que actualiza ambos en la misma transacción (`/api/inventario/verificar` y la pestaña "Control" lo comprueban). Sin permitir stock negativo, un depósito no puede quedar en negativo aunque el total alcance. Los documentos guardan su depósito y **las anulaciones y reversos vuelven al mismo depósito** (anular una compra o recepción exige que la mercadería siga ahí).
+  - **Regla de stock de la OT** (definida y mantenida): los repuestos se descuentan **una sola vez, al pasar a "Lista para entregar"** (o a "Entregada" desde un estado sin stock), del depósito de la orden; volver la OT a un estado de taller los repone en el mismo depósito; el comprobante generado desde la OT **no** vuelve a descontar. El depósito de la OT solo se cambia mientras el stock no está descontado. Probado con tres solicitudes simultáneas.
+- **Código de barras**: campo `codigo_barras` único por taller; los lectores USB estándar (teclado + Enter) funcionan en el buscador de repuestos de presupuestos, OT y ventas de mostrador, compras, órdenes de compra, movimientos de stock, listado de artículos y transferencias: el código exacto agrega o abre el artículo. La búsqueda por texto también encuentra por código de barras. Sin integraciones de hardware.
+- **Costo histórico**: `venta_items.costo_unitario` guarda el costo del artículo al emitir el comprobante (el de la OT, el que tenían los repuestos al descontarse). Los informes de rentabilidad y estadísticas usan ese costo, de modo que **actualizar costos o precios no cambia retroactivamente lo vendido**. Los comprobantes anteriores a este sprint usan el costo actual (no hay dato histórico). El costo del comprobante solo lo ve quien tiene permiso de costos.
+- **Rentabilidad de la OT** (`/api/ordenes/:id/rentabilidad`, tarjeta en la OT con permiso de márgenes): repuestos (venta contra costo real del consumo; estimado antes de descontarse), mano de obra facturada y horas cronometradas.
+- **Cuentas corrientes**: los estados de cuenta de clientes y proveedores aceptan `?desde=` y muestran el **saldo anterior** (también al imprimir); nuevo control `/api/cuentas-corrientes/verificar` (comprobantes vs. cobros aplicados vs. medios; requiere ventas y finanzas).
+- **Documentos nuevos**: comprobante de recepción de mercadería (con depósito, remito, usuario; costos solo con permiso) y orden de pago a proveedor (desde el estado de cuenta del proveedor).
+- **Trazabilidad**: cada movimiento de stock guarda usuario, origen, depósito y costo; las transferencias y los conteos guardan el responsable.
+
+## 35. Circuitos operativos
+- **COMPRA → STOCK → PAGO**: proveedor → orden de compra → recepción (parcial/total, a un depósito) → inventario → factura (deuda) → pago → cuenta del proveedor → caja/banco/cheque. Verificado de punta a punta con reintentos, anulaciones y controles de consistencia.
+- **PRESUPUESTO → OT → REPUESTOS → VENTA → COBRO**: presupuesto → OT → consumo de repuestos (un solo descuento) → comprobante interno → cobros parciales con varios medios → caja/cuenta corriente; anulación autorizada; reposición de stock al reabrir. Verificado con saldo del cliente, stock y controles de consistencia.
+
+## 36. Migración
+- `migrations/0008_depositos_barras_costos.sql` (aditiva): `depositos`, `stock_depositos`, `transferencias_stock`, `transferencia_items`; `deposito_id` en `stock_movimientos`, `ventas`, `compras`, `recepciones`, `ordenes` y `conteos`; `articulos.codigo_barras` (único por taller); `venta_items.costo_unitario`. Crea el depósito principal de cada taller existente y le asigna el stock actual de cada artículo; los datos históricos sin depósito corresponden al principal.
+- Probada en `tests/api/migraciones.test.ts` sobre datos previos y ensayada sobre el respaldo de la D1 remota antes de aplicarla. Los talleres nuevos reciben su depósito principal al darse de alta.
+
+## 37. Pruebas
+- `npm run build` (typecheck + Vite) y `npm test`: **46 unitarias + 208 de integración, todas OK**. Nuevas: `tests/api/depositos.test.ts` (16 pruebas contra el Worker real: depósito principal por taller, aislamiento entre talleres, transferencias con reintento, sin stock y anulación, venta de mostrador desde un depósito con reversa al mismo, OT con un único descuento ante solicitudes simultáneas y reposición en el depósito de origen, compra y recepción por depósito y anulaciones, movimientos manuales y conteo por depósito, desactivación, código de barras con permisos y aislamiento, costo histórico y rentabilidad de la OT, circuitos compra→pago y presupuesto→cobro→anulación con cuentas corrientes verificadas, saldo anterior y control de consistencia) y la prueba de migraciones ampliada con la 0008 sobre datos previos. Se actualizó una expectativa de `informes.test.ts` que fijaba el comportamiento anterior (rentabilidad con el costo actual): ahora usa el costo con el que se vendió.
+- Las pruebas de integración se corrieron en tandas de archivos (como en el Sprint 07).
+- Verificación en el navegador sobre una instancia aislada: pantalla de depósitos con stock y valor, nueva transferencia y lectura de un código de barras con Enter (agregó el artículo con su disponibilidad).
+- Nota preexistente: `scripts/seed.mjs` falla de noche en esta máquina porque envía una fecha UTC que el servidor (UTC-3) considera futura; no está relacionado con este sprint.
+
+## 38. Pendiente (no se publicó nada parcial)
+- **Devoluciones parciales de ventas / notas de crédito internas**: hoy existe la anulación autorizada del comprobante (con sus cobros anulados antes) y la reposición del stock de la OT al reabrirla. Una devolución parcial exige una nota de crédito que reduzca la cuenta corriente y, si corresponde, reintegre dinero en caja, tocando clientes, cobros, caja, informes y tesorería: es demasiado extenso para cerrarlo de forma segura en este sprint y no se publicó una versión incompleta.
+- Anticipos o saldo a favor de clientes (un cobro mayor al saldo sigue rechazándose); aplicación manual de pagos a proveedores contra un comprobante específico (sigue siendo automática al más antiguo).
+- Costo de la mano de obra (no hay costo por hora del mecánico): la rentabilidad de la OT muestra la venta y las horas, no el margen de mano de obra.
+- Reposición, inventario valorizado y stock mínimo trabajan con el stock **total** del artículo (no por depósito); no hay reserva de stock para presupuestos ni depósito por presupuesto.
+- Las transferencias son inmediatas (sin estado "en tránsito").
+- Importación masiva de artículos y exportaciones CSV adicionales siguen pendientes (el CSV existente cubre los listados principales y las pantallas nuevas).

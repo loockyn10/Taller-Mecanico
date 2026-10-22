@@ -8,7 +8,7 @@ import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCantidad, zCentavos, zFecha, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, like, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
 import { requirePerm, requireRW, tiene } from '../lib/auth';
-import { agrupar, permiteNegativo, sentenciaOrigenCosto, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
+import { agrupar, permiteNegativo, resolverDeposito, sentenciaOrigenCosto, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { sentenciasMedioEgreso, validarMedioEgreso, zMedioEgreso } from '../lib/pagos';
 import { reversoBancoDeOrigen, sentenciaReversosBanco } from '../lib/banco';
 import { chequesBloqueanAnulacion, sentenciasAnularChequesDePago } from '../lib/cheques';
@@ -66,6 +66,8 @@ compras.post('/compras', async (c) => {
       actualizar_costos: z.boolean().default(true),
       notas: zTextoOpt(500),
       items: z.array(z.object({ articulo_id: zId, cantidad: zCantidad, costo_unitario: zCentavos })).min(1).max(200),
+      /** Depósito donde ingresa la mercadería (sin indicar: el principal). */
+      deposito_id: zId.nullish(),
       idem_key: z.string().min(8).max(80),
       // Compra de contado: se paga en el acto (total o parcialmente) y sale de la caja si es en efectivo.
       pago: z.object({ medio: z.enum(MEDIOS_PAGO), importe: zCentavos.optional(), referencia: zTextoOpt(120), ...zMedioEgreso }).nullish(),
@@ -75,6 +77,7 @@ compras.post('/compras', async (c) => {
   const prov = await first<{ activo: number }>(c.env.DB, 'SELECT activo FROM proveedores WHERE taller_id = ? AND id = ?', s.tallerId, d.proveedor_id);
   if (!prov) throw badRequest('Proveedor inexistente');
   if (!prov.activo) throw badRequest('El proveedor está desactivado');
+  const deposito = await resolverDeposito(c.env.DB, s.tallerId, d.deposito_id);
   const ids = d.items.map((i) => i.articulo_id);
   if (new Set(ids).size !== ids.length) throw badRequest('Hay artículos repetidos: sumá las cantidades en una sola línea');
   let existentes = 0;
@@ -96,9 +99,9 @@ compras.post('/compras', async (c) => {
   const stmts: Stmt[] = [
     ...seqIncrementar(c.env.DB, s.tallerId, 'compra'),
     c.env.DB.prepare(
-      `INSERT INTO compras (id, taller_id, numero, proveedor_id, fecha, tipo_doc, numero_doc, neto, iva, otros, total, actualizar_costos, notas, created_by, vencimiento)
-       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, s.tallerId, s.tallerId, 'compra', d.proveedor_id, fecha, d.tipo_doc, d.numero_doc, neto, d.iva, d.otros, total, d.actualizar_costos ? 1 : 0, d.notas, s.usuarioId, d.vencimiento ?? null),
+      `INSERT INTO compras (id, taller_id, numero, proveedor_id, fecha, tipo_doc, numero_doc, neto, iva, otros, total, actualizar_costos, notas, created_by, vencimiento, deposito_id)
+       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, s.tallerId, s.tallerId, 'compra', d.proveedor_id, fecha, d.tipo_doc, d.numero_doc, neto, d.iva, d.otros, total, d.actualizar_costos ? 1 : 0, d.notas, s.usuarioId, d.vencimiento ?? null, deposito),
   ];
   d.items.forEach((it, i) => {
     // Se conserva el costo previo para poder revertirlo si la compra se anula.
@@ -116,7 +119,7 @@ compras.post('/compras', async (c) => {
       ...sentenciasMovimiento(
         c.env.DB,
         s.tallerId,
-        { articuloId, delta: cant, tipo: 'compra', origenTipo: 'compra', origenId: id, idemKey: `compra:${d.idem_key}:${articuloId}`, costoUnitario: costo, usuarioId: s.usuarioId },
+        { articuloId, depositoId: deposito, delta: cant, tipo: 'compra', origenTipo: 'compra', origenId: id, idemKey: `compra:${d.idem_key}:${articuloId}`, costoUnitario: costo, usuarioId: s.usuarioId },
         true,
       ),
     );
@@ -146,13 +149,13 @@ compras.post('/compras', async (c) => {
 compras.post('/compras/:id/anular', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const co = await first<{ estado: string; numero: number }>(c.env.DB, 'SELECT estado, numero FROM compras WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  const co = await first<{ estado: string; numero: number; deposito_id: string | null }>(c.env.DB, 'SELECT estado, numero, deposito_id FROM compras WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!co) throw notFound('Compra');
   if (co.estado !== 'registrada') throw conflict('La compra ya está anulada');
   const items = await all<{ articulo_id: string; cantidad: number }>(c.env.DB, 'SELECT articulo_id, cantidad FROM compra_items WHERE taller_id = ? AND compra_id = ?', s.tallerId, id);
   const porArticulo = agrupar(items);
   const negativo = await permiteNegativo(c.env.DB, s.tallerId);
-  if (!negativo) await verificarDisponible(c.env.DB, s.tallerId, porArticulo);
+  if (!negativo) await verificarDisponible(c.env.DB, s.tallerId, porArticulo, co.deposito_id);
   const conPago = !!(await first(c.env.DB, "SELECT 1 FROM pagos_proveedor WHERE taller_id = ? AND compra_id = ? AND estado = 'registrado'", s.tallerId, id));
   if (conPago) await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   const pagosContado = await all<{ id: string }>(c.env.DB, "SELECT id FROM pagos_proveedor WHERE taller_id = ? AND compra_id = ? AND estado = 'registrado'", s.tallerId, id);
@@ -170,7 +173,7 @@ compras.post('/compras/:id/anular', async (c) => {
       ...sentenciasMovimiento(
         c.env.DB,
         s.tallerId,
-        { articuloId, delta: -cant, tipo: 'anulacion_compra', origenTipo: 'compra', origenId: id, idemKey: `anulacion_compra:${id}:${articuloId}`, notas: `Anulación compra #${co.numero}`, usuarioId: s.usuarioId },
+        { articuloId, depositoId: co.deposito_id, delta: -cant, tipo: 'anulacion_compra', origenTipo: 'compra', origenId: id, idemKey: `anulacion_compra:${id}:${articuloId}`, notas: `Anulación compra #${co.numero}`, usuarioId: s.usuarioId },
         negativo,
       ),
     );
@@ -219,6 +222,23 @@ compras.get('/pagos-proveedor', async (c) => {
       ...params,
     ),
   );
+});
+
+/** Detalle de un pago a proveedor (para la orden de pago imprimible). */
+compras.get('/pagos-proveedor/:id', async (c) => {
+  const s = c.get('sesion');
+  const pg = await first<Record<string, unknown>>(
+    c.env.DB,
+    `SELECT pp.*, p.nombre AS proveedor, p.cuit AS proveedor_cuit, u.nombre AS usuario, co.numero AS compra_numero
+       FROM pagos_proveedor pp JOIN proveedores p ON p.taller_id = pp.taller_id AND p.id = pp.proveedor_id
+       LEFT JOIN usuarios u ON u.taller_id = pp.taller_id AND u.id = pp.usuario_id
+       LEFT JOIN compras co ON co.taller_id = pp.taller_id AND co.id = pp.compra_id
+      WHERE pp.taller_id = ? AND pp.id = ?`,
+    s.tallerId, c.req.param('id'),
+  );
+  if (!pg) throw notFound('Pago');
+  const [deuda] = await deudaProveedores(c.env.DB, s.tallerId, String(pg.proveedor_id));
+  return c.json({ ...pg, saldo_proveedor: deuda?.saldo ?? 0 });
 });
 
 compras.post('/pagos-proveedor', async (c) => {
@@ -300,6 +320,7 @@ compras.post('/pagos-proveedor/:id/anular', async (c) => {
 compras.get('/proveedores/:id/cuenta', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
+  const { desde } = query(c, z.object({ desde: zFecha.optional() }));
   const p = await first(c.env.DB, 'SELECT id, nombre, cuit, telefono, email, activo FROM proveedores WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!p) throw notFound('Proveedor');
   // Incluye anulados (marcados) para trazabilidad; el saldo corrido sólo cuenta los vigentes.
@@ -318,12 +339,16 @@ compras.get('/proveedores/:id/cuenta', async (c) => {
   );
   const [deuda] = await deudaProveedores(c.env.DB, s.tallerId, id);
   let saldo = 0;
+  const todos = movs.map((m) => {
+    if (!m.anulado) saldo += m.haber - m.debe;
+    return { ...m, saldo };
+  });
+  const saldoAnterior = desde ? ([...todos].reverse().find((m: any) => m.fecha < desde)?.saldo ?? 0) : 0;
   return c.json({
     proveedor: p,
-    movimientos: movs.map((m) => {
-      if (!m.anulado) saldo += m.haber - m.debe;
-      return { ...m, saldo };
-    }),
+    desde: desde ?? null,
+    saldo_anterior: saldoAnterior,
+    movimientos: desde ? todos.filter((m: any) => m.fecha >= desde) : todos,
     saldo,
     deuda: deuda ?? { proveedor_id: id, saldo: 0, vencido: 0, por_vencer: 0, docs: [] },
   });

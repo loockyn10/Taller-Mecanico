@@ -41,6 +41,7 @@ const OrdenesCompra = lazy(() => import('./pages/compras/OrdenesCompra').then((m
 const OrdenCompraForm = lazy(() => import('./pages/compras/OrdenesCompra').then((m) => ({ default: m.OrdenCompraForm })));
 const OrdenCompraDetalle = lazy(() => import('./pages/compras/OrdenesCompra').then((m) => ({ default: m.OrdenCompraDetalle })));
 const FacturasProveedor = lazy(() => import('./pages/compras/FacturasProveedor').then((m) => ({ default: m.FacturasProveedor })));
+const Depositos = lazy(() => import('./pages/stock/Depositos').then((m) => ({ default: m.Depositos })));
 const Inventario = lazy(() => import('./pages/stock/Inventario').then((m) => ({ default: m.Inventario })));
 const Equipo = lazy(() => import('./pages/personal/Equipo').then((m) => ({ default: m.Equipo })));
 const PanelAsistencia = lazy(() => import('./pages/personal/PanelAsistencia').then((m) => ({ default: m.PanelAsistencia })));
@@ -129,6 +130,7 @@ export function App() {
         <Route path="tesoreria" element={<Requiere permiso="tesoreria.ver"><Tesoreria /></Requiere>} />
         <Route path="bancos" element={<Requiere permiso="bancos.ver"><Bancos /></Requiere>} />
         <Route path="cheques" element={<Requiere permiso="cheques.gestionar"><Cheques /></Requiere>} />
+        <Route path="depositos" element={<Requiere permiso="stock.ver"><Depositos /></Requiere>} />
         <Route path="inventario" element={<Requiere permiso="stock.ver"><Inventario /></Requiere>} />
         <Route path="ordenes-compra" element={<Requiere permiso="compras.ver"><OrdenesCompra /></Requiere>} />
         <Route path="ordenes-compra/nueva" element={<Requiere permiso="compras.gestionar"><OrdenCompraForm /></Requiere>} />

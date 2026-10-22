@@ -85,7 +85,7 @@ reportes.get('/reportes', requirePerm('reportes.ver'), async (c) => {
     ),
     all(
       db,
-      `SELECT vi.descripcion, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total, SUM(vi.cantidad * a.costo) AS costo
+      `SELECT vi.descripcion, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total, SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0)) AS costo
          FROM venta_items vi JOIN ventas ve ON ve.taller_id = vi.taller_id AND ve.id = vi.venta_id
          LEFT JOIN articulos a ON a.taller_id = vi.taller_id AND a.id = vi.articulo_id
         WHERE vi.taller_id = ? AND ve.estado = 'emitida' AND ve.fecha BETWEEN ? AND ? AND vi.tipo = 'articulo' GROUP BY vi.articulo_id ORDER BY total DESC LIMIT 10`,

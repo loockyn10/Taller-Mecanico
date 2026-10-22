@@ -29,6 +29,7 @@ import { tempario } from './modules/tempario';
 import { historial } from './modules/historial';
 import { mantenimientos } from './modules/mantenimientos';
 import { productividad } from './modules/productividad';
+import { depositos } from './modules/depositos';
 
 const app = new Hono<AppEnv>();
 
@@ -57,6 +58,7 @@ api.route('/', historial);
 api.route('/', mantenimientos);
 api.route('/tempario', tempario);
 api.route('/productividad', productividad);
+api.route('/', depositos);
 api.route('/', catalogo);
 api.route('/presupuestos', presupuestos);
 api.route('/ordenes', ordenes);

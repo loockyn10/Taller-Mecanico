@@ -10,7 +10,7 @@ import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCantidad, zCentavos, zFecha, zId, zPct, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, like, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
 import { requireRW } from '../lib/auth';
-import { agrupar, permiteNegativo, sentenciaOrigenCosto, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
+import { agrupar, permiteNegativo, resolverDeposito, sentenciaOrigenCosto, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { fechaComercial, sumarDias } from '../lib/fechas';
 import { deudaProveedores } from '../lib/proveedores';
 import { calcularOC } from '../../shared/compras';
@@ -213,8 +213,12 @@ abastecimiento.get('/recepciones/:id', async (c) => {
   const s = c.get('sesion');
   const r = await first<any>(
     c.env.DB,
-    `SELECT r.*, p.nombre AS proveedor, oc.numero AS orden_numero FROM recepciones r JOIN proveedores p ON p.taller_id = r.taller_id AND p.id = r.proveedor_id
-       JOIN ordenes_compra oc ON oc.taller_id = r.taller_id AND oc.id = r.orden_id WHERE r.taller_id = ? AND r.id = ?`,
+    `SELECT r.*, p.nombre AS proveedor, p.cuit AS proveedor_cuit, oc.numero AS orden_numero, u.nombre AS usuario,
+            COALESCE(dp.nombre, (SELECT nombre FROM depositos WHERE taller_id = r.taller_id AND es_principal = 1)) AS deposito
+       FROM recepciones r JOIN proveedores p ON p.taller_id = r.taller_id AND p.id = r.proveedor_id
+       JOIN ordenes_compra oc ON oc.taller_id = r.taller_id AND oc.id = r.orden_id
+       LEFT JOIN depositos dp ON dp.taller_id = r.taller_id AND dp.id = r.deposito_id
+       LEFT JOIN usuarios u ON u.taller_id = r.taller_id AND u.id = r.usuario_id WHERE r.taller_id = ? AND r.id = ?`,
     s.tallerId, c.req.param('id'),
   );
   if (!r) throw notFound('Recepción');
@@ -232,6 +236,8 @@ abastecimiento.post('/ordenes-compra/:id/recepciones', async (c) => {
       remito: zTextoOpt(40),
       notas: zTextoOpt(500),
       items: z.array(z.object({ orden_item_id: zId, cantidad: zCantidad })).min(1, 'indicá qué se recibió').max(200),
+      /** Depósito donde se recibe la mercadería (sin indicar: el principal). */
+      deposito_id: zId.nullish(),
       idem_key: z.string().min(8).max(80),
     }),
   );
@@ -242,6 +248,7 @@ abastecimiento.post('/ordenes-compra/:id/recepciones', async (c) => {
   );
   if (!oc) throw notFound('Orden de compra');
   if (!['pendiente', 'parcial'].includes(oc.estado)) throw conflict(oc.estado === 'borrador' ? 'Emití la orden antes de recibir mercadería' : `La orden está ${oc.estado}: no admite recepciones`);
+  const deposito = await resolverDeposito(c.env.DB, s.tallerId, d.deposito_id);
   const ids = d.items.map((i) => i.orden_item_id);
   if (new Set(ids).size !== ids.length) throw badRequest('Una línea de la orden aparece más de una vez');
   const lineas = await all<{ id: string; articulo_id: string; cantidad: number; cantidad_recibida: number; costo_unitario: number; desc_pct: number; nombre: string }>(
@@ -260,8 +267,8 @@ abastecimiento.post('/ordenes-compra/:id/recepciones', async (c) => {
     guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM ordenes_compra WHERE taller_id = ? AND id = ? AND estado IN ('pendiente','parcial'))", s.tallerId, ordenId),
     ...seqIncrementar(c.env.DB, s.tallerId, 'recepcion'),
     c.env.DB
-      .prepare(`INSERT INTO recepciones (id, taller_id, numero, orden_id, proveedor_id, fecha, remito, notas, idem_key, usuario_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(id, s.tallerId, s.tallerId, 'recepcion', ordenId, oc.proveedor_id, fecha, d.remito, d.notas, d.idem_key, s.usuarioId),
+      .prepare(`INSERT INTO recepciones (id, taller_id, numero, orden_id, proveedor_id, fecha, remito, notas, idem_key, usuario_id, deposito_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(id, s.tallerId, s.tallerId, 'recepcion', ordenId, oc.proveedor_id, fecha, d.remito, d.notas, d.idem_key, s.usuarioId, deposito),
   ];
   for (const it of d.items) {
     const l = lineas.find((x) => x.id === it.orden_item_id)!;
@@ -278,7 +285,7 @@ abastecimiento.post('/ordenes-compra/:id/recepciones', async (c) => {
       c.env.DB.prepare('UPDATE orden_compra_items SET cantidad_recibida = ROUND(cantidad_recibida + ?, 3) WHERE taller_id = ? AND id = ?').bind(it.cantidad, s.tallerId, it.orden_item_id),
       ...sentenciasMovimiento(
         c.env.DB, s.tallerId,
-        { articuloId: l.articulo_id, delta: it.cantidad, tipo: 'compra', origenTipo: 'recepcion', origenId: id, idemKey: `recepcion:${d.idem_key}:${l.articulo_id}`, costoUnitario: costoNeto, notas: `Recepción orden de compra #${oc.numero}`, usuarioId: s.usuarioId },
+        { articuloId: l.articulo_id, depositoId: deposito, delta: it.cantidad, tipo: 'compra', origenTipo: 'recepcion', origenId: id, idemKey: `recepcion:${d.idem_key}:${l.articulo_id}`, costoUnitario: costoNeto, notas: `Recepción orden de compra #${oc.numero}`, usuarioId: s.usuarioId },
         true,
       ),
     );
@@ -302,14 +309,14 @@ abastecimiento.post('/recepciones/:id/anular', async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
   const { motivo } = await body(c, z.object({ motivo: z.string().trim().min(3).max(300) }));
-  const r = await first<{ estado: string; orden_id: string; numero: number }>(c.env.DB, 'SELECT estado, orden_id, numero FROM recepciones WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  const r = await first<{ estado: string; orden_id: string; numero: number; deposito_id: string | null }>(c.env.DB, 'SELECT estado, orden_id, numero, deposito_id FROM recepciones WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!r) throw notFound('Recepción');
   if (r.estado !== 'registrada') throw conflict('La recepción ya está anulada');
   const oc = await first<{ cerrada_con_faltante: number }>(c.env.DB, 'SELECT cerrada_con_faltante FROM ordenes_compra WHERE taller_id = ? AND id = ?', s.tallerId, r.orden_id);
   if (oc?.cerrada_con_faltante) throw conflict('La orden fue cerrada con faltante: no se pueden anular sus recepciones');
   const items = await all<{ orden_item_id: string; articulo_id: string; cantidad: number }>(c.env.DB, 'SELECT orden_item_id, articulo_id, cantidad FROM recepcion_items WHERE taller_id = ? AND recepcion_id = ?', s.tallerId, id);
   const negativo = await permiteNegativo(c.env.DB, s.tallerId);
-  if (!negativo) await verificarDisponible(c.env.DB, s.tallerId, agrupar(items));
+  if (!negativo) await verificarDisponible(c.env.DB, s.tallerId, agrupar(items), r.deposito_id);
   const stmts: Stmt[] = [
     guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM recepciones WHERE taller_id = ? AND id = ? AND estado = 'registrada')", s.tallerId, id),
     c.env.DB.prepare("UPDATE recepciones SET estado = 'anulada', notas = COALESCE(notas || ' · ', '') || ? WHERE taller_id = ? AND id = ?").bind(`Anulada: ${motivo}`, s.tallerId, id),
@@ -319,7 +326,7 @@ abastecimiento.post('/recepciones/:id/anular', async (c) => {
       c.env.DB.prepare('UPDATE orden_compra_items SET cantidad_recibida = ROUND(cantidad_recibida - ?, 3) WHERE taller_id = ? AND id = ?').bind(it.cantidad, s.tallerId, it.orden_item_id),
       ...sentenciasMovimiento(
         c.env.DB, s.tallerId,
-        { articuloId: it.articulo_id, delta: -it.cantidad, tipo: 'anulacion_compra', origenTipo: 'recepcion', origenId: id, idemKey: `anulacion_recepcion:${id}:${it.articulo_id}`, notas: `Anulación recepción #${r.numero}`, usuarioId: s.usuarioId },
+        { articuloId: it.articulo_id, depositoId: r.deposito_id, delta: -it.cantidad, tipo: 'anulacion_compra', origenTipo: 'recepcion', origenId: id, idemKey: `anulacion_recepcion:${id}:${it.articulo_id}`, notas: `Anulación recepción #${r.numero}`, usuarioId: s.usuarioId },
         negativo,
       ),
     );

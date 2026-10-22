@@ -17,7 +17,7 @@ const RUTA: Record<string, string> = { presupuesto: '/presupuestos/', orden: '/o
 /** Recibos y estados de cuenta tienen su propia vista; el resto de los documentos comparte ésta. */
 export function Imprimir() {
   const { tipo = '' } = useParams();
-  if (tipo === 'orden-compra' || tipo === 'cuenta-proveedor') return <ImprimirCompras />;
+  if (tipo === 'orden-compra' || tipo === 'cuenta-proveedor' || tipo === 'recepcion' || tipo === 'orden-pago') return <ImprimirCompras />;
   return tipo === 'recibo' || tipo === 'cuenta' ? <ImprimirDinero /> : <ImprimirDocumento />;
 }
 

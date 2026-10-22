@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Ban, Plus, ShoppingCart, Trash2 } from 'lucide-react';
+import { buscarPorCodigo } from '@/lib/lector';
 import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { invalidarDinero } from '@/lib/caja';
 import { cantidad, fecha, hoyISO, money, numero } from '@/lib/format';
+import { SelectorDeposito } from '@/components/SelectorDeposito';
 import { Aviso, Boton, Buscador, Campo, Cargando, Check, Encabezado, ErrorCaja, Input, InputMoneda, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
 import { AvisoCaja, useCajaBloqueada } from '@/components/Cobro';
 import { MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
@@ -129,6 +131,7 @@ export function NuevaCompra() {
   const [pago, setPago] = useState<{ medio: MedioPago; importe: number | null; referencia: string }>({ medio: 'efectivo', importe: null, referencia: '' });
   const [extra, setExtra] = useState<ExtraMedio>(extraVacio());
   const [vence, setVence] = useState('');
+  const [deposito, setDeposito] = useState('');
   const [q, setQ] = useState('');
   const dq = useDebounce(q);
   const [clave] = useState(nuevaClave());
@@ -143,7 +146,7 @@ export function NuevaCompra() {
   const m = useMutation({
     mutationFn: () =>
       api.post('/compras', {
-        proveedor_id: prov, ...f, numero_doc: f.numero_doc || null, vencimiento: !contado && vence ? vence : null,
+        proveedor_id: prov, ...f, deposito_id: deposito || null, numero_doc: f.numero_doc || null, vencimiento: !contado && vence ? vence : null,
         items: items.map((i) => ({ articulo_id: i.articulo.id, cantidad: i.cantidad, costo_unitario: i.costo })), idem_key: clave,
         pago: contado ? { medio: pago.medio, importe: importePago, referencia: pago.referencia.trim() || null, ...extraAPayload(pago.medio, extra, 'pago_proveedor') } : null,
       }),
@@ -161,7 +164,7 @@ export function NuevaCompra() {
       <Encabezado titulo="Registrar compra" volver="/compras" />
       <div className="grid gap-5 xl:grid-cols-3">
         <Tarjeta titulo="Artículos recibidos" className="xl:col-span-2">
-          <Buscador value={q} onChange={setQ} placeholder="Buscar artículo para agregar…" />
+          <Buscador value={q} onChange={setQ} placeholder="Buscar artículo para agregar… (o escaneá el código de barras)" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (!a) return toast.error(new Error(`No hay ningún artículo con el código ${codigo}`)); setItems((prev) => (prev.some((i) => i.articulo.id === a.id) ? prev : [...prev, { articulo: a, cantidad: 1, costo: a.costo }])); setQ(''); }} />
           {dq && (
             <ul className="mt-1.5 max-h-56 divide-y divide-borde overflow-y-auto rounded-lg border border-borde text-sm">
               {res.map((a) => (
@@ -204,6 +207,7 @@ export function NuevaCompra() {
                   </Select>
                 </Campo>
                 <Campo label="Fecha"><Input type="date" value={f.fecha} max={hoyISO()} disabled={!puede('fechas.retroactivas')} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Campo>
+                <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito de ingreso" />
               </div>
               <Campo label="Número"><Input value={f.numero_doc} onChange={(e) => setF({ ...f, numero_doc: e.target.value })} placeholder="A-0001-00001234" /></Campo>
               <div className="grid grid-cols-2 gap-3">

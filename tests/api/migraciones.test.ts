@@ -119,4 +119,49 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(() => db.exec("INSERT INTO servicios (id, taller_id, nombre, precio, codigo) VALUES ('s3', 't1', 'Dup', 0, 'FRE-001')")).toThrow(/UNIQUE/);
     db.close();
   });
+
+  it('0008 crea el depósito principal de cada taller con el stock actual, sin perder datos, y deja la base lista para operar por depósito', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    const migraciones = fs.readdirSync(path.join(RAIZ, 'migrations')).sort();
+    for (const m of migraciones.filter((f) => f < '0008')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all() as Array<Record<string, any>>;
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Viejo'), ('t2', 'Otro');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x');
+      INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES ('c1', 't1', 1, 'Cliente');
+      INSERT INTO articulos (id, taller_id, codigo, nombre, costo, precio, stock) VALUES ('a1', 't1', 'A1', 'Filtro', 1000, 2000, 7.5), ('a2', 't1', 'A2', 'Aceite', 3000, 5000, 0), ('a3', 't2', 'A1', 'Filtro ajeno', 1000, 2000, 3);
+      INSERT INTO stock_movimientos (id, taller_id, articulo_id, tipo, cantidad, stock_resultante) VALUES ('m1', 't1', 'a1', 'entrada', 7.5, 7.5);
+      INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha) VALUES ('v1', 't1', 1, 'c1', '2026-10-01');
+      INSERT INTO venta_items (id, taller_id, venta_id, tipo, articulo_id, descripcion, cantidad, precio_unitario, subtotal) VALUES ('vi1', 't1', 'v1', 'articulo', 'a1', 'Filtro', 2, 2000, 4000);
+    `);
+    db.exec(leer('migrations', migraciones.find((f) => f.startsWith('0008'))!));
+    // Cada taller recibe exactamente un depósito principal
+    expect(todos('SELECT taller_id, nombre, es_principal, activo FROM depositos ORDER BY taller_id').map((r) => ({ ...r }))).toEqual([
+      { taller_id: 't1', nombre: 'Depósito principal', es_principal: 1, activo: 1 },
+      { taller_id: 't2', nombre: 'Depósito principal', es_principal: 1, activo: 1 },
+    ]);
+    // El stock de cada artículo pasa al principal de SU taller y la suma coincide con el total
+    expect(todos('SELECT articulo_id, stock FROM stock_depositos ORDER BY articulo_id').map((r) => ({ ...r }))).toEqual([{ articulo_id: 'a1', stock: 7.5 }, { articulo_id: 'a2', stock: 0 }, { articulo_id: 'a3', stock: 3 }]);
+    expect(uno("SELECT COUNT(*) AS n FROM articulos a WHERE ROUND(a.stock, 3) <> ROUND((SELECT SUM(stock) FROM stock_depositos s WHERE s.taller_id = a.taller_id AND s.articulo_id = a.id), 3)").n).toBe(0);
+    // Los datos existentes siguen ahí; las operaciones anteriores corresponden al principal (deposito_id vacío) y sin costo histórico
+    expect(uno("SELECT stock FROM articulos WHERE id = 'a1'").stock).toBe(7.5);
+    expect(uno("SELECT deposito_id FROM stock_movimientos WHERE id = 'm1'").deposito_id).toBeNull();
+    expect(uno("SELECT costo_unitario, subtotal FROM venta_items WHERE id = 'vi1'")).toMatchObject({ costo_unitario: null, subtotal: 4000 });
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    // Un único principal por taller y nombres únicos por taller
+    expect(() => db.exec("INSERT INTO depositos (id, taller_id, nombre, es_principal) VALUES ('d9', 't1', 'Otro principal', 1)")).toThrow(/UNIQUE/);
+    expect(() => db.exec("INSERT INTO depositos (id, taller_id, nombre) VALUES ('d8', 't1', 'depósito PRINCIPAL')")).toThrow(/UNIQUE/);
+    db.exec("INSERT INTO depositos (id, taller_id, nombre) VALUES ('d7', 't1', 'Mostrador')");
+    // No se puede guardar stock de un artículo en el depósito de otro taller
+    expect(() => db.exec("INSERT INTO stock_depositos (taller_id, articulo_id, deposito_id, stock) VALUES ('t1', 'a1', (SELECT id FROM depositos WHERE taller_id = 't2'), 1)")).toThrow(/FOREIGN KEY/);
+    // Código de barras único por taller
+    db.exec("UPDATE articulos SET codigo_barras = '779123' WHERE id = 'a1'");
+    db.exec("UPDATE articulos SET codigo_barras = '779123' WHERE id = 'a3'");
+    expect(() => db.exec("UPDATE articulos SET codigo_barras = '779123' WHERE id = 'a2'")).toThrow(/UNIQUE/);
+    // Transferencias: origen y destino distintos, cantidades positivas
+    expect(() => db.exec("INSERT INTO transferencias_stock (id, taller_id, numero, fecha, origen_id, destino_id, idem_key) VALUES ('x1', 't1', 1, '2026-10-01', 'd7', 'd7', 'k1')")).toThrow(/CHECK/);
+    db.close();
+  });
 });

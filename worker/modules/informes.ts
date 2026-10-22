@@ -78,7 +78,7 @@ async function ventasArticulo({ db, t, f, puedeCostos }: Ctx, orden: 'cantidad' 
   const filas = await all<any>(
     db,
     `SELECT COALESCE(a.codigo, '') AS codigo, vi.descripcion AS articulo, COALESCE(ca.nombre, 'Sin categoría') AS categoria, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total,
-            SUM(vi.cantidad * COALESCE(a.costo, 0)) AS costo
+            SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0)) AS costo
        ${FROM_ITEMS} WHERE ${cond.join(' AND ')} GROUP BY COALESCE(vi.articulo_id, vi.descripcion) ORDER BY ${orden === 'cantidad' ? 'cantidad' : orden === 'margen' ? '(total - costo)' : 'total'} DESC LIMIT ?`,
     ...params, limite,
   );
@@ -87,7 +87,7 @@ async function ventasArticulo({ db, t, f, puedeCostos }: Ctx, orden: 'cantidad' 
   if (puedeCostos) cols.push(col('costo', 'Costo', 'moneda'), col('margen', 'Margen', 'moneda'), col('margen_pct', 'Margen %', 'pct'));
   const tot: Record<string, number | string> = sumar(out, ['cantidad', 'total', ...(puedeCostos ? ['costo', 'margen'] : [])]);
   if (puedeCostos) tot.margen_pct = pctMargen(Number(tot.total), Number(tot.costo));
-  return { titulo: orden === 'cantidad' ? 'Productos más vendidos' : orden === 'margen' ? 'Rentabilidad por artículo' : 'Ventas por artículo', columnas: cols, filas: out, totales: tot, nota: puedeCostos ? 'El costo se calcula con el costo actual del artículo.' : undefined };
+  return { titulo: orden === 'cantidad' ? 'Productos más vendidos' : orden === 'margen' ? 'Rentabilidad por artículo' : 'Ventas por artículo', columnas: cols, filas: out, totales: tot, nota: puedeCostos ? 'El costo es el vigente al emitir cada comprobante (en comprobantes anteriores a esta función, el costo actual del artículo).' : undefined };
 }
 
 async function ventasCategoria(ctx: Ctx): Promise<Informe> {
@@ -95,7 +95,7 @@ async function ventasCategoria(ctx: Ctx): Promise<Informe> {
   const art = baseItems(f, t, 'articulo');
   const srv = baseItems(f, t, 'servicio');
   const [a, s] = await Promise.all([
-    all<any>(db, `SELECT COALESCE(ca.nombre, 'Sin categoría') AS categoria, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total, SUM(vi.cantidad * COALESCE(a.costo, 0)) AS costo ${FROM_ITEMS} WHERE ${art.cond.join(' AND ')} GROUP BY categoria ORDER BY total DESC`, ...art.params),
+    all<any>(db, `SELECT COALESCE(ca.nombre, 'Sin categoría') AS categoria, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total, SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0)) AS costo ${FROM_ITEMS} WHERE ${art.cond.join(' AND ')} GROUP BY categoria ORDER BY total DESC`, ...art.params),
     first<any>(db, `SELECT SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total ${FROM_ITEMS} WHERE ${srv.cond.join(' AND ')}`, ...srv.params),
   ]);
   const filas = [...a.map((x) => ({ ...x, cantidad: r3(x.cantidad), costo: Math.round(x.costo) })), ...(s?.total ? [{ categoria: 'Servicios y mano de obra', cantidad: r3(s.cantidad), total: s.total, costo: 0 }] : [])].map((x) => ({ ...x, margen: x.total - x.costo, margen_pct: pctMargen(x.total, x.costo) }));

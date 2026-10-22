@@ -3,10 +3,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Ban, CheckCheck, FilePlus2, PackageCheck, Pencil, Plus, Printer, Send, Trash2, Truck } from 'lucide-react';
+import { buscarPorCodigo } from '@/lib/lector';
 import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { invalidarDinero } from '@/lib/caja';
 import { cantidad, fecha, hoyISO, money, numero } from '@/lib/format';
+import { SelectorDeposito } from '@/components/SelectorDeposito';
 import { Aviso, Boton, Buscador, Campo, Cargando, Check, Encabezado, ErrorCaja, Input, InputMoneda, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useDebounce, useToast, Vacio, type Tono } from '@/components/ui';
 import { calcularOC } from '@shared/compras';
 import { ESTADO_OC_LABEL, ESTADOS_ORDEN_COMPRA, type EstadoOrdenCompra } from '@shared/dominio';
@@ -107,7 +109,7 @@ export function OrdenCompraForm() {
       {id && !existente ? <Cargando /> : !editable ? <Aviso tono="ambar">Esta orden ya no se puede editar.</Aviso> : (
         <div className="grid gap-5 xl:grid-cols-3">
           <Tarjeta titulo="Artículos a pedir" className="xl:col-span-2">
-            <Buscador value={q} onChange={setQ} placeholder="Buscar artículo para agregar…" />
+            <Buscador value={q} onChange={setQ} placeholder="Buscar artículo para agregar… (o escaneá el código de barras)" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (!a) return toast.error(new Error(`No hay ningún artículo con el código ${codigo}`)); setItems((prev) => (prev.some((i) => i.articulo_id === a.id) ? prev : [...prev, { articulo_id: a.id, nombre: a.nombre, codigo: a.codigo, cantidad: 1, costo_unitario: a.costo, desc_pct: 0 }])); setQ(''); }} />
             {dq && (
               <ul className="mt-1.5 max-h-56 divide-y divide-borde overflow-y-auto rounded-lg border border-borde text-sm">
                 {res.map((a) => (
@@ -188,10 +190,11 @@ function ModalRecepcion({ orden, onCerrar }: { orden: any; onCerrar: () => void 
   const [remito, setRemito] = useState('');
   const [notas, setNotas] = useState('');
   const [fechaR, setFechaR] = useState(hoyISO());
+  const [deposito, setDeposito] = useState('');
   const [clave] = useState(nuevaClave());
   const { puede } = useAuth();
   const m = useMutation({
-    mutationFn: () => api.post(`/ordenes-compra/${orden.id}/recepciones`, { fecha: fechaR, remito: remito.trim() || null, notas: notas || null, idem_key: clave, items: Object.entries(cant).filter(([, v]) => v > 0).map(([orden_item_id, cantidad]) => ({ orden_item_id, cantidad })) }),
+    mutationFn: () => api.post(`/ordenes-compra/${orden.id}/recepciones`, { fecha: fechaR, remito: remito.trim() || null, notas: notas || null, deposito_id: deposito || null, idem_key: clave, items: Object.entries(cant).filter(([, v]) => v > 0).map(([orden_item_id, cantidad]) => ({ orden_item_id, cantidad })) }),
     onSuccess: (r: any) => {
       invalidarDinero(qc);
       ['articulos', 'movimientos', 'reposicion', 'recepciones'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
@@ -210,6 +213,7 @@ function ModalRecepcion({ orden, onCerrar }: { orden: any; onCerrar: () => void 
           <Campo label="Remito del proveedor" hint="Un mismo remito no se carga dos veces"><Input value={remito} onChange={(e) => setRemito(e.target.value)} placeholder="0001-00001234" /></Campo>
           <Campo label="Fecha de recepción"><Input type="date" value={fechaR} max={hoyISO()} disabled={!puede('fechas.retroactivas')} onChange={(e) => setFechaR(e.target.value)} /></Campo>
           <Campo label="Notas"><Input value={notas} onChange={(e) => setNotas(e.target.value)} /></Campo>
+          <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito de ingreso" />
         </div>
         <ul className="divide-y divide-borde rounded-xl border border-borde">
           {pendientes.map((i: any) => {
@@ -321,6 +325,7 @@ export function OrdenCompraDetalle() {
               {o.recepciones_detalle.map((r: any) => (
                 <li key={r.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
                   <span className={r.estado === 'anulada' ? 'text-tenue line-through' : ''}>Recepción #{numero(r.numero)} · {fecha(r.fecha)}{r.remito ? ` · remito ${r.remito}` : ''} · {r.lineas} línea(s)</span>
+                  <Boton tam="sm" variante="fantasma" icono={<Printer className="size-4" />} onClick={() => window.open(`/imprimir/recepcion/${r.id}`, '_blank')}>Comprobante</Boton>
                   {r.estado === 'registrada' ? o.cerrada_con_faltante ? null : <Boton tam="sm" variante="fantasma" icono={<Ban className="size-4" />} onClick={() => setMotivoModal({ tipo: 'anular-recepcion', recepcion: r })}>Anular</Boton> : <Insignia>Anulada</Insignia>}
                 </li>
               ))}

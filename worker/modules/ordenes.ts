@@ -11,7 +11,7 @@ import { medioDeCobroInmediato, sentenciasCobro, validarMediosCobro, zCobroInmed
 import { exigirCajaAbiertaSiCorresponde } from '../lib/caja';
 import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
-import { agrupar, permiteNegativo, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
+import { agrupar, permiteNegativo, resolverDeposito, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { nombreUsuarioSql, sentenciaTareasDesdeTrabajos } from '../lib/tareas';
 import { ESTADOS_TAREA } from '../../shared/tempario';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
@@ -45,7 +45,7 @@ async function autorizarTrabajo(db: D1Database, s: Sesion, ordenId: string) {
 const ESTADOS_DE_TALLER = ['diagnostico', 'en_reparacion', 'esperando_repuestos', 'lista'];
 
 const SELECT = `SELECT o.*, c.nombre AS cliente, c.codigo AS cliente_codigo, c.telefono AS cliente_telefono, v.patente, v.anio, ma.nombre AS marca, mo.nombre AS modelo,
-    m.nombre AS mecanico, m.usuario_id AS mecanico_usuario_id, p.numero AS presupuesto_numero,
+    m.nombre AS mecanico, m.usuario_id AS mecanico_usuario_id, p.numero AS presupuesto_numero, dep.nombre AS deposito,
     (SELECT COUNT(*) FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id) AS tareas_total,
     (SELECT COUNT(*) FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id AND ta.estado = 'completada') AS tareas_completadas,
     (SELECT COUNT(*) FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id AND ta.estado = 'en_proceso') AS tareas_en_proceso,
@@ -60,9 +60,12 @@ const SELECT = `SELECT o.*, c.nombre AS cliente, c.codigo AS cliente_codigo, c.t
   LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id
   LEFT JOIN mecanicos m ON m.taller_id = o.taller_id AND m.id = o.mecanico_id
   LEFT JOIN presupuestos p ON p.taller_id = o.taller_id AND p.id = o.presupuesto_id
+  LEFT JOIN depositos dep ON dep.taller_id = o.taller_id AND dep.id = o.deposito_id
   LEFT JOIN ventas ve ON ve.taller_id = o.taller_id AND ve.orden_id = o.id AND ve.estado = 'emitida'`;
 
 const zOrden = zParametrosTotales.extend({
+  /** Depósito del que se descuentan los repuestos al dejar la orden lista (sin indicar: el principal). */
+  deposito_id: zId.nullish(),
   cliente_id: zId,
   vehiculo_id: zId,
   mecanico_id: zId.nullish(),
@@ -205,6 +208,42 @@ ordenes.get('/:id', async (c) => {
   });
 });
 
+/**
+ * Rentabilidad de la orden: repuestos (venta contra costo) y mano de obra facturada. El costo de los repuestos es el que tenían al
+ * descontarse del stock (no cambia si el costo del artículo se actualiza después); antes de descontarse es una estimación con el costo actual.
+ * La mano de obra no tiene costo cargado en Fierro (no hay costo por hora): se muestra su venta y las horas cronometradas.
+ */
+ordenes.get('/:id/rentabilidad', requirePerm('ordenes.ver', 'margenes.ver', 'presupuestos.valorizados.ver'), async (c) => {
+  const s = c.get('sesion');
+  const id = c.req.param('id');
+  const o = await first<{ stock_aplicado: number; estado: string }>(c.env.DB, 'SELECT stock_aplicado, estado FROM ordenes WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  if (!o) throw notFound('Orden de trabajo');
+  const repuestos = await all<{ articulo_id: string; descripcion: string; cantidad: number; venta: number; costo_actual: number; costo_consumido: number | null }>(
+    c.env.DB,
+    `SELECT oi.articulo_id, oi.descripcion, SUM(oi.cantidad) AS cantidad, SUM(oi.subtotal) AS venta, COALESCE(a.costo, 0) AS costo_actual,
+            (SELECT SUM(-sm.cantidad * COALESCE(sm.costo_unitario, a.costo, 0)) FROM stock_movimientos sm
+              WHERE sm.taller_id = oi.taller_id AND sm.origen_tipo = 'orden' AND sm.origen_id = oi.orden_id AND sm.articulo_id = oi.articulo_id AND sm.tipo IN ('consumo_ot','reverso_ot')) AS costo_consumido
+       FROM orden_items oi LEFT JOIN articulos a ON a.taller_id = oi.taller_id AND a.id = oi.articulo_id
+      WHERE oi.taller_id = ? AND oi.orden_id = ? AND oi.tipo = 'articulo' GROUP BY oi.articulo_id`,
+    s.tallerId, id,
+  );
+  const lineas = repuestos.map((r) => {
+    const costo = o.stock_aplicado && r.costo_consumido != null ? Math.round(r.costo_consumido) : Math.round(r.cantidad * r.costo_actual);
+    return { descripcion: r.descripcion, cantidad: r.cantidad, venta: r.venta, costo, margen: r.venta - costo };
+  });
+  const mo = await first<{ venta: number }>(c.env.DB, "SELECT COALESCE(SUM(subtotal), 0) AS venta FROM orden_items WHERE taller_id = ? AND orden_id = ? AND tipo IN ('servicio','libre')", s.tallerId, id);
+  const t = await first<{ seg: number }>(c.env.DB, 'SELECT COALESCE(SUM(duracion_seg), 0) AS seg FROM orden_tiempos WHERE taller_id = ? AND orden_id = ?', s.tallerId, id);
+  const venta = lineas.reduce((a, l) => a + l.venta, 0);
+  const costo = lineas.reduce((a, l) => a + l.costo, 0);
+  return c.json({
+    costo_estimado: !o.stock_aplicado,
+    repuestos: lineas,
+    totales_repuestos: { venta, costo, margen: venta - costo },
+    mano_obra: { venta: mo?.venta ?? 0, horas_registradas_seg: t?.seg ?? 0 },
+    nota: 'Importes de las líneas antes de descuentos e impuestos globales de la orden.',
+  });
+});
+
 ordenes.post('/', requirePerm('ordenes.crear'), async (c) => {
   const s = c.get('sesion');
   const d = await body(c, zOrden);
@@ -216,15 +255,16 @@ ordenes.post('/', requirePerm('ordenes.crear'), async (c) => {
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
   const t = totales(items, d);
   const lista = await resolverLista(c.env.DB, s.tallerId, d.lista_precio_id);
+  const deposito = await resolverDeposito(c.env.DB, s.tallerId, d.deposito_id);
   const id = uid();
   const stmts: Stmt[] = [
     ...seqIncrementar(c.env.DB, s.tallerId, 'orden'),
     c.env.DB.prepare(
-      `INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, mecanico_id, km_ingreso, falla_reportada, diagnostico, observaciones, fecha_ingreso, fecha_prometida, created_by, ${COLS_TOTALES})
-       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${COLS_TOTALES.split(',').map(() => '?').join(',')})`,
+      `INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, mecanico_id, km_ingreso, falla_reportada, diagnostico, observaciones, fecha_ingreso, fecha_prometida, created_by, deposito_id, ${COLS_TOTALES})
+       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${COLS_TOTALES.split(',').map(() => '?').join(',')})`,
     ).bind(
       id, s.tallerId, s.tallerId, 'orden', d.cliente_id, d.vehiculo_id, d.mecanico_id ?? null, d.km_ingreso ?? null, d.falla_reportada, d.diagnostico, d.observaciones,
-      new Date().toISOString(), d.fecha_prometida ?? null, s.usuarioId, ...valoresTotales(d, t),
+      new Date().toISOString(), d.fecha_prometida ?? null, s.usuarioId, deposito, ...valoresTotales(d, t),
     ),
     ...sentenciasItems(c.env.DB, 'orden_items', 'orden_id', s.tallerId, id, items, t.subtotales),
     sentenciaTareasDesdeTrabajos(c.env.DB, s.tallerId, id, s.usuarioId),
@@ -295,9 +335,9 @@ ordenes.post('/:id/estado', async (c) => {
   await autorizarTrabajo(c.env.DB, s, id);
   // Quien solo puede actualizar sus órdenes asignadas no entrega ni cancela (eso es del mostrador) ni reabre órdenes cerradas.
   if (!tiene(s, 'ordenes.modificar') && !ESTADOS_DE_TALLER.includes(d.estado)) throw forbidden('Tu rol puede pasar la orden a diagnóstico, en reparación, esperando repuestos o lista');
-  const o = await first<{ estado: EstadoOT; stock_aplicado: number; version: number; numero: number; vehiculo_id: string }>(
+  const o = await first<{ estado: EstadoOT; stock_aplicado: number; version: number; numero: number; vehiculo_id: string; deposito_id: string | null }>(
     c.env.DB,
-    'SELECT estado, stock_aplicado, version, numero, vehiculo_id FROM ordenes WHERE taller_id = ? AND id = ?',
+    'SELECT estado, stock_aplicado, version, numero, vehiculo_id, deposito_id FROM ordenes WHERE taller_id = ? AND id = ?',
     s.tallerId,
     id,
   );
@@ -323,7 +363,7 @@ ordenes.post('/:id/estado', async (c) => {
     const items = await all<{ articulo_id: string | null; cantidad: number }>(c.env.DB, "SELECT articulo_id, cantidad FROM orden_items WHERE taller_id = ? AND orden_id = ? AND tipo = 'articulo'", s.tallerId, id);
     const porArticulo = agrupar(items);
     const negativo = await permiteNegativo(c.env.DB, s.tallerId);
-    if (aplicar && !negativo) await verificarDisponible(c.env.DB, s.tallerId, porArticulo);
+    if (aplicar && !negativo) await verificarDisponible(c.env.DB, s.tallerId, porArticulo, o.deposito_id);
     for (const [articuloId, cant] of porArticulo) {
       stmts.push(
         ...sentenciasMovimiento(
@@ -331,6 +371,7 @@ ordenes.post('/:id/estado', async (c) => {
           s.tallerId,
           {
             articuloId,
+            depositoId: o.deposito_id,
             delta: aplicar ? -cant : cant,
             tipo: aplicar ? 'consumo_ot' : 'reverso_ot',
             origenTipo: 'orden',
@@ -446,9 +487,11 @@ ordenes.post('/:id/comprobante', requirePerm('ventas.emitir', 'ordenes.ver'), as
     c.env.DB.prepare('UPDATE ventas SET lista_precio_id = (SELECT lista_precio_id FROM ordenes WHERE taller_id = ? AND id = ?), lista_precio_nombre = (SELECT lista_precio_nombre FROM ordenes WHERE taller_id = ? AND id = ?) WHERE taller_id = ? AND id = ?')
       .bind(s.tallerId, id, s.tallerId, id, s.tallerId, ventaId),
     c.env.DB.prepare(
-      `INSERT INTO venta_items (id, taller_id, venta_id, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, alicuota_iva, subtotal)
+      `INSERT INTO venta_items (id, taller_id, venta_id, orden, tipo, articulo_id, servicio_id, descripcion, cantidad, precio_unitario, desc_pct, alicuota_iva, subtotal, costo_unitario)
        SELECT lower(hex(randomblob(16))), oi.taller_id, ?, oi.orden, oi.tipo, oi.articulo_id, oi.servicio_id, oi.descripcion, oi.cantidad, oi.precio_unitario, oi.desc_pct,
-              COALESCE(a.alicuota_iva, 21), oi.subtotal
+              COALESCE(a.alicuota_iva, 21), oi.subtotal,
+              CASE WHEN oi.tipo = 'articulo' THEN COALESCE((SELECT sm.costo_unitario FROM stock_movimientos sm WHERE sm.taller_id = oi.taller_id AND sm.origen_tipo = 'orden' AND sm.origen_id = oi.orden_id
+                      AND sm.articulo_id = oi.articulo_id AND sm.tipo = 'consumo_ot' ORDER BY sm.created_at DESC LIMIT 1), a.costo) END
          FROM orden_items oi LEFT JOIN articulos a ON a.taller_id = oi.taller_id AND a.id = oi.articulo_id
         WHERE oi.taller_id = ? AND oi.orden_id = ?`,
     ).bind(ventaId, s.tallerId, id),
@@ -469,6 +512,26 @@ ordenes.get('/resumen/estados', async (c) => {
   const s = c.get('sesion');
   const ac = alcance(s);
   return c.json(await all(c.env.DB, `SELECT o.estado, COUNT(*) AS cantidad FROM ordenes o WHERE o.taller_id = ? ${ac.cond.map((x) => `AND ${x}`).join(' ')} GROUP BY o.estado`, s.tallerId, ...ac.params));
+});
+
+// ───── Depósito del que se descuentan los repuestos ─────
+// Regla de stock de la OT: los repuestos se descuentan UNA sola vez, al pasar a "Lista para entregar" (o "Entregada" desde un estado sin stock),
+// del depósito de la orden; al reabrirla vuelven al mismo depósito. Por eso el depósito solo se cambia mientras el stock no está descontado.
+ordenes.patch('/:id/deposito', requirePerm('ordenes.modificar'), async (c) => {
+  const s = c.get('sesion');
+  const id = c.req.param('id');
+  const d = await body(c, z.object({ deposito_id: zId.nullable() }));
+  const o = await first<{ estado: EstadoOT; stock_aplicado: number }>(c.env.DB, 'SELECT estado, stock_aplicado FROM ordenes WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  if (!o) throw notFound('Orden de trabajo');
+  if (o.estado === 'entregada' || o.estado === 'cancelada') throw conflict('La orden está cerrada');
+  if (o.stock_aplicado) throw conflict('Los repuestos ya se descontaron del depósito: volvé la orden a "En reparación" para cambiarlo');
+  const dep = await resolverDeposito(c.env.DB, s.tallerId, d.deposito_id);
+  await c.env.DB.batch([
+    guard(c.env.DB, 'NOT EXISTS (SELECT 1 FROM ordenes WHERE taller_id = ? AND id = ? AND stock_aplicado = 0)', s.tallerId, id),
+    c.env.DB.prepare("UPDATE ordenes SET deposito_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE taller_id = ? AND id = ?").bind(dep, s.tallerId, id),
+    auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'deposito', { deposito_id: dep }),
+  ]);
+  return c.json({ ok: true });
 });
 
 // ───── Asignación: mecánico responsable y participantes ─────

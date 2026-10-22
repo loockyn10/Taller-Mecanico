@@ -6,7 +6,7 @@ import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zCantidad, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, hoy, lotes, SEQ_VALOR, seqIncrementar, uid, type Stmt } from '../lib/db';
 import { requirePerm, tiene } from '../lib/auth';
-import { permiteNegativo, sentenciasMovimiento } from '../lib/stock';
+import { permiteNegativo, resolverDeposito, sentenciasMovimiento } from '../lib/stock';
 import { calcularOC } from '../../shared/compras';
 import { redondearCantidad as r3 } from '../../shared/dominio';
 
@@ -120,11 +120,12 @@ inventario.post('/reposicion/ordenes', requirePerm('compras.gestionar'), async (
 });
 
 // ───────────── Conteo físico ─────────────
-const SELECT_CONTEO = `SELECT cn.*, u.nombre AS usuario, ca.nombre AS categoria,
+const SELECT_CONTEO = `SELECT cn.*, u.nombre AS usuario, ca.nombre AS categoria, COALESCE(dp.nombre, (SELECT nombre FROM depositos WHERE taller_id = cn.taller_id AND es_principal = 1)) AS deposito,
     (SELECT COUNT(*) FROM conteo_items i WHERE i.taller_id = cn.taller_id AND i.conteo_id = cn.id) AS articulos,
     (SELECT COUNT(*) FROM conteo_items i WHERE i.taller_id = cn.taller_id AND i.conteo_id = cn.id AND i.contado IS NOT NULL) AS contados,
     (SELECT COUNT(*) FROM conteo_items i WHERE i.taller_id = cn.taller_id AND i.conteo_id = cn.id AND i.contado IS NOT NULL AND ROUND(i.contado - i.stock_sistema, 3) <> 0) AS con_diferencia
-  FROM conteos cn LEFT JOIN usuarios u ON u.taller_id = cn.taller_id AND u.id = cn.usuario_id LEFT JOIN categorias_articulo ca ON ca.taller_id = cn.taller_id AND ca.id = cn.categoria_id`;
+  FROM conteos cn LEFT JOIN usuarios u ON u.taller_id = cn.taller_id AND u.id = cn.usuario_id LEFT JOIN categorias_articulo ca ON ca.taller_id = cn.taller_id AND ca.id = cn.categoria_id
+  LEFT JOIN depositos dp ON dp.taller_id = cn.taller_id AND dp.id = cn.deposito_id`;
 
 inventario.get('/inventario/conteos', requirePerm('stock.ver'), async (c) => {
   const s = c.get('sesion');
@@ -133,21 +134,27 @@ inventario.get('/inventario/conteos', requirePerm('stock.ver'), async (c) => {
 
 inventario.post('/inventario/conteos', requirePerm('stock.ajustar'), async (c) => {
   const s = c.get('sesion');
-  const d = await body(c, z.object({ descripcion: zTextoOpt(200), categoria_id: zId.nullish(), solo_con_stock: z.boolean().default(false) }));
+  const d = await body(c, z.object({ descripcion: zTextoOpt(200), categoria_id: zId.nullish(), solo_con_stock: z.boolean().default(false), deposito_id: zId.nullish() }));
+  const deposito = await resolverDeposito(c.env.DB, s.tallerId, d.deposito_id);
   if (d.categoria_id && !(await first(c.env.DB, 'SELECT 1 FROM categorias_articulo WHERE taller_id = ? AND id = ?', s.tallerId, d.categoria_id))) throw badRequest('Categoría inexistente');
-  const abierto = await first(c.env.DB, "SELECT 1 FROM conteos WHERE taller_id = ? AND estado = 'abierto' AND COALESCE(categoria_id, '') = COALESCE(?, '')", s.tallerId, d.categoria_id ?? null);
+  const abierto = await first(
+    c.env.DB,
+    "SELECT 1 FROM conteos WHERE taller_id = ? AND estado = 'abierto' AND COALESCE(categoria_id, '') = COALESCE(?, '') AND COALESCE(deposito_id, (SELECT id FROM depositos WHERE taller_id = ? AND es_principal = 1)) = COALESCE(?, (SELECT id FROM depositos WHERE taller_id = ? AND es_principal = 1))",
+    s.tallerId, d.categoria_id ?? null, s.tallerId, deposito, s.tallerId,
+  );
   if (abierto) throw conflict('Ya hay un conteo abierto para ese alcance: terminalo o cancelalo antes de iniciar otro', 'conteo_abierto');
   const id = uid();
   await c.env.DB.batch([
     ...seqIncrementar(c.env.DB, s.tallerId, 'conteo'),
-    c.env.DB.prepare(`INSERT INTO conteos (id, taller_id, numero, fecha, descripcion, categoria_id, usuario_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?)`).bind(id, s.tallerId, s.tallerId, 'conteo', hoy(), d.descripcion, d.categoria_id ?? null, s.usuarioId),
+    c.env.DB.prepare(`INSERT INTO conteos (id, taller_id, numero, fecha, descripcion, categoria_id, usuario_id, deposito_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?)`).bind(id, s.tallerId, s.tallerId, 'conteo', hoy(), d.descripcion, d.categoria_id ?? null, s.usuarioId, deposito),
     c.env.DB
       .prepare(
         `INSERT INTO conteo_items (id, taller_id, conteo_id, articulo_id, stock_sistema, costo)
-         SELECT lower(hex(randomblob(16))), taller_id, ?, id, ROUND(stock, 3), costo FROM articulos
-          WHERE taller_id = ? AND activo = 1 ${d.categoria_id ? 'AND categoria_id = ?' : ''} ${d.solo_con_stock ? 'AND ROUND(stock, 3) <> 0' : ''}`,
+         SELECT lower(hex(randomblob(16))), a.taller_id, ?, a.id, ROUND(COALESCE(sd.stock, 0), 3), a.costo FROM articulos a
+           LEFT JOIN stock_depositos sd ON sd.taller_id = a.taller_id AND sd.articulo_id = a.id AND sd.deposito_id = COALESCE(?, (SELECT id FROM depositos WHERE taller_id = a.taller_id AND es_principal = 1))
+          WHERE a.taller_id = ? AND a.activo = 1 ${d.categoria_id ? 'AND a.categoria_id = ?' : ''} ${d.solo_con_stock ? 'AND ROUND(COALESCE(sd.stock, 0), 3) <> 0' : ''}`,
       )
-      .bind(id, s.tallerId, ...(d.categoria_id ? [d.categoria_id] : [])),
+      .bind(id, deposito, s.tallerId, ...(d.categoria_id ? [d.categoria_id] : [])),
     guard(c.env.DB, 'NOT EXISTS (SELECT 1 FROM conteo_items WHERE taller_id = ? AND conteo_id = ?)', s.tallerId, id),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'conteo', id, 'iniciar'),
   ]).catch((e) => {
@@ -163,10 +170,12 @@ inventario.get('/inventario/conteos/:id', requirePerm('stock.ver'), async (c) =>
   if (!cn) throw notFound('Conteo');
   const items = await all<any>(
     c.env.DB,
-    `SELECT i.articulo_id, a.codigo, a.nombre, a.unidad, i.stock_sistema, i.contado, a.stock AS stock_actual, i.costo,
+    `SELECT i.articulo_id, a.codigo, a.codigo_barras, a.nombre, a.unidad, i.stock_sistema, i.contado, COALESCE(sd.stock, 0) AS stock_actual, i.costo,
             CASE WHEN i.contado IS NULL THEN NULL ELSE ROUND(i.contado - i.stock_sistema, 3) END AS diferencia
-       FROM conteo_items i JOIN articulos a ON a.taller_id = i.taller_id AND a.id = i.articulo_id WHERE i.taller_id = ? AND i.conteo_id = ? ORDER BY a.nombre COLLATE NOCASE`,
-    s.tallerId, cn.id,
+       FROM conteo_items i JOIN articulos a ON a.taller_id = i.taller_id AND a.id = i.articulo_id
+       LEFT JOIN stock_depositos sd ON sd.taller_id = i.taller_id AND sd.articulo_id = i.articulo_id AND sd.deposito_id = COALESCE(?, (SELECT id FROM depositos WHERE taller_id = i.taller_id AND es_principal = 1))
+      WHERE i.taller_id = ? AND i.conteo_id = ? ORDER BY a.nombre COLLATE NOCASE`,
+    cn.deposito_id ?? null, s.tallerId, cn.id,
   );
   const conCosto = tiene(s, 'precios.costo.ver');
   const conValor = items.map((i) => ({ ...i, costo: conCosto ? i.costo : undefined, valor_diferencia: !conCosto || i.diferencia == null ? null : Math.round(i.diferencia * i.costo) }));
@@ -193,14 +202,15 @@ const MAX_AJUSTES_POR_CONTEO = 250;
 inventario.post('/inventario/conteos/:id/aplicar', requirePerm('stock.ajustar'), async (c) => {
   const s = c.get('sesion');
   const id = c.req.param('id');
-  const cn = await first<{ estado: string; numero: number }>(c.env.DB, 'SELECT estado, numero FROM conteos WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  const cn = await first<{ estado: string; numero: number; deposito_id: string | null }>(c.env.DB, 'SELECT estado, numero, deposito_id FROM conteos WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!cn) throw notFound('Conteo');
   if (cn.estado !== 'abierto') throw conflict('El conteo ya fue aplicado o cancelado');
   const dif = await all<{ articulo_id: string; nombre: string; stock_sistema: number; contado: number; stock_actual: number; costo: number }>(
     c.env.DB,
-    `SELECT i.articulo_id, a.nombre, i.stock_sistema, i.contado, a.stock AS stock_actual, i.costo FROM conteo_items i JOIN articulos a ON a.taller_id = i.taller_id AND a.id = i.articulo_id
+    `SELECT i.articulo_id, a.nombre, i.stock_sistema, i.contado, COALESCE(sd.stock, 0) AS stock_actual, i.costo FROM conteo_items i JOIN articulos a ON a.taller_id = i.taller_id AND a.id = i.articulo_id
+       LEFT JOIN stock_depositos sd ON sd.taller_id = i.taller_id AND sd.articulo_id = i.articulo_id AND sd.deposito_id = COALESCE(?, (SELECT id FROM depositos WHERE taller_id = i.taller_id AND es_principal = 1))
       WHERE i.taller_id = ? AND i.conteo_id = ? AND i.contado IS NOT NULL AND ROUND(i.contado - i.stock_sistema, 3) <> 0`,
-    s.tallerId, id,
+    cn.deposito_id ?? null, s.tallerId, id,
   );
   if (dif.length > MAX_AJUSTES_POR_CONTEO) throw badRequest(`Un conteo no puede ajustar más de ${MAX_AJUSTES_POR_CONTEO} artículos a la vez: dividilo por categoría`);
   const negativo = await permiteNegativo(c.env.DB, s.tallerId);
@@ -210,7 +220,7 @@ inventario.post('/inventario/conteos/:id/aplicar', requirePerm('stock.ajustar'),
   for (const i of dif) {
     const delta = r3(i.contado - i.stock_sistema);
     if (!negativo && r3(i.stock_actual + delta) < 0) negados.push(`${i.nombre} (stock actual ${i.stock_actual}, diferencia ${delta})`);
-    stmts.push(...sentenciasMovimiento(c.env.DB, s.tallerId, { articuloId: i.articulo_id, delta, tipo: 'ajuste', motivo: 'conteo', origenTipo: 'conteo', origenId: id, idemKey: `conteo:${id}:${i.articulo_id}`, notas: `Conteo físico #${cn.numero}`, costoUnitario: i.costo, usuarioId: s.usuarioId }, negativo));
+    stmts.push(...sentenciasMovimiento(c.env.DB, s.tallerId, { articuloId: i.articulo_id, depositoId: cn.deposito_id, delta, tipo: 'ajuste', motivo: 'conteo', origenTipo: 'conteo', origenId: id, idemKey: `conteo:${id}:${i.articulo_id}`, notas: `Conteo físico #${cn.numero}`, costoUnitario: i.costo, usuarioId: s.usuarioId }, negativo));
   }
   if (negados.length) throw conflict(`El ajuste dejaría stock negativo: ${negados.join('; ')}`, 'stock_insuficiente');
   stmts.push(

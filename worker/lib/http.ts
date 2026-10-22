@@ -60,6 +60,7 @@ export function traducirErrorDb(e: unknown): ApiError | null {
     if (msg.includes('asistencias.taller_id, asistencias.usuario_id')) return conflict('Ya tenés una jornada abierta', 'jornada_abierta');
     if (msg.includes('orden_tiempos.taller_id, orden_tiempos.usuario_id')) return conflict('Ya tenés el cronómetro en marcha en otra orden', 'cronometro_en_marcha');
     if (msg.includes('mecanicos.taller_id, mecanicos.usuario_id')) return conflict('Ese usuario ya está vinculado a un mecánico', 'duplicado');
+    if (msg.includes('codigo_barras')) return conflict('Ya hay un artículo con ese código de barras', 'duplicado');
     if (msg.includes('codigo')) return conflict('Ya existe un registro con ese código', 'duplicado');
     if (msg.includes('nombre')) return conflict('Ya existe un registro con ese nombre', 'duplicado');
     return conflict('Registro duplicado', 'duplicado');

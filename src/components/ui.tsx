@@ -155,11 +155,19 @@ export function InputMoneda({ value, onChange, className, ...p }: { value: numbe
   );
 }
 
-export function Buscador({ value, onChange, placeholder = 'Buscar…', className, autoFocus }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean }) {
+export function Buscador({ value, onChange, placeholder = 'Buscar…', className, autoFocus, onEnter }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string; autoFocus?: boolean; onEnter?: (v: string) => void }) {
   return (
     <div className={cn('relative', className)}>
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="pl-9" autoFocus={autoFocus} />
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onEnter ? (e) => { if (e.key === 'Enter' && value.trim()) { e.preventDefault(); onEnter(value.trim()); } } : undefined}
+        placeholder={placeholder}
+        className="pl-9"
+        autoFocus={autoFocus}
+        enterKeyHint={onEnter ? 'search' : undefined}
+      />
     </div>
   );
 }

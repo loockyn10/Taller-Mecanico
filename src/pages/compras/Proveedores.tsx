@@ -235,7 +235,7 @@ export function ProveedorDetalle() {
             { clave: 'd', titulo: 'Pagos', alinear: 'derecha', render: (m: any) => (m.debe ? money(m.debe) : ''), movil: 'meta' },
             { clave: 'h', titulo: 'Compras', alinear: 'derecha', render: (m: any) => (m.haber ? money(m.haber) : ''), movil: 'meta' },
             { clave: 's', titulo: 'Saldo', alinear: 'derecha', render: (m: any) => money(m.saldo), movil: 'derecha' },
-            { clave: 'a', titulo: '', render: (m: any) => m.tipo === 'pago' && !m.anulado ? <Boton tam="sm" variante="fantasma" icono={<Ban className="size-4" />} onClick={() => setAnular(m)}>Anular</Boton> : null, movil: 'meta' },
+            { clave: 'a', titulo: '', render: (m: any) => m.tipo === 'pago' ? <span className="flex gap-1"><Boton tam="sm" variante="fantasma" icono={<Printer className="size-4" />} onClick={() => window.open(`/imprimir/orden-pago/${m.id}`, '_blank')}>Orden de pago</Boton>{!m.anulado && <Boton tam="sm" variante="fantasma" icono={<Ban className="size-4" />} onClick={() => setAnular(m)}>Anular</Boton>}</span> : null, movil: 'meta' },
           ]}
         />
       </Tarjeta>

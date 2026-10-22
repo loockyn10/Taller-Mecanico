@@ -15,7 +15,8 @@ import { exigirCajaAbiertaSiCorresponde, guardCajaObligatoria, reversoDeCobro } 
 import { fechaComercial } from '../lib/fechas';
 import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
-import { agrupar, permiteNegativo, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
+import { agrupar, permiteNegativo, resolverDeposito, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
+import { puedeCosto } from '../lib/privacidad';
 import { MEDIOS_PAGO } from '../../shared/dominio';
 
 export const comercial = new Hono<AppEnv>();
@@ -51,7 +52,12 @@ comercial.get('/ventas/:id', requirePerm('ventas.ver'), async (c) => {
   const s = c.get('sesion');
   const v = await first(c.env.DB, `${SELECT_VENTA} WHERE ve.taller_id = ? AND ve.id = ?`, s.tallerId, c.req.param('id'));
   if (!v) throw notFound('Comprobante');
-  const items = await all(c.env.DB, 'SELECT * FROM venta_items WHERE taller_id = ? AND venta_id = ? ORDER BY orden', s.tallerId, v.id);
+  // El costo con el que se emitió es un dato de costo: solo lo ve quien tiene permiso.
+  const items = (await all<Record<string, unknown>>(c.env.DB, 'SELECT * FROM venta_items WHERE taller_id = ? AND venta_id = ? ORDER BY orden', s.tallerId, v.id)).map((i) => {
+    if (puedeCosto(s)) return i;
+    const { costo_unitario: _c, ...resto } = i;
+    return resto;
+  });
   const cobros = await all(
     c.env.DB,
     `SELECT co.id, co.numero, co.fecha, co.estado, ca.importe FROM cobro_aplicaciones ca JOIN cobros co ON co.taller_id = ca.taller_id AND co.id = ca.cobro_id
@@ -75,6 +81,8 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
       items: z.array(zItem).min(1).max(200),
       idem_key: z.string().min(8).max(80),
       lista_precio_id: zId.nullish(),
+      /** Depósito del que salen los repuestos (sin indicar: el principal). */
+      deposito_id: zId.nullish(),
       // Cobro inmediato del total (venta de contado): se registra en la misma transacción.
       cobro: zCobroInmediato.nullish(),
     }),
@@ -98,16 +106,19 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
   if (cobrar) await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   const porArticulo = agrupar(items.map((i) => ({ articulo_id: i.articulo_id ?? null, cantidad: i.cantidad })));
   const negativo = await permiteNegativo(c.env.DB, s.tallerId);
-  if (!negativo) await verificarDisponible(c.env.DB, s.tallerId, porArticulo);
+  const deposito = await resolverDeposito(c.env.DB, s.tallerId, d.deposito_id);
+  if (!negativo) await verificarDisponible(c.env.DB, s.tallerId, porArticulo, deposito);
   const alicuotas = await alicuotasItems(c.env.DB, s.tallerId, items);
   const id = uid();
   const stmts: Stmt[] = [
     ...seqIncrementar(c.env.DB, s.tallerId, 'venta'),
     c.env.DB.prepare(
-      `INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, condicion, observaciones, idem_key, created_by, ${COLS_TOTALES})
-       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ${COLS_TOTALES.split(',').map(() => '?').join(',')})`,
-    ).bind(id, s.tallerId, s.tallerId, 'venta', clienteId, fecha, d.condicion, d.observaciones, d.idem_key, s.usuarioId, ...valoresTotales(d, t)),
+      `INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, condicion, observaciones, idem_key, created_by, deposito_id, ${COLS_TOTALES})
+       VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ${COLS_TOTALES.split(',').map(() => '?').join(',')})`,
+    ).bind(id, s.tallerId, s.tallerId, 'venta', clienteId, fecha, d.condicion, d.observaciones, d.idem_key, s.usuarioId, deposito, ...valoresTotales(d, t)),
     ...sentenciasItems(c.env.DB, 'venta_items', 'venta_id', s.tallerId, id, items, t.subtotales, alicuotas),
+    // Costo vigente al emitir: el comprobante conserva su rentabilidad aunque el costo cambie después.
+    c.env.DB.prepare("UPDATE venta_items SET costo_unitario = (SELECT a.costo FROM articulos a WHERE a.taller_id = venta_items.taller_id AND a.id = venta_items.articulo_id) WHERE taller_id = ? AND venta_id = ? AND tipo = 'articulo'").bind(s.tallerId, id),
     ...(lista ? [sentenciaListaEnDocumento(c.env.DB, 'ventas', s.tallerId, id, lista)] : []),
   ];
   for (const [articuloId, cant] of porArticulo) {
@@ -115,7 +126,7 @@ comercial.post('/ventas', requirePerm('ventas.emitir'), async (c) => {
       ...sentenciasMovimiento(
         c.env.DB,
         s.tallerId,
-        { articuloId, delta: -cant, tipo: 'venta', origenTipo: 'venta', origenId: id, idemKey: `venta:${d.idem_key}:${articuloId}`, usuarioId: s.usuarioId },
+        { articuloId, depositoId: deposito, delta: -cant, tipo: 'venta', origenTipo: 'venta', origenId: id, idemKey: `venta:${d.idem_key}:${articuloId}`, usuarioId: s.usuarioId },
         negativo,
       ),
     );
@@ -145,9 +156,9 @@ comercial.post('/ventas/:id/anular', requirePerm('ventas.anular'), async (c) => 
   const s = c.get('sesion');
   const id = c.req.param('id');
   const { motivo } = await body(c, z.object({ motivo: z.string().trim().min(3).max(300) }));
-  const v = await first<{ estado: string; cobrado: number; orden_id: string | null; numero: number }>(
+  const v = await first<{ estado: string; cobrado: number; orden_id: string | null; numero: number; deposito_id: string | null }>(
     c.env.DB,
-    'SELECT estado, cobrado, orden_id, numero FROM ventas WHERE taller_id = ? AND id = ?',
+    'SELECT estado, cobrado, orden_id, numero, deposito_id FROM ventas WHERE taller_id = ? AND id = ?',
     s.tallerId,
     id,
   );
@@ -169,7 +180,7 @@ comercial.post('/ventas/:id/anular', requirePerm('ventas.anular'), async (c) => 
         ...sentenciasMovimiento(
           c.env.DB,
           s.tallerId,
-          { articuloId, delta: cant, tipo: 'anulacion_venta', origenTipo: 'venta', origenId: id, idemKey: `anulacion_venta:${id}:${articuloId}`, notas: `Anulación comprobante #${v.numero}`, usuarioId: s.usuarioId },
+          { articuloId, depositoId: v.deposito_id, delta: cant, tipo: 'anulacion_venta', origenTipo: 'venta', origenId: id, idemKey: `anulacion_venta:${id}:${articuloId}`, notas: `Anulación comprobante #${v.numero}`, usuarioId: s.usuarioId },
           true,
         ),
       );
@@ -359,9 +370,43 @@ comercial.get('/cuentas-corrientes', requirePerm('ventas.ver'), async (c) => {
   );
 });
 
+/**
+ * Control de consistencia de las cuentas corrientes de clientes: el saldo mostrado (comprobantes vigentes menos lo cobrado) debe coincidir
+ * con la suma de los cobros vigentes aplicados, y ningún comprobante puede tener cobrado mayor al total. Devuelve las diferencias (vacío = todo en orden).
+ */
+comercial.get('/cuentas-corrientes/verificar', requirePerm('ventas.ver', 'finanzas.ver'), async (c) => {
+  const s = c.get('sesion');
+  const comprobantes = await all(
+    c.env.DB,
+    `SELECT ve.id, ve.numero, ve.total, ve.cobrado,
+            COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca JOIN cobros co ON co.taller_id = ca.taller_id AND co.id = ca.cobro_id
+                       WHERE ca.taller_id = ve.taller_id AND ca.venta_id = ve.id AND co.estado = 'registrado'), 0) AS aplicado
+       FROM ventas ve WHERE ve.taller_id = ? AND ve.estado = 'emitida'
+        AND (ve.cobrado <> COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca JOIN cobros co ON co.taller_id = ca.taller_id AND co.id = ca.cobro_id
+                       WHERE ca.taller_id = ve.taller_id AND ca.venta_id = ve.id AND co.estado = 'registrado'), 0) OR ve.cobrado > ve.total) LIMIT 200`,
+    s.tallerId,
+  );
+  const cobros = await all(
+    c.env.DB,
+    `SELECT co.id, co.numero, co.total, COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca WHERE ca.taller_id = co.taller_id AND ca.cobro_id = co.id), 0) AS aplicado
+       FROM cobros co WHERE co.taller_id = ? AND co.estado = 'registrado'
+        AND co.total <> COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca WHERE ca.taller_id = co.taller_id AND ca.cobro_id = co.id), 0) LIMIT 200`,
+    s.tallerId,
+  );
+  const medios = await all(
+    c.env.DB,
+    `SELECT co.id, co.numero, co.total, COALESCE((SELECT SUM(cm.importe) FROM cobro_medios cm WHERE cm.taller_id = co.taller_id AND cm.cobro_id = co.id), 0) AS medios
+       FROM cobros co WHERE co.taller_id = ? AND co.estado = 'registrado'
+        AND co.total <> COALESCE((SELECT SUM(cm.importe) FROM cobro_medios cm WHERE cm.taller_id = co.taller_id AND cm.cobro_id = co.id), 0) LIMIT 200`,
+    s.tallerId,
+  );
+  return c.json({ ok: !comprobantes.length && !cobros.length && !medios.length, comprobantes_con_diferencia: comprobantes, cobros_sin_cuadrar: cobros, cobros_con_medios_distintos: medios });
+});
+
 comercial.get('/cuentas-corrientes/:clienteId', requirePerm('ventas.ver'), async (c) => {
   const s = c.get('sesion');
   const clienteId = c.req.param('clienteId');
+  const { desde } = query(c, z.object({ desde: zFecha.optional() }));
   const cli = await first(c.env.DB, 'SELECT id, codigo, nombre, telefono, documento, email FROM clientes WHERE taller_id = ? AND id = ?', s.tallerId, clienteId);
   if (!cli) throw notFound('Cliente');
   const movs = await all<{ fecha: string; debe: number; haber: number }>(
@@ -373,7 +418,10 @@ comercial.get('/cuentas-corrientes/:clienteId', requirePerm('ventas.ver'), async
     s.tallerId, clienteId, s.tallerId, clienteId,
   );
   let saldo = 0;
-  const conSaldo = movs.map((m) => ((saldo += m.debe - m.haber), { ...m, saldo }));
+  const todos = movs.map((m) => ((saldo += m.debe - m.haber), { ...m, saldo }));
+  // Con "desde", el estado de cuenta arranca con el saldo anterior (lo que se arrastra de antes de esa fecha).
+  const saldoAnterior = desde ? ([...todos].reverse().find((m) => m.fecha < desde)?.saldo ?? 0) : 0;
+  const conSaldo = desde ? todos.filter((m) => m.fecha >= desde) : todos;
   const pendientes = await all(c.env.DB, `${SELECT_VENTA} WHERE ve.taller_id = ? AND ve.cliente_id = ? AND ve.estado = 'emitida' AND ve.cobrado < ve.total ORDER BY ve.fecha`, s.tallerId, clienteId);
   // Historial de pagos del cliente, incluidos los anulados (con sus medios).
   const cobros = await all<{ id: string }>(c.env.DB, `${SELECT_COBRO} WHERE co.taller_id = ? AND co.cliente_id = ? ORDER BY co.numero DESC LIMIT 200`, s.tallerId, clienteId);
@@ -383,5 +431,5 @@ comercial.get('/cuentas-corrientes/:clienteId', requirePerm('ventas.ver'), async
       WHERE cm.taller_id = ? AND cm.cobro_id IN (SELECT id FROM cobros WHERE taller_id = ? AND cliente_id = ? ORDER BY numero DESC LIMIT 200)`,
     s.tallerId, s.tallerId, clienteId,
   );
-  return c.json({ cliente: cli, movimientos: conSaldo, saldo, pendientes, cobros: cobros.map((co) => ({ ...co, medios: medios.filter((m) => m.cobro_id === co.id) })) });
+  return c.json({ cliente: cli, desde: desde ?? null, saldo_anterior: saldoAnterior, movimientos: conSaldo, saldo, pendientes, cobros: cobros.map((co) => ({ ...co, medios: medios.filter((m) => m.cobro_id === co.id) })) });
 });

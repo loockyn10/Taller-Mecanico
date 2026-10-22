@@ -91,6 +91,8 @@ export function sentenciasAltaTaller(db: D1Database, d: DatosTallerNuevo): { tal
     db.prepare('INSERT INTO taller_config (taller_id, iva_default) VALUES (?, ?)').bind(tallerId, d.condicion_iva === 'responsable_inscripto' ? 21 : 0),
     db.prepare("INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES (?, ?, ?, ?, 'propietario', 'propietario', ?)")
       .bind(propietarioId, tallerId, d.propietario.email, d.propietario.nombre, d.propietario.password_hash),
+    // Depósito principal: el que usan por defecto todas las operaciones de stock.
+    db.prepare("INSERT INTO depositos (id, taller_id, nombre, es_principal) VALUES (?, ?, 'Depósito principal', 1)").bind(uid(), tallerId),
     // Cliente genérico para ventas de mostrador
     db.prepare("INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES (?, ?, 0, 'Consumidor final')").bind(uid(), tallerId),
     db.prepare("INSERT INTO secuencias (taller_id, clave, valor) VALUES (?, 'cliente', 0)").bind(tallerId),

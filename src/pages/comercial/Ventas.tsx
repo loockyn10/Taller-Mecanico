@@ -5,6 +5,7 @@ import { Ban, Plus, Printer, Receipt, ShoppingBag, Wallet } from 'lucide-react';
 import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, money, numero } from '@/lib/format';
+import { SelectorDeposito } from '@/components/SelectorDeposito';
 import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Input, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useDebounce, useToast, Vacio } from '@/components/ui';
 import { EstadoCobroBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, useDefectosEnParams, type ItemUI, type ParamsUI } from '@/components/EditorItems';
@@ -165,6 +166,7 @@ export function VentaMostrador() {
   const [ref, setRef] = useState('');
   const [extra, setExtra] = useState<ExtraMedio>(extraVacio());
   const [clave] = useState(nuevaClave());
+  const [deposito, setDeposito] = useState('');
   const total = calcularTotales(items, params).total;
   const chequeSinNumero = condicion === 'contado' && !!errorMedio(medio, ref, extra, 'cobro');
   // "Contado" se cobra en el acto; sin cliente identificado sólo se puede vender de contado.
@@ -172,7 +174,7 @@ export function VentaMostrador() {
   const m = useMutation({
     mutationFn: () =>
       api.post('/ventas', {
-        cliente_id: cliente?.id ?? null, condicion, observaciones: obs, items: itemsParaApi(items), idem_key: clave, lista_precio_id: lista, ...params,
+        cliente_id: cliente?.id ?? null, condicion, observaciones: obs, items: itemsParaApi(items), idem_key: clave, lista_precio_id: lista, deposito_id: deposito || null, ...params,
         cobro: condicion === 'contado' ? { medio, referencia: ref.trim() || null, ...extraAPayload(medio, extra, 'cobro') } : null,
       }),
     onSuccess: (v) => {
@@ -189,6 +191,7 @@ export function VentaMostrador() {
       <div className="grid gap-5 xl:grid-cols-3">
         <Tarjeta titulo="Ítems" className="xl:col-span-2">
           <div className="mb-4"><SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} /></div>
+          <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito de salida" className="mb-4 max-w-sm" />
           <EditorItems items={items} onItems={setItems} params={params} onParams={setParams} listaId={lista} />
         </Tarjeta>
         <div className="space-y-5">

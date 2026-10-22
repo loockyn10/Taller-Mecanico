@@ -35,7 +35,8 @@ export function ImprimirDinero() {
   const { tipo, id } = useParams();
   const { me } = useAuth();
   const esRecibo = tipo === 'recibo';
-  const { data: d, isLoading, error } = useQuery({ queryKey: ['imprimir', tipo, id], queryFn: () => api.get(esRecibo ? `/cobros/${id}` : `/cuentas-corrientes/${id}`) });
+  const desde = new URLSearchParams(window.location.search).get('desde') ?? '';
+  const { data: d, isLoading, error } = useQuery({ queryKey: ['imprimir', tipo, id, desde], queryFn: () => api.get(esRecibo ? `/cobros/${id}` : `/cuentas-corrientes/${id}${desde ? `?desde=${desde}` : ''}`) });
   const { data: cfg } = useQuery({ queryKey: ['config'], queryFn: () => api.get('/taller/config') });
   useEffect(() => {
     if (d && cfg) {
@@ -103,7 +104,7 @@ export function ImprimirDinero() {
         </>
       ) : (
         <>
-          <Cabecera cfg={cfg} titulo="Estado de cuenta"><div>Emitido: {fecha(new Date().toISOString())}</div></Cabecera>
+          <Cabecera cfg={cfg} titulo="Estado de cuenta"><div>Emitido: {fecha(new Date().toISOString())}</div>{desde && <div>Desde: {fecha(desde)}</div>}</Cabecera>
           <section className="border-b border-slate-300 py-3">
             <div className="text-[11px] font-semibold uppercase text-slate-500">Cliente</div>
             <div className="font-medium">{d.cliente.nombre}</div>
@@ -113,6 +114,7 @@ export function ImprimirDinero() {
           <table className="mt-3 w-full border-collapse">
             <thead><tr className="border-b border-black text-left text-[11px] uppercase"><th className="py-1.5">Fecha</th><th className="py-1.5">Concepto</th><th className="py-1.5 text-right">Debe</th><th className="py-1.5 text-right">Haber</th><th className="py-1.5 text-right">Saldo</th></tr></thead>
             <tbody>
+              {d.desde && <tr className="border-b border-slate-200 font-medium"><td className="py-1.5">{fecha(d.desde)}</td><td className="py-1.5" colSpan={3}>Saldo anterior</td><td className="py-1.5 text-right">{money(d.saldo_anterior)}</td></tr>}
               {d.movimientos.map((m: any) => (
                 <tr key={`${m.tipo}-${m.id}`} className="border-b border-slate-200">
                   <td className="py-1.5">{fecha(m.fecha)}</td>

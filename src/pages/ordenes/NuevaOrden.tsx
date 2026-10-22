@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { km } from '@/lib/format';
+import { SelectorDeposito } from '@/components/SelectorDeposito';
 import { Boton, Campo, Encabezado, Input, Select, Tarjeta, Textarea, useToast } from '@/components/ui';
 import { SelectorCliente, SelectorVehiculo, useMecanicos, type ClienteMin } from '@/components/selectores';
 import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
@@ -19,6 +20,7 @@ export function NuevaOrden() {
   const [kmActual, setKmActual] = useState<number | null>(null);
   const [kmIngreso, setKmIngreso] = useState('');
   const [mecanico, setMecanico] = useState('');
+  const [deposito, setDeposito] = useState('');
   const [falla, setFalla] = useState('');
   const [prometida, setPrometida] = useState('');
   const [obs, setObs] = useState('');
@@ -44,6 +46,7 @@ export function NuevaOrden() {
         cliente_id: cliente!.id,
         vehiculo_id: vehiculoId,
         mecanico_id: mecanico || null,
+        deposito_id: deposito || null,
         km_ingreso: kmIngreso ? Number(kmIngreso) : null,
         falla_reportada: falla,
         observaciones: obs,
@@ -107,6 +110,7 @@ export function NuevaOrden() {
                   {mecanicos.filter((x) => x.activo).map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}
                 </Select>
               </Campo>
+              <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito de los repuestos" hint="De dónde se descuentan al dejar la orden lista" />
               <Campo label="Fecha prometida de entrega">
                 <Input type="date" value={prometida} onChange={(e) => setPrometida(e.target.value)} />
               </Campo>

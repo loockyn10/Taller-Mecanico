@@ -4,11 +4,12 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowRight, ClipboardCheck, MessageCircle, Pencil, Printer, Receipt, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
+import { duracion, fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, ResumenTotales, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 import { Cronometro, EquipoOrden, NotasTecnicas, Tareas } from '@/components/TrabajoMecanico';
+import { SelectorDeposito, useDepositos } from '@/components/SelectorDeposito';
 import { useMecanicos } from '@/components/selectores';
 import { ModalCobro, ModalEmitirCobrar } from '@/components/Cobro';
 import { SelectorLista } from '@/components/SelectorLista';
@@ -152,6 +153,14 @@ export function OrdenDetalle() {
   const [cab, setCab] = useState({ mecanico_id: '', km_ingreso: '', falla_reportada: '', diagnostico: '', observaciones: '', fecha_prometida: '' });
   const [lista, setLista] = useState<string | null>(null);
   const [emitirCobrar, setEmitirCobrar] = useState(false);
+  const { data: depositos = [] } = useDepositos();
+  const cambiarDeposito = useMutation({
+    mutationFn: (deposito_id: string) => api.patch(`/ordenes/${id}/deposito`, { deposito_id: deposito_id || null }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orden', id] }); toast.ok('Depósito actualizado'); },
+    onError: toast.error,
+  });
+  const verRentabilidad = puede('margenes.ver') && puede('presupuestos.valorizados.ver') && puede('ordenes.ver');
+  const { data: rent } = useQuery({ queryKey: ['orden', id, 'rentabilidad', o?.version, o?.estado], queryFn: () => api.get<any>(`/ordenes/${id}/rentabilidad`), enabled: verRentabilidad && !!o });
 
   useEffect(() => {
     if (!o) return;
@@ -372,6 +381,13 @@ export function OrdenDetalle() {
               {o.resultado && <Dato etiqueta="Resultado del trabajo" className="col-span-2">{o.resultado}</Dato>}
               <Dato etiqueta="Observaciones" className="col-span-2">{o.observaciones}</Dato>
               {o.lista_precio_nombre && <Dato etiqueta="Lista de precios" className="col-span-2">{o.lista_precio_nombre}</Dato>}
+              {depositos.filter((d) => d.activo).length > 1 && (
+                <Dato etiqueta="Depósito de repuestos" className="col-span-2">
+                  {puedeModificar && !cerrada && !o.stock_aplicado
+                    ? <SelectorDeposito valor={o.deposito_id ?? ''} onCambio={(v) => cambiarDeposito.mutate(v)} label="" />
+                    : (o.deposito ?? depositos.find((d) => d.es_principal)?.nombre)}
+                </Dato>
+              )}
             </dl>
           </Tarjeta>
           {valorizado ? (
@@ -381,6 +397,18 @@ export function OrdenDetalle() {
               {o.stock_aplicado ? <p className="mt-2 text-xs text-tenue">Repuestos descontados del stock.</p> : null}
             </Tarjeta>
           ) : null}
+          {rent && (
+            <Tarjeta titulo="Rentabilidad" subtitulo={rent.costo_estimado ? 'Costo estimado (los repuestos aún no se descontaron)' : 'Con el costo de los repuestos al descontarlos del stock'}>
+              <dl className="space-y-1.5 text-sm">
+                <div className="flex justify-between"><dt className="text-tenue">Repuestos (venta)</dt><dd className="tabular-nums">{money(rent.totales_repuestos.venta)}</dd></div>
+                <div className="flex justify-between"><dt className="text-tenue">Repuestos (costo)</dt><dd className="tabular-nums">{money(rent.totales_repuestos.costo)}</dd></div>
+                <div className="flex justify-between border-t border-borde pt-1.5 font-medium"><dt>Margen de repuestos</dt><dd className="tabular-nums">{money(rent.totales_repuestos.margen)}</dd></div>
+                <div className="flex justify-between"><dt className="text-tenue">Mano de obra (venta)</dt><dd className="tabular-nums">{money(rent.mano_obra.venta)}</dd></div>
+                {rent.mano_obra.horas_registradas_seg > 0 && <div className="flex justify-between"><dt className="text-tenue">Horas cronometradas</dt><dd className="tabular-nums">{duracion(rent.mano_obra.horas_registradas_seg)}</dd></div>}
+              </dl>
+              <p className="mt-2 text-xs text-tenue">{rent.nota} La mano de obra no tiene costo cargado.</p>
+            </Tarjeta>
+          )}
           {o.estado === 'cancelada' && puedeModificar && (
             <Boton
               className="w-full"

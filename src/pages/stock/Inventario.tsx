@@ -7,6 +7,7 @@ import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { descargarCSV, pesosCSV } from '@/lib/csv';
 import { cantidad, fecha, money, numero } from '@/lib/format';
+import { SelectorDeposito } from '@/components/SelectorDeposito';
 import { Aviso, Boton, Buscador, Campo, Cargando, Check, Encabezado, ErrorCaja, Indicador, Input, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
 
 const coma = (n: number) => String(n).replace('.', ',');
@@ -171,11 +172,11 @@ function Conteos() {
   const [sp, setSp] = useSearchParams();
   const abierto = sp.get('conteo');
   const [nuevo, setNuevo] = useState(false);
-  const [f, setF] = useState({ categoria_id: '', descripcion: '', solo_con_stock: false });
+  const [f, setF] = useState({ categoria_id: '', descripcion: '', solo_con_stock: false, deposito_id: '' });
   const { data: cats = [] } = useQuery({ queryKey: ['categorias-articulo'], queryFn: () => api.get<any[]>('/categorias-articulo') });
   const { data = [], isLoading, error, refetch } = useQuery({ queryKey: ['inventario', 'conteos'], queryFn: () => api.get<any[]>('/inventario/conteos') });
   const iniciar = useMutation({
-    mutationFn: () => api.post('/inventario/conteos', { categoria_id: f.categoria_id || null, descripcion: f.descripcion || null, solo_con_stock: f.solo_con_stock }),
+    mutationFn: () => api.post('/inventario/conteos', { categoria_id: f.categoria_id || null, descripcion: f.descripcion || null, solo_con_stock: f.solo_con_stock, deposito_id: f.deposito_id || null }),
     onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['inventario'] }); setNuevo(false); setSp({ tab: 'conteos', conteo: r.id }); toast.ok('Conteo iniciado'); },
     onError: toast.error,
   });
@@ -193,7 +194,7 @@ function Conteos() {
             columnas={[
               { clave: 'n', titulo: 'Conteo', render: (c: any) => <span className="font-medium">#{numero(c.numero)}</span>, movil: 'titulo' },
               { clave: 'f', titulo: 'Fecha', render: (c: any) => fecha(c.fecha), movil: 'meta' },
-              { clave: 'a', titulo: 'Alcance', render: (c: any) => `${c.categoria ?? 'Todo el inventario'}${c.descripcion ? ` · ${c.descripcion}` : ''}`, movil: 'subtitulo' },
+              { clave: 'a', titulo: 'Alcance', render: (c: any) => `${c.deposito ? `${c.deposito} · ` : ''}${c.categoria ?? 'Todo el inventario'}${c.descripcion ? ` · ${c.descripcion}` : ''}`, movil: 'subtitulo' },
               { clave: 'c', titulo: 'Contados', alinear: 'derecha', render: (c: any) => `${c.contados}/${c.articulos}`, movil: 'meta' },
               { clave: 'd', titulo: 'Con diferencia', alinear: 'derecha', render: (c: any) => c.con_diferencia, movil: 'meta' },
               { clave: 'e', titulo: 'Estado', render: (c: any) => <Insignia tono={c.estado === 'abierto' ? 'azul' : c.estado === 'aplicado' ? 'verde' : 'gris'}>{c.estado === 'abierto' ? 'Abierto' : c.estado === 'aplicado' ? 'Aplicado' : 'Cancelado'}</Insignia>, movil: 'derecha' },
@@ -205,6 +206,7 @@ function Conteos() {
         <div className="space-y-3">
           <Aviso>Se toma una foto del stock actual de los artículos activos. Conviene contar por categoría o estantería para no pasar de 250 ajustes por conteo.</Aviso>
           <Campo label="Categoría"><Select value={f.categoria_id} onChange={(e) => setF({ ...f, categoria_id: e.target.value })}><option value="">Todo el inventario</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</Select></Campo>
+          <SelectorDeposito valor={f.deposito_id} onCambio={(v) => setF({ ...f, deposito_id: v })} label="Depósito a contar" />
           <Campo label="Descripción (opcional)"><Input value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} placeholder="Ej.: estantería 2" /></Campo>
           <Check checked={f.solo_con_stock} onChange={(v) => setF({ ...f, solo_con_stock: v })} label="Incluir sólo artículos con stock distinto de cero" />
         </div>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Boxes, Download } from 'lucide-react';
+import { buscarPorCodigo } from '@/lib/lector';
 import { api, qs } from '@/lib/api';
 import { cantidad, fechaHora } from '@/lib/format';
 import { descargarCSV } from '@/lib/csv';
@@ -41,7 +42,7 @@ export function Movimientos() {
             <div className="flex h-10 items-center justify-between rounded-lg border border-marca-300 bg-marca-50 px-3 text-sm"><span className="truncate font-medium">{articuloId.nombre}</span><button type="button" className="ml-2 text-marca-700 underline" onClick={() => { setArticuloId(null); setQ(''); }}>Quitar</button></div>
           ) : (
             <>
-              <Buscador value={q} onChange={setQ} placeholder="Filtrar por artículo…" />
+              <Buscador value={q} onChange={setQ} placeholder="Filtrar por artículo… (o escaneá el código de barras)" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (a) { setArticuloId({ id: a.id, nombre: a.nombre }); setQ(''); } }} />
               {sugeridos.length > 0 && (
                 <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-borde bg-white text-sm shadow-lg">
                   {sugeridos.map((a) => <li key={a.id}><button type="button" className="w-full px-3 py-2 text-left hover:bg-marca-50" onClick={() => { setArticuloId({ id: a.id, nombre: a.nombre }); setQ(''); }}>{a.nombre} <span className="text-tenue">{a.codigo ?? ''}</span></button></li>)}
@@ -69,6 +70,7 @@ export function Movimientos() {
               { clave: 't', titulo: 'Tipo', render: (m) => TIPOS_MOVIMIENTO_STOCK_LABEL[m.tipo] ?? m.tipo, movil: 'subtitulo' },
               { clave: 'm', titulo: 'Motivo', render: (m) => motivo(m) || '—', movil: 'meta' },
               { clave: 'o', titulo: 'Origen', render: origen, movil: 'meta' },
+              { clave: 'd', titulo: 'Depósito', render: (m) => m.deposito ?? '—', movil: 'oculta' },
               { clave: 'u', titulo: 'Usuario', render: (m) => m.usuario ?? '—', movil: 'oculta' },
               { clave: 'c', titulo: 'Cantidad', alinear: 'derecha', render: (m) => <span className={m.cantidad < 0 ? 'text-red-600' : 'text-emerald-700'}>{m.cantidad > 0 ? '+' : ''}{cantidad(m.cantidad)}</span>, movil: 'derecha' },
               { clave: 's', titulo: 'Stock resultante', alinear: 'derecha', render: (m) => cantidad(m.stock_resultante), movil: 'meta' },
