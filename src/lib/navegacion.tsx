@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import {
   Banknote, BarChart3, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, PackageSearch, Package, PiggyBank,
   Receipt, Scale, ScrollText, Settings, ShoppingCart, Tags, Truck, UserCog, Users, Wallet, Wrench, KeyRound, ShieldCheck, History, UserRound, BadgeDollarSign, ShoppingBasket,
-  Warehouse, Clock, MonitorSmartphone, UsersRound, CalendarCheck, HardHat, Timer, Activity,
+  Warehouse, Clock, MonitorSmartphone, Rocket, Upload, UsersRound, CalendarCheck, HardHat, Timer, Activity,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permiso } from '@shared/permisos';
@@ -114,6 +114,8 @@ export const GRUPOS: GrupoNav[] = [
     id: 'admin', titulo: 'Administración', icono: ic(Settings),
     items: [
       item('config', 'Configuración', '/configuracion', Settings, 'taller datos parametros preferencias documentos medios de pago', undefined, 'taller'),
+      item('puesta', 'Puesta en marcha', '/puesta-en-marcha', Rocket, 'configuracion inicial asistente pasos primeros pasos empezar progreso', 'config.editar'),
+      item('importar', 'Importar datos', '/importar', Upload, 'excel csv planilla importacion migrar clientes vehiculos articulos proveedores sistema anterior', 'datos.importar'),
       item('catalogos', 'Marcas y categorías', '/configuracion?tab=catalogos', Tags, 'catalogos marcas modelos categorias', 'catalogo.editar'),
       item('licencia', 'Licencia', '/configuracion?tab=licencia', ShieldCheck, 'plan suscripcion usuarios', 'licencia.ver'),
       item('actividad', 'Actividad', '/configuracion?tab=auditoria', History, 'auditoria registro cambios', 'config.editar'),

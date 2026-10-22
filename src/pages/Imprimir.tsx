@@ -49,6 +49,7 @@ function ImprimirDocumento() {
       </div>
       <header className="flex items-start justify-between border-b-2 border-black pb-4">
         <div>
+          {cfg.config.tiene_logo && <img src={`/api/taller/logo?v=${cfg.config.updated_at}`} alt="" className="mb-2 max-h-16 max-w-[220px] object-contain" />}
           <div className="text-xl font-bold">{t.nombre}</div>
           {t.razon_social && <div>{t.razon_social}</div>}
           <div>{[t.direccion, t.localidad].filter(Boolean).join(', ')}</div>

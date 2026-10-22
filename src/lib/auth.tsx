@@ -6,7 +6,7 @@ import type { Permiso, Rol } from '@shared/permisos';
 export interface Me {
   usuario: { id: string; nombre: string; email: string; rol: Rol; nivel: 'propietario' | 'administrador' | 'empleado'; tiene_pin: boolean };
   permisos: Permiso[];
-  taller: { id: string; nombre: string; razon_social: string | null; cuit: string | null; condicion_iva: string; direccion: string | null; localidad: string | null; telefono: string | null; email: string | null; zona_horaria: string; reloj_activo: boolean };
+  taller: { id: string; nombre: string; razon_social: string | null; cuit: string | null; condicion_iva: string; direccion: string | null; localidad: string | null; provincia: string | null; telefono: string | null; email: string | null; zona_horaria: string; reloj_activo: boolean; asistente_pendiente: boolean; tiene_logo: boolean };
   licencia: { plan: string; usuarios_incluidos: number; usuarios_adicionales: number; estado: string } | null;
 }
 

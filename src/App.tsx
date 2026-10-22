@@ -6,6 +6,7 @@ import { useAuth } from './lib/auth';
 import { Layout } from './components/Layout';
 import { Cargando, Vacio } from './components/ui';
 import { Login } from './pages/Login';
+import { Activar } from './pages/Activar';
 import { Inicio } from './pages/Inicio';
 import { Ordenes } from './pages/ordenes/Ordenes';
 import { NuevaOrden } from './pages/ordenes/NuevaOrden';
@@ -50,6 +51,8 @@ const Informes = lazy(() => import('./pages/Informes').then((m) => ({ default: m
 const Mantenimientos = lazy(() => import('./pages/Mantenimientos').then((m) => ({ default: m.Mantenimientos })));
 const Tempario = lazy(() => import('./pages/Tempario').then((m) => ({ default: m.Tempario })));
 const Productividad = lazy(() => import('./pages/Productividad').then((m) => ({ default: m.Productividad })));
+const PuestaEnMarcha = lazy(() => import('./pages/config/PuestaEnMarcha').then((m) => ({ default: m.PuestaEnMarcha })));
+const Importar = lazy(() => import('./pages/config/Importar').then((m) => ({ default: m.Importar })));
 const Contabilidad = lazy(() => import('./pages/Contabilidad').then((m) => ({ default: m.Contabilidad })));
 
 /** Guarda de ruta: el menú ya oculta las opciones, pero quien escribe la dirección a mano ve un aviso claro (la API igual verifica en el servidor). */
@@ -60,7 +63,9 @@ function Requiere({ permiso, children }: { permiso: Permiso; children: ReactElem
 
 /** Quien solo ve sus órdenes asignadas (mecánico) empieza en "Mis trabajos" en vez del tablero general. */
 function Portada() {
-  const { soloMecanico } = useAuth();
+  const { soloMecanico, me, puede } = useAuth();
+  // Taller recién activado: la primera vez se muestra el asistente de configuración inicial (se puede cerrar y retomar después).
+  if (me?.taller.asistente_pendiente && puede('config.editar')) return <Navigate to="/puesta-en-marcha" replace />;
   return soloMecanico ? <Navigate to="/mis-trabajos" replace /> : <Inicio />;
 }
 
@@ -70,6 +75,8 @@ export function App() {
   // Reloj compartido: pantalla propia (se autentica con el dispositivo, no con una sesión). En un navegador que quedó
   // dedicado al reloj no se puede navegar por el resto del sistema.
   if (pathname === '/reloj') return <Reloj />;
+  // Activación de un taller nuevo con el enlace de invitación (todavía no hay sesión).
+  if (pathname === '/activar') return <Activar />;
   if (modoReloj()) return <Navigate to="/reloj" replace />;
   if (cargando) return <Cargando texto="Iniciando Fierro…" />;
   if (!me) {
@@ -138,6 +145,8 @@ export function App() {
         <Route path="ordenes-compra/:id/editar" element={<Requiere permiso="compras.gestionar"><OrdenCompraForm /></Requiere>} />
         <Route path="facturas-proveedor" element={<Requiere permiso="compras.ver"><FacturasProveedor /></Requiere>} />
         <Route path="configuracion" element={<Configuracion />} />
+        <Route path="puesta-en-marcha" element={<Requiere permiso="config.editar"><PuestaEnMarcha /></Requiere>} />
+        <Route path="importar" element={<Requiere permiso="datos.importar"><Importar /></Requiere>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

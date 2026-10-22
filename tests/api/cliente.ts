@@ -1,4 +1,6 @@
 // Cliente HTTP mínimo con manejo de cookie de sesión, para las pruebas de integración.
+import fs from 'node:fs';
+import path from 'node:path';
 import { PLATFORM_TOKEN, PUERTO } from './global-setup';
 
 const BASE = `http://127.0.0.1:${PUERTO}`;
@@ -98,3 +100,39 @@ export async function nuevoPersonal(owner: Api, rol: string, extra: Record<strin
 }
 
 export const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Ejecuta SQL directamente sobre la base LOCAL de ensayo (la carpeta temporal que levantó global-setup). Solo para preparar situaciones que la API
+ * no permite crear (por ejemplo, una invitación ya vencida). Nunca apunta a una base remota.
+ */
+export async function sqlLocal(sql: string): Promise<void> {
+  const estado = process.env.FIERRO_TEST_ESTADO;
+  if (!estado) throw new Error('No hay base local de ensayo');
+  const dir = path.join(estado, 'v3', 'd1', 'miniflare-D1DatabaseObject');
+  const archivo = fs.readdirSync(dir).find((f) => f.endsWith('.sqlite'));
+  if (!archivo) throw new Error('No se encontró la base local de ensayo');
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(path.join(dir, archivo));
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec(sql);
+  } finally {
+    db.close();
+  }
+}
+
+/** Lee filas de la base LOCAL de ensayo (ver sqlLocal). */
+export async function consultaLocal<T = Record<string, unknown>>(sql: string): Promise<T[]> {
+  const estado = process.env.FIERRO_TEST_ESTADO;
+  if (!estado) throw new Error('No hay base local de ensayo');
+  const dir = path.join(estado, 'v3', 'd1', 'miniflare-D1DatabaseObject');
+  const archivo = fs.readdirSync(dir).find((f) => f.endsWith('.sqlite'));
+  if (!archivo) throw new Error('No se encontró la base local de ensayo');
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(path.join(dir, archivo), { readOnly: true });
+  try {
+    return db.prepare(sql).all() as T[];
+  } finally {
+    db.close();
+  }
+}

@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { money, numero } from '@/lib/format';
 import { useEstadoCaja } from '@/lib/caja';
+import { usePuesta } from '@/lib/puesta';
 import { Boton, Cargando, Encabezado, ErrorCaja, Indicador, Tarjeta, Vacio } from '@/components/ui';
 import { EstadoOTBadge, EstadoTurnoBadge } from '@/components/estados';
 import { ESTADOS_OT_ABIERTOS, ESTADO_OT_LABEL, type EstadoOT } from '@shared/dominio';
@@ -13,6 +14,7 @@ export function Inicio() {
   const { me, puede } = useAuth();
   const nav = useNavigate();
   const { data: caja } = useEstadoCaja();
+  const { data: puesta } = usePuesta();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get('/dashboard'), refetchInterval: 60_000 });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
@@ -33,6 +35,16 @@ export function Inicio() {
           </>
         }
       />
+
+      {puesta && puesta.pendientes > 0 && (
+        <Link to="/puesta-en-marcha" className="mb-4 block rounded-xl border border-marca-200 bg-marca-50/60 px-4 py-3 hover:bg-marca-50">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-semibold text-marca-800">Configuración del taller: {puesta.completos} de {puesta.total} pasos completos</span>
+            <span className="text-sm text-marca-700">Continuar →</span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${(puesta.completos / puesta.total) * 100}%` }} /></div>
+        </Link>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {puede('ordenes.ver') && <Indicador titulo="OT abiertas" valor={abiertas} detalle={`${cant('en_reparacion')} en reparación`} icono={<Wrench className="size-5" />} onClick={() => nav('/ordenes')} />}

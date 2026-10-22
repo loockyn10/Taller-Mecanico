@@ -69,6 +69,7 @@ export const PERMISOS = [
   'reloj.administrar', // dispositivos de reloj compartido y PIN del personal
   // ── Administración del taller
   'config.editar',
+  'datos.importar', // importar clientes, vehículos, artículos y proveedores desde Excel o CSV (además del permiso de crear/editar de cada tipo)
   'licencia.ver',
   'registros.eliminar',
   'fechas.retroactivas', // cargar comprobantes con fecha pasada
@@ -295,7 +296,8 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'asistencia.ver': { etiqueta: 'Ver asistencia del personal' },
   'asistencia.corregir': { etiqueta: 'Corregir fichajes' },
   'reloj.administrar': { etiqueta: 'Administrar reloj compartido y PIN' },
-  'config.editar': { etiqueta: 'Configurar el taller' },
+  'config.editar': { etiqueta: 'Configurar el taller', ayuda: 'Datos del negocio, preferencias y asistente de puesta en marcha' },
+  'datos.importar': { etiqueta: 'Importar datos desde Excel o CSV', ayuda: 'Además hacen falta los permisos de crear (y de editar, para actualizar) de lo que se importa: clientes, vehículos, artículos o proveedores' },
   'licencia.ver': { etiqueta: 'Ver la licencia' },
   'registros.eliminar': { etiqueta: 'Eliminar clientes y vehículos' },
   'fechas.retroactivas': { etiqueta: 'Cargar operaciones con fecha anterior' },
@@ -311,7 +313,7 @@ export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Caja, bancos y finanzas', permisos: ['caja.operar', 'finanzas.ver', 'gastos.gestionar', 'bancos.ver', 'bancos.gestionar', 'bancos.ajustar', 'cheques.gestionar', 'tesoreria.ver', 'contabilidad.ver', 'contabilidad.gestionar'] },
   { titulo: 'Informes', permisos: ['reportes.ver', 'informes.exportar', 'productividad.ver'] },
   { titulo: 'Personal y asistencia', permisos: ['usuarios.gestionar', 'permisos.gestionar', 'asistencia.fichar', 'asistencia.ver', 'asistencia.corregir', 'reloj.administrar'] },
-  { titulo: 'Administración', permisos: ['config.editar', 'licencia.ver', 'registros.eliminar', 'fechas.retroactivas'] },
+  { titulo: 'Administración', permisos: ['config.editar', 'datos.importar', 'licencia.ver', 'registros.eliminar', 'fechas.retroactivas'] },
 ];
 
 /** Zonas horarias ofrecidas para el taller (la hora siempre se registra en el servidor, en UTC). */

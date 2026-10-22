@@ -6,6 +6,11 @@
 //   npm run platform -- suspender <tallerId>
 //   npm run platform -- activar <tallerId>
 //
+// Alta comercial por invitación (el cliente crea su propia contraseña y configura su taller; el token de plataforma nunca sale de acá):
+//   npm run platform -- invitar [--nombre "Taller X"] [--email dueño@x.com] [--adicionales 2] [--dias 7] [--notas "Venta #12"]
+//   npm run platform -- invitaciones
+//   npm run platform -- revocar <invitacionId>
+//
 // Variables: FIERRO_API (por defecto http://127.0.0.1:8787) y PLATFORM_ADMIN_TOKEN (por defecto se lee de .dev.vars).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -66,8 +71,29 @@ async function main() {
     case 'activar':
       console.log(await plataforma('PATCH', `/talleres/${o._[0]}/licencia`, { estado: 'activa' }));
       break;
+    case 'invitar': {
+      const r = await plataforma('POST', '/invitaciones', {
+        nombre_sugerido: o.nombre || undefined,
+        email: o.email || undefined,
+        usuarios_adicionales: Number(o.adicionales ?? 0),
+        dias: Number(o.dias ?? 7),
+        notas: o.notas || undefined,
+      });
+      console.log(`Invitación creada (id ${r.id}). Vence: ${r.vence_at}`);
+      console.log('Enlace de activación (se muestra una sola vez; es de un solo uso):');
+      console.log(r.enlace);
+      break;
+    }
+    case 'invitaciones': {
+      const t = await plataforma('GET', '/invitaciones');
+      console.table(t.map((x) => ({ id: x.id, para: x.nombre_sugerido ?? x.email_destino ?? '', estado: x.estado, vence: x.vence_at, taller: x.taller ?? '' })));
+      break;
+    }
+    case 'revocar':
+      console.log(await plataforma('POST', `/invitaciones/${o._[0]}/revocar`, {}));
+      break;
     default:
-      console.log('Comandos: listar | crear-taller | licencia | suspender | activar (ver encabezado del archivo)');
+      console.log('Comandos: listar | crear-taller | licencia | suspender | activar | invitar | invitaciones | revocar (ver encabezado del archivo)');
   }
 }
 

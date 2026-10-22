@@ -47,19 +47,19 @@ auth.post('/logout', async (c) => {
 
 auth.get('/me', requireAuth, async (c) => {
   const s = c.get('sesion');
-  const taller = await first(c.env.DB, 'SELECT id, nombre, razon_social, cuit, condicion_iva, direccion, localidad, telefono, email FROM talleres WHERE id = ?', s.tallerId);
+  const taller = await first(c.env.DB, 'SELECT id, nombre, razon_social, cuit, condicion_iva, direccion, localidad, provincia, telefono, email FROM talleres WHERE id = ?', s.tallerId);
   const licencia = await first<{ plan: string; usuarios_incluidos: number; usuarios_adicionales: number; estado: string }>(
     c.env.DB,
     'SELECT plan, usuarios_incluidos, usuarios_adicionales, estado FROM licencias WHERE taller_id = ?',
     s.tallerId,
   );
-  const cfg = await first<{ zona_horaria: string; reloj_activo: number }>(c.env.DB, 'SELECT zona_horaria, reloj_activo FROM taller_config WHERE taller_id = ?', s.tallerId);
+  const cfg = await first<{ zona_horaria: string; reloj_activo: number; asistente_pendiente: number; tiene_logo: number }>(c.env.DB, 'SELECT zona_horaria, reloj_activo, asistente_pendiente, (logo IS NOT NULL) AS tiene_logo FROM taller_config WHERE taller_id = ?', s.tallerId);
   const yo = await first<{ pin_hash: string | null }>(c.env.DB, 'SELECT pin_hash FROM usuarios WHERE taller_id = ? AND id = ?', s.tallerId, s.usuarioId);
   return c.json({
     usuario: { id: s.usuarioId, nombre: s.nombre, email: s.email, rol: s.rol, nivel: s.nivel, tiene_pin: !!yo?.pin_hash },
     // Permisos efectivos (plantilla del rol + ajustes individuales): el frontend los usa solo para mostrar u ocultar opciones.
     permisos: [...s.permisos],
-    taller: { ...taller, zona_horaria: cfg?.zona_horaria ?? 'America/Argentina/Buenos_Aires', reloj_activo: !!cfg?.reloj_activo },
+    taller: { ...taller, zona_horaria: cfg?.zona_horaria ?? 'America/Argentina/Buenos_Aires', reloj_activo: !!cfg?.reloj_activo, asistente_pendiente: !!cfg?.asistente_pendiente, tiene_logo: !!cfg?.tiene_logo },
     licencia,
   });
 });

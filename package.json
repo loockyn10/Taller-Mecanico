@@ -17,7 +17,8 @@
     "test": "vitest run && vitest run --config vitest.api.config.ts",
     "test:unit": "vitest run",
     "test:api": "vitest run --config vitest.api.config.ts",
-    "platform": "node scripts/platform.mjs"
+    "platform": "node scripts/platform.mjs",
+    "verificar:online": "node scripts/verificar-online.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.75.0",

@@ -312,4 +312,67 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(todos('PRAGMA foreign_key_check')).toEqual([]);
     db.close();
   });
+
+  it('0011 no toca los datos existentes, los talleres previos no ven el asistente y la base protege códigos, invitaciones e importaciones', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    const migraciones = fs.readdirSync(path.join(RAIZ, 'migrations')).sort();
+    for (const m of migraciones.filter((f) => f < '0011')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all() as Array<Record<string, any>>;
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Viejo'), ('t2', 'Otro');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x'), ('u2', 't2', 'b@b.com', 'Otro', 'propietario', 'propietario', 'x');
+      INSERT INTO taller_config (taller_id) VALUES ('t1'), ('t2');
+      INSERT INTO clientes (id, taller_id, codigo, nombre, documento) VALUES ('c1', 't1', 1, 'Cliente', '30123456'), ('c2', 't2', 1, 'Cliente ajeno', '30123456');
+      INSERT INTO proveedores (id, taller_id, nombre, cuit) VALUES ('p1', 't1', 'Proveedor', '30-71234567-1');
+      INSERT INTO articulos (id, taller_id, codigo, nombre, costo, precio, stock) VALUES ('a1', 't1', 'A1', 'Filtro', 1000, 2000, 7.5);
+    `);
+    const foto = () => JSON.stringify({ c: todos('SELECT id, nombre, documento FROM clientes ORDER BY id'), p: todos('SELECT id, nombre, cuit FROM proveedores'), a: todos('SELECT id, codigo, stock FROM articulos'), u: todos('SELECT id, email FROM usuarios ORDER BY id') });
+    const antes = foto();
+    db.exec(leer('migrations', migraciones.find((f) => f.startsWith('0011'))!));
+    expect(foto()).toBe(antes);
+    // Los talleres que ya existían no reciben el asistente de primer inicio ni pierden nada
+    expect(todos('SELECT taller_id, asistente_pendiente, horarios_atencion, logo FROM taller_config ORDER BY taller_id').map((r) => ({ ...r }))).toEqual([
+      { taller_id: 't1', asistente_pendiente: 0, horarios_atencion: null, logo: null },
+      { taller_id: 't2', asistente_pendiente: 0, horarios_atencion: null, logo: null },
+    ]);
+    expect(uno("SELECT provincia FROM talleres WHERE id = 't1'").provincia).toBeNull();
+    expect(uno("SELECT codigo_externo FROM clientes WHERE id = 'c1'").codigo_externo).toBeNull();
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    // El código del sistema anterior es único por taller (y puede repetirse entre talleres)
+    db.exec("UPDATE clientes SET codigo_externo = 'X-1' WHERE id = 'c1'");
+    db.exec("UPDATE clientes SET codigo_externo = 'X-1' WHERE id = 'c2'");
+    expect(() => db.exec("INSERT INTO clientes (id, taller_id, codigo, nombre, codigo_externo) VALUES ('c3', 't1', 2, 'Otro', 'X-1')")).toThrow(/UNIQUE/);
+    db.exec("INSERT INTO clientes (id, taller_id, codigo, nombre, codigo_externo) VALUES ('c3', 't1', 2, 'Sin código', NULL), ('c4', 't1', 3, 'Sin código 2', NULL)");
+    db.exec("UPDATE proveedores SET codigo_externo = 'P-1' WHERE id = 'p1'");
+    expect(() => db.exec("INSERT INTO proveedores (id, taller_id, nombre, codigo_externo) VALUES ('p2', 't1', 'Dup', 'P-1')")).toThrow(/UNIQUE/);
+    // Invitaciones: un solo enlace por huella, estados válidos y licencia mínima
+    db.exec("INSERT INTO invitaciones_activacion (id, token_hash, vence_at) VALUES ('i1', 'h1', '2030-01-01T00:00:00Z')");
+    expect(() => db.exec("INSERT INTO invitaciones_activacion (id, token_hash, vence_at) VALUES ('i2', 'h1', '2030-01-01T00:00:00Z')")).toThrow(/UNIQUE/);
+    expect(() => db.exec("UPDATE invitaciones_activacion SET estado = 'rara' WHERE id = 'i1'")).toThrow(/CHECK/);
+    expect(uno("SELECT estado, usuarios_incluidos FROM invitaciones_activacion WHERE id = 'i1'")).toMatchObject({ estado: 'pendiente', usuarios_incluidos: 1 });
+    // Importaciones: tipo y modo válidos, usuario del mismo taller, un solo registro por (importación, lote) y por entidad
+    const imp = (id: string, taller: string, usuario: string) =>
+      db.exec(`INSERT INTO importaciones (id, taller_id, usuario_id, tipo, modo, archivo_nombre, archivo_hash, total_filas) VALUES ('${id}', '${taller}', '${usuario}', 'clientes', 'omitir', 'a.csv', 'h', 10)`);
+    imp('m1', 't1', 'u1');
+    expect(() => imp('m2', 't1', 'u2')).toThrow(/FOREIGN KEY/); // el usuario es de otro taller
+    expect(() => db.exec("UPDATE importaciones SET tipo = 'bancos' WHERE id = 'm1'")).toThrow(/CHECK/);
+    expect(() => db.exec("UPDATE importaciones SET modo = 'pisar' WHERE id = 'm1'")).toThrow(/CHECK/);
+    db.exec("INSERT INTO importacion_lotes (taller_id, importacion_id, lote, filas) VALUES ('t1', 'm1', 0, 10)");
+    expect(() => db.exec("INSERT INTO importacion_lotes (taller_id, importacion_id, lote, filas) VALUES ('t1', 'm1', 0, 10)")).toThrow(/UNIQUE|PRIMARY/); // reintentar un lote no lo duplica
+    expect(() => db.exec("INSERT INTO importacion_lotes (taller_id, importacion_id, lote, filas) VALUES ('t2', 'm1', 1, 10)")).toThrow(/FOREIGN KEY/); // lote de otro taller
+    db.exec("INSERT INTO importacion_registros (taller_id, importacion_id, entidad_id, accion) VALUES ('t1', 'm1', 'c1', 'creado')");
+    expect(() => db.exec("INSERT INTO importacion_registros (taller_id, importacion_id, entidad_id, accion) VALUES ('t1', 'm1', 'c1', 'creado')")).toThrow(/UNIQUE|PRIMARY/);
+    // Al borrar una importación se van sus lotes, errores y registros (nunca los datos importados)
+    db.exec("DELETE FROM importaciones WHERE id = 'm1'");
+    expect(uno('SELECT COUNT(*) AS n FROM importacion_lotes').n).toBe(0);
+    expect(uno("SELECT COUNT(*) AS n FROM clientes WHERE id = 'c1'").n).toBe(1);
+    // Pasos de puesta en marcha: uno por taller y estado válido
+    db.exec("INSERT INTO puesta_marcha_pasos (taller_id, paso, estado) VALUES ('t1', 'negocio', 'hecho')");
+    expect(() => db.exec("INSERT INTO puesta_marcha_pasos (taller_id, paso, estado) VALUES ('t1', 'negocio', 'omitido')")).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => db.exec("INSERT INTO puesta_marcha_pasos (taller_id, paso, estado) VALUES ('t1', 'horarios', 'pendiente')")).toThrow(/CHECK/);
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    db.close();
+  });
 });

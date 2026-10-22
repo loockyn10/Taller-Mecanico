@@ -34,6 +34,9 @@ import { anticipos } from './modules/anticipos';
 import { devoluciones } from './modules/devoluciones';
 import { costos } from './modules/costos';
 import { contabilidad } from './modules/contabilidad';
+import { activacion } from './modules/activacion';
+import { puesta } from './modules/puesta';
+import { importaciones } from './modules/importaciones';
 
 const app = new Hono<AppEnv>();
 
@@ -47,6 +50,8 @@ app.use('/api/*', requireJson);
 app.get('/api/salud', (c) => c.json({ ok: true, version: '0.1.0' }));
 app.route('/api/auth', auth);
 app.route('/api/platform', platform);
+// Canje de una invitación de activación: público (se autentica con el enlace de un solo uso).
+app.route('/api/activacion', activacion);
 // Pantalla del reloj compartido: se autentica con el token del dispositivo, no con una sesión de usuario.
 app.route('/api/reloj', relojPublico);
 
@@ -84,6 +89,8 @@ api.route('/', abastecimiento);
 api.route('/', inventario);
 api.route('/', informes);
 api.route('/contabilidad', contabilidad);
+api.route('/puesta-en-marcha', puesta);
+api.route('/importaciones', importaciones);
 app.route('/api', api);
 
 app.all('/api/*', (c) => c.json({ error: { code: 'no_encontrado', message: 'Ruta inexistente' } }, 404));

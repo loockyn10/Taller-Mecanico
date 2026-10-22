@@ -4,18 +4,24 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { ApiError, body, notFound, zTextoOpt } from '../lib/http';
-import { all, first, uid } from '../lib/db';
-import { hashPassword, igualSeguro } from '../lib/crypto';
+import { ahora, all, first, uid } from '../lib/db';
+import { hashPassword, igualSeguro, sha256Hex, tokenAleatorio } from '../lib/crypto';
+import { exigirNoBloqueado, limpiarFallos, registrarFallo } from '../lib/limites';
 import { sentenciasAltaTaller } from './provision';
 
 export const platform = new Hono<AppEnv>();
 
 platform.use('*', async (c, next) => {
+  // Los intentos con un token equivocado se limitan por origen (protección contra adivinación).
+  const clave = `platform:${c.req.header('cf-connecting-ip') ?? 'local'}`;
+  await exigirNoBloqueado(c.env.DB, clave);
   const esperado = c.env.PLATFORM_ADMIN_TOKEN;
   const recibido = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!esperado || esperado.length < 16 || !igualSeguro(recibido, esperado)) {
+    await registrarFallo(c.env.DB, clave, 10, 15, 30);
     throw new ApiError(401, 'no_autorizado', 'Token de plataforma inválido');
   }
+  await limpiarFallos(c.env.DB, clave);
   await next();
 });
 
@@ -77,4 +83,45 @@ platform.patch('/talleres/:id/licencia', async (c) => {
     c.env.DB.prepare('INSERT INTO licencia_eventos (id, taller_id, tipo, detalle) VALUES (?, ?, ?, ?)').bind(uid(), id, 'modificacion', JSON.stringify(d)),
   ]);
   return c.json(await first(c.env.DB, 'SELECT * FROM licencias WHERE taller_id = ?', id));
+});
+
+// ───────────── Invitaciones de activación ─────────────
+// El enlace se muestra una sola vez al generarlo; en la base queda únicamente su hash. Es de un solo uso y vence.
+platform.post('/invitaciones', async (c) => {
+  const d = await body(
+    c,
+    z.object({
+      nombre_sugerido: zTextoOpt(120),
+      email: z.string().trim().email().max(120).nullish().transform((v) => v || null),
+      usuarios_adicionales: z.number().int().min(0).max(500).default(0),
+      plan: z.string().trim().min(1).max(40).default('base'),
+      notas: zTextoOpt(500),
+      dias: z.number().int().min(1).max(30).default(7),
+    }),
+  );
+  const token = tokenAleatorio();
+  const id = uid();
+  const vence = new Date(Date.now() + d.dias * 86400_000).toISOString();
+  await c.env.DB.prepare(
+    'INSERT INTO invitaciones_activacion (id, token_hash, nombre_sugerido, email_destino, plan, usuarios_adicionales, notas, vence_at) VALUES (?,?,?,?,?,?,?,?)',
+  ).bind(id, await sha256Hex(token), d.nombre_sugerido, d.email, d.plan, d.usuarios_adicionales, d.notas, vence).run();
+  const origen = new URL(c.req.url).origin;
+  // El token va en el fragmento (#): el navegador no lo envía al servidor ni lo manda en el encabezado Referer.
+  return c.json({ id, token, enlace: `${origen}/activar#${token}`, vence_at: vence }, 201);
+});
+
+platform.get('/invitaciones', async (c) => {
+  const ts = ahora();
+  const rows = await all<{ estado: string; vence_at: string }>(
+    c.env.DB,
+    `SELECT i.id, i.nombre_sugerido, i.email_destino, i.plan, i.usuarios_adicionales, i.notas, i.estado, i.vence_at, i.created_at, i.usada_at, i.taller_id, t.nombre AS taller
+       FROM invitaciones_activacion i LEFT JOIN talleres t ON t.id = i.taller_id ORDER BY i.created_at DESC LIMIT 200`,
+  );
+  return c.json(rows.map((r) => ({ ...r, estado: r.estado === 'pendiente' && r.vence_at <= ts ? 'vencida' : r.estado })));
+});
+
+platform.post('/invitaciones/:id/revocar', async (c) => {
+  const r = await c.env.DB.prepare("UPDATE invitaciones_activacion SET estado = 'revocada', revocada_at = ? WHERE id = ? AND estado = 'pendiente'").bind(ahora(), c.req.param('id')).run();
+  if (!r.meta.changes) throw notFound('Invitación pendiente');
+  return c.json({ ok: true });
 });

@@ -1,26 +1,6 @@
 // Alta de un taller nuevo con su licencia, propietario y catálogo inicial.
 import { ahora, uid, type Stmt } from '../lib/db';
-
-const MARCAS: Record<string, string[]> = {
-  Chevrolet: ['Onix', 'Cruze', 'Tracker', 'S10', 'Corsa', 'Prisma', 'Spin', 'Agile'],
-  Citroën: ['C3', 'C4', 'Berlingo', 'C4 Cactus'],
-  Fiat: ['Cronos', 'Argo', 'Palio', 'Siena', 'Strada', 'Toro', 'Uno', 'Fiorino', 'Mobi'],
-  Ford: ['Ka', 'Fiesta', 'Focus', 'EcoSport', 'Ranger', 'Territory', 'Maverick'],
-  Honda: ['Civic', 'City', 'Fit', 'HR-V', 'CR-V'],
-  Hyundai: ['HB20', 'Tucson', 'Creta', 'i30'],
-  Jeep: ['Renegade', 'Compass', 'Commander'],
-  Nissan: ['March', 'Versa', 'Sentra', 'Kicks', 'Frontier'],
-  Peugeot: ['208', '2008', '308', '3008', 'Partner', '207', 'Expert'],
-  Renault: ['Clio', 'Sandero', 'Logan', 'Kangoo', 'Duster', 'Kwid', 'Oroch', 'Alaskan', 'Fluence'],
-  Toyota: ['Etios', 'Yaris', 'Corolla', 'Corolla Cross', 'Hilux', 'SW4', 'RAV4'],
-  Volkswagen: ['Gol', 'Gol Trend', 'Polo', 'Virtus', 'Vento', 'Golf', 'T-Cross', 'Taos', 'Nivus', 'Amarok', 'Saveiro', 'Suran'],
-  'Mercedes-Benz': ['Clase A', 'Clase C', 'Sprinter', 'Vito'],
-  BMW: ['Serie 1', 'Serie 3', 'X1', 'X3'],
-  Audi: ['A1', 'A3', 'A4', 'Q3', 'Q5'],
-  Kia: ['Picanto', 'Rio', 'Sportage', 'Cerato'],
-  Chery: ['Tiggo 2', 'Tiggo 3', 'Tiggo 4'],
-  RAM: ['1500', '2500'],
-};
+import { CATEGORIAS_ARTICULO_PLANTILLA, CATEGORIAS_GASTO_PLANTILLA, MARCAS_PLANTILLA } from '../../shared/plantillas';
 
 const SERVICIOS: Array<[string, Array<[string, number, number | null, number | null]>]> = [
   // [categoría, [[nombre, precio pesos, intervalo km, intervalo meses]]]
@@ -58,13 +38,6 @@ const SERVICIOS: Array<[string, Array<[string, number, number | null, number | n
   ['Varios', [['Mano de obra por hora', 25000, null, null], ['Revisión general / pre-VTV', 30000, null, 12]]],
 ];
 
-export const CATEGORIAS_GASTO: Array<[string, 'operativo' | 'fijo' | 'impuestos' | 'otro']> = [
-  ['Alquiler', 'fijo'], ['Servicios (luz, agua, internet)', 'fijo'], ['Sueldos y jornales', 'fijo'], ['Impuestos y tasas', 'impuestos'], ['Insumos de taller', 'operativo'],
-  ['Herramientas y equipos', 'operativo'], ['Mantenimiento', 'operativo'], ['Limpieza', 'operativo'], ['Combustible y fletes', 'operativo'], ['Publicidad', 'fijo'], ['Varios', 'otro'],
-];
-
-const CATEGORIAS_ARTICULO = ['Aceites y lubricantes', 'Filtros', 'Frenos', 'Encendido', 'Suspensión', 'Refrigeración', 'Correas y distribución', 'Baterías', 'Varios'];
-
 export interface DatosTallerNuevo {
   nombre: string;
   cuit?: string | null;
@@ -75,6 +48,12 @@ export interface DatosTallerNuevo {
   usuarios_incluidos?: number;
   usuarios_adicionales?: number;
   plan?: string;
+  /** Con false no se cargan los servicios de ejemplo (con precios de muestra): el taller arma los suyos desde la plantilla del tempario, sin precios ajenos. */
+  servicios?: boolean;
+  /** Cómo nació el taller (queda en el historial de la licencia). */
+  origen?: string;
+  /** Muestra el asistente de configuración inicial la primera vez que el propietario entra. */
+  asistente?: boolean;
 }
 
 export function sentenciasAltaTaller(db: D1Database, d: DatosTallerNuevo): { tallerId: string; propietarioId: string; stmts: Stmt[] } {
@@ -86,9 +65,9 @@ export function sentenciasAltaTaller(db: D1Database, d: DatosTallerNuevo): { tal
     db.prepare('INSERT INTO licencias (taller_id, plan, usuarios_incluidos, usuarios_adicionales) VALUES (?, ?, ?, ?)')
       .bind(tallerId, d.plan ?? 'base', d.usuarios_incluidos ?? 1, d.usuarios_adicionales ?? 0),
     db.prepare('INSERT INTO licencia_eventos (id, taller_id, tipo, detalle) VALUES (?, ?, ?, ?)')
-      .bind(uid(), tallerId, 'alta', JSON.stringify({ usuarios_incluidos: d.usuarios_incluidos ?? 1, usuarios_adicionales: d.usuarios_adicionales ?? 0, fecha: ahora() })),
+      .bind(uid(), tallerId, 'alta', JSON.stringify({ usuarios_incluidos: d.usuarios_incluidos ?? 1, usuarios_adicionales: d.usuarios_adicionales ?? 0, fecha: ahora(), ...(d.origen ? { origen: d.origen } : {}) })),
     // IVA por defecto de los documentos nuevos: sólo los responsables inscriptos discriminan IVA.
-    db.prepare('INSERT INTO taller_config (taller_id, iva_default) VALUES (?, ?)').bind(tallerId, d.condicion_iva === 'responsable_inscripto' ? 21 : 0),
+    db.prepare('INSERT INTO taller_config (taller_id, iva_default, asistente_pendiente) VALUES (?, ?, ?)').bind(tallerId, d.condicion_iva === 'responsable_inscripto' ? 21 : 0, d.asistente ? 1 : 0),
     db.prepare("INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES (?, ?, ?, ?, 'propietario', 'propietario', ?)")
       .bind(propietarioId, tallerId, d.propietario.email, d.propietario.nombre, d.propietario.password_hash),
     // Depósito principal: el que usan por defecto todas las operaciones de stock.
@@ -97,12 +76,12 @@ export function sentenciasAltaTaller(db: D1Database, d: DatosTallerNuevo): { tal
     db.prepare("INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES (?, ?, 0, 'Consumidor final')").bind(uid(), tallerId),
     db.prepare("INSERT INTO secuencias (taller_id, clave, valor) VALUES (?, 'cliente', 0)").bind(tallerId),
   ];
-  for (const [marca, modelos] of Object.entries(MARCAS)) {
+  for (const [marca, modelos] of Object.entries(MARCAS_PLANTILLA)) {
     const marcaId = uid();
     s.push(db.prepare('INSERT INTO marcas (id, taller_id, nombre) VALUES (?, ?, ?)').bind(marcaId, tallerId, marca));
     for (const m of modelos) s.push(db.prepare('INSERT INTO modelos (id, taller_id, marca_id, nombre) VALUES (?, ?, ?, ?)').bind(uid(), tallerId, marcaId, m));
   }
-  SERVICIOS.forEach(([cat, items], i) => {
+  if (d.servicios !== false) SERVICIOS.forEach(([cat, items], i) => {
     const catId = uid();
     s.push(db.prepare('INSERT INTO categorias_servicio (id, taller_id, nombre, orden) VALUES (?, ?, ?, ?)').bind(catId, tallerId, cat, i));
     for (const [nombre, precio, km, meses] of items) {
@@ -112,7 +91,7 @@ export function sentenciasAltaTaller(db: D1Database, d: DatosTallerNuevo): { tal
       );
     }
   });
-  for (const [nombre, tipo] of CATEGORIAS_GASTO) s.push(db.prepare('INSERT INTO categorias_gasto (id, taller_id, nombre, tipo) VALUES (?, ?, ?, ?)').bind(uid(), tallerId, nombre, tipo));
-  for (const c of CATEGORIAS_ARTICULO) s.push(db.prepare('INSERT INTO categorias_articulo (id, taller_id, nombre) VALUES (?, ?, ?)').bind(uid(), tallerId, c));
+  for (const [nombre, tipo] of CATEGORIAS_GASTO_PLANTILLA) s.push(db.prepare('INSERT INTO categorias_gasto (id, taller_id, nombre, tipo) VALUES (?, ?, ?, ?)').bind(uid(), tallerId, nombre, tipo));
+  for (const c of CATEGORIAS_ARTICULO_PLANTILLA) s.push(db.prepare('INSERT INTO categorias_articulo (id, taller_id, nombre) VALUES (?, ?, ?)').bind(uid(), tallerId, c));
   return { tallerId, propietarioId, stmts: s };
 }
