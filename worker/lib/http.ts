@@ -69,6 +69,7 @@ export function traducirErrorDb(e: unknown): ApiError | null {
     return conflict('El registro está relacionado con datos inexistentes o de otro taller, o tiene registros que dependen de él', 'referencia_invalida');
   }
   if (msg.includes('CHECK constraint failed')) {
+    if (msg.includes('credito_aplicado')) return conflict('El saldo a favor ya no alcanza: se aplicó o se devolvió en otra operación', 'credito_insuficiente');
     if (msg.includes('cobrado')) return conflict('El importe supera el saldo pendiente del comprobante', 'saldo_excedido');
     if (msg.includes('cantidad_recibida')) return conflict('La cantidad recibida supera lo pendiente de la orden de compra', 'recepcion_excedida');
     return badRequest('Algún valor está fuera de rango');

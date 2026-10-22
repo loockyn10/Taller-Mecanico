@@ -10,6 +10,11 @@ import { normalizarPatente } from '../../shared/dominio';
 
 export const reportes = new Hono<AppEnv>();
 
+/** Lo devuelto de cada línea de comprobante (devoluciones vigentes): cantidad, subtotal y costo de lo que volvió al inventario. */
+const DEV_LINEA = (campo: 'cantidad' | 'subtotal' | 'costo') =>
+  `COALESCE((SELECT SUM(${campo === 'costo' ? 'CASE WHEN di.reingresa = 1 THEN di.cantidad * COALESCE(di.costo_unitario, 0) ELSE 0 END' : `di.${campo}`}) FROM devolucion_items di
+      JOIN devoluciones dv ON dv.taller_id = di.taller_id AND dv.id = di.devolucion_id AND dv.estado = 'registrada' WHERE di.taller_id = vi.taller_id AND di.venta_item_id = vi.id), 0)`;
+
 /** Cada bloque del tablero se arma solo si la persona tiene permiso para ver ese tipo de información. */
 reportes.get('/dashboard', async (c) => {
   const s = c.get('sesion');
@@ -29,7 +34,17 @@ reportes.get('/dashboard', async (c) => {
         )
       : Promise.resolve([]),
     tiene(s, 'stock.ver')
-      ? all(db, 'SELECT id, nombre, codigo, stock, stock_minimo, unidad FROM articulos WHERE taller_id = ? AND activo = 1 AND stock <= stock_minimo AND stock_minimo > 0 ORDER BY stock - stock_minimo LIMIT 8', s.tallerId)
+      ? all(
+          db,
+          `SELECT * FROM (SELECT id, nombre, codigo, stock, stock_minimo, unidad, NULL AS deposito FROM articulos WHERE taller_id = ? AND activo = 1 AND stock <= stock_minimo AND stock_minimo > 0
+             UNION ALL
+            SELECT a.id, a.nombre, a.codigo, ROUND(COALESCE(sd.stock, 0), 3) AS stock, m.minimo AS stock_minimo, a.unidad, d.nombre AS deposito
+              FROM stock_minimos_deposito m JOIN articulos a ON a.taller_id = m.taller_id AND a.id = m.articulo_id JOIN depositos d ON d.taller_id = m.taller_id AND d.id = m.deposito_id
+              LEFT JOIN stock_depositos sd ON sd.taller_id = m.taller_id AND sd.articulo_id = m.articulo_id AND sd.deposito_id = m.deposito_id
+             WHERE m.taller_id = ? AND a.activo = 1 AND d.activo = 1 AND m.minimo > 0 AND ROUND(COALESCE(sd.stock, 0), 3) <= ROUND(m.minimo, 3)
+             ) ORDER BY stock - stock_minimo LIMIT 8`,
+          s.tallerId, s.tallerId,
+        )
       : Promise.resolve([]),
     tiene(s, 'presupuestos.ver')
       ? first(db, "SELECT SUM(estado = 'pendiente') AS pendientes, SUM(estado = 'aprobado') AS aprobados FROM presupuestos WHERE taller_id = ?", s.tallerId)
@@ -51,7 +66,7 @@ reportes.get('/dashboard', async (c) => {
       `SELECT
          (SELECT COALESCE(SUM(total),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND substr(fecha,1,7) = ?) AS ventas_mes,
          (SELECT COALESCE(SUM(total),0) FROM cobros WHERE taller_id = ? AND estado = 'registrado' AND fecha = ?) AS cobrado_hoy,
-         (SELECT COALESCE(SUM(total - cobrado),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida') AS por_cobrar`,
+         (SELECT COALESCE(SUM(total - devuelto - cobrado),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida') AS por_cobrar`,
       s.tallerId, mes, s.tallerId, f, s.tallerId,
     );
   }
@@ -62,7 +77,7 @@ reportes.get('/reportes', requirePerm('reportes.ver'), async (c) => {
   const s = c.get('sesion');
   const db = c.env.DB;
   const { desde, hasta } = query(c, z.object({ desde: zFecha, hasta: zFecha }));
-  const [resumen, porDia, porMedio, topServicios, topArticulos, porMecanico, ordenesPeriodo, compras] = await Promise.all([
+  const [resumen, porDia, porMedio, topServicios, topArticulos, porMecanico, ordenesPeriodo, compras, devoluciones, anticipos] = await Promise.all([
     first(
       db,
       `SELECT COUNT(*) AS comprobantes, COALESCE(SUM(total),0) AS total, COALESCE(SUM(neto),0) AS neto, COALESCE(SUM(iva),0) AS iva,
@@ -79,13 +94,13 @@ reportes.get('/reportes', requirePerm('reportes.ver'), async (c) => {
     ),
     all(
       db,
-      `SELECT vi.descripcion, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total FROM venta_items vi JOIN ventas ve ON ve.taller_id = vi.taller_id AND ve.id = vi.venta_id
+      `SELECT vi.descripcion, SUM(vi.cantidad - ${DEV_LINEA('cantidad')}) AS cantidad, SUM(vi.subtotal - ${DEV_LINEA('subtotal')}) AS total FROM venta_items vi JOIN ventas ve ON ve.taller_id = vi.taller_id AND ve.id = vi.venta_id
         WHERE vi.taller_id = ? AND ve.estado = 'emitida' AND ve.fecha BETWEEN ? AND ? AND vi.tipo IN ('servicio','libre') GROUP BY vi.descripcion ORDER BY total DESC LIMIT 10`,
       s.tallerId, desde, hasta,
     ),
     all(
       db,
-      `SELECT vi.descripcion, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total, SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0)) AS costo
+      `SELECT vi.descripcion, SUM(vi.cantidad - ${DEV_LINEA('cantidad')}) AS cantidad, SUM(vi.subtotal - ${DEV_LINEA('subtotal')}) AS total, SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0) - ${DEV_LINEA('costo')}) AS costo
          FROM venta_items vi JOIN ventas ve ON ve.taller_id = vi.taller_id AND ve.id = vi.venta_id
          LEFT JOIN articulos a ON a.taller_id = vi.taller_id AND a.id = vi.articulo_id
         WHERE vi.taller_id = ? AND ve.estado = 'emitida' AND ve.fecha BETWEEN ? AND ? AND vi.tipo = 'articulo' GROUP BY vi.articulo_id ORDER BY total DESC LIMIT 10`,
@@ -106,11 +121,13 @@ reportes.get('/reportes', requirePerm('reportes.ver'), async (c) => {
       s.tallerId, desde, hasta,
     ),
     first(db, "SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total FROM compras WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?", s.tallerId, desde, hasta),
+    first(db, "SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total, COALESCE(SUM(reintegrado),0) AS reintegrado FROM devoluciones WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?", s.tallerId, desde, hasta),
+    first(db, "SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total FROM cobros WHERE taller_id = ? AND tipo = 'anticipo' AND estado = 'registrado' AND fecha BETWEEN ? AND ?", s.tallerId, desde, hasta),
   ]);
   // El costo (y con él, la ganancia) solo se informa a quien puede ver márgenes.
   const conMargen = tiene(s, 'margenes.ver');
   return c.json({
-    resumen, porDia, porMedio, topServicios, ordenesPeriodo, compras, porMecanico,
+    resumen, porDia, porMedio, topServicios, ordenesPeriodo, compras, porMecanico, devoluciones, anticipos,
     topArticulos: conMargen ? topArticulos : topArticulos.map((a) => ({ ...a, costo: undefined })),
   });
 });

@@ -28,6 +28,10 @@ export interface DatosCobro {
   aplicaciones: Array<{ ventaId: string; importe: number }>;
   notas?: string | null;
   idemKey: string;
+  /** 'anticipo' = dinero recibido antes de la venta: no se aplica a ningún comprobante (se aplica después, ver lib/creditos.ts). */
+  tipo?: 'cobro' | 'anticipo';
+  ordenId?: string | null;
+  presupuestoId?: string | null;
 }
 
 /** Validaciones previas (mensajes claros) de los medios: cuenta bancaria, cheque y medios habilitados. */
@@ -50,8 +54,8 @@ export function sentenciasCobro(db: D1Database, s: { tallerId: string; usuarioId
     guardCajaObligatoria(db, s.tallerId),
     ...seqIncrementar(db, s.tallerId, 'cobro'),
     db
-      .prepare(`INSERT INTO cobros (id, taller_id, numero, cliente_id, fecha, total, idem_key, notas, usuario_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?)`)
-      .bind(c.id, s.tallerId, s.tallerId, 'cobro', c.clienteId, c.fecha, total, c.idemKey, c.notas ?? null, s.usuarioId),
+      .prepare(`INSERT INTO cobros (id, taller_id, numero, cliente_id, fecha, total, idem_key, notas, usuario_id, tipo, orden_id, presupuesto_id) VALUES (?, ?, ${SEQ_VALOR}, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(c.id, s.tallerId, s.tallerId, 'cobro', c.clienteId, c.fecha, total, c.idemKey, c.notas ?? null, s.usuarioId, c.tipo ?? 'cobro', c.ordenId ?? null, c.presupuestoId ?? null),
     ...c.medios.map((m, i) =>
       db.prepare('INSERT INTO cobro_medios (id, taller_id, cobro_id, medio, importe, referencia, cuenta_id) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(idsMedio[i], s.tallerId, c.id, m.medio, m.importe, m.referencia ?? null, m.cuentaId ?? null),
     ),
@@ -76,7 +80,7 @@ export function sentenciasCobro(db: D1Database, s: { tallerId: string; usuarioId
       }),
     );
   });
-  stmts.push(auditar(db, s.tallerId, s.usuarioId, 'cobro', c.id, 'crear', { total }));
+  stmts.push(auditar(db, s.tallerId, s.usuarioId, 'cobro', c.id, 'crear', { total, tipo: c.tipo ?? 'cobro' }));
   return stmts;
 }
 

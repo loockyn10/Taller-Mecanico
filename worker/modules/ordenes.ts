@@ -13,6 +13,8 @@ import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
 import { agrupar, permiteNegativo, resolverDeposito, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { nombreUsuarioSql, sentenciaTareasDesdeTrabajos } from '../lib/tareas';
+import { estimarManoObra, rentabilidadOrdenes } from '../lib/rentabilidad';
+import { sentenciasAplicarCredito, validarOrigenCredito } from '../lib/creditos';
 import { ESTADOS_TAREA } from '../../shared/tempario';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
 
@@ -52,7 +54,7 @@ const SELECT = `SELECT o.*, c.nombre AS cliente, c.codigo AS cliente_codigo, c.t
     (SELECT SUM(ta.tiempo_estimado_min) FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id) AS tiempo_estimado_min,
     (SELECT COALESCE(SUM(ti.duracion_seg), 0) FROM orden_tiempos ti WHERE ti.taller_id = o.taller_id AND ti.orden_id = o.id) AS tiempo_real_seg,
     (SELECT COUNT(*) FROM orden_participantes pa WHERE pa.taller_id = o.taller_id AND pa.orden_id = o.id) AS participantes_n,
-    ve.id AS venta_id, ve.numero AS venta_numero, ve.total AS venta_total, ve.cobrado AS venta_cobrado
+    ve.id AS venta_id, ve.numero AS venta_numero, ve.total AS venta_total, ve.cobrado AS venta_cobrado, ve.devuelto AS venta_devuelto
   FROM ordenes o
   JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id
   JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
@@ -235,12 +237,15 @@ ordenes.get('/:id/rentabilidad', requirePerm('ordenes.ver', 'margenes.ver', 'pre
   const t = await first<{ seg: number }>(c.env.DB, 'SELECT COALESCE(SUM(duracion_seg), 0) AS seg FROM orden_tiempos WHERE taller_id = ? AND orden_id = ?', s.tallerId, id);
   const venta = lineas.reduce((a, l) => a + l.venta, 0);
   const costo = lineas.reduce((a, l) => a + l.costo, 0);
+  const resumen = (await rentabilidadOrdenes(c.env.DB, s.tallerId, [id])).get(id);
   return c.json({
     costo_estimado: !o.stock_aplicado,
     repuestos: lineas,
     totales_repuestos: { venta, costo, margen: venta - costo },
     mano_obra: { venta: mo?.venta ?? 0, horas_registradas_seg: t?.seg ?? 0 },
-    nota: 'Importes de las líneas antes de descuentos e impuestos globales de la orden.',
+    // Resultado de la operación (neto de descuentos globales, sin IVA y neto de devoluciones), con la calidad del dato y lo que falta para que sea definitivo.
+    resumen,
+    nota: 'Las líneas muestran los importes antes de descuentos e impuestos globales de la orden; el resumen es neto de descuentos, sin IVA y neto de devoluciones.',
   });
 });
 
@@ -394,6 +399,15 @@ ordenes.post('/:id/estado', async (c) => {
   if (d.estado === 'lista') sets.push("fecha_lista = strftime('%Y-%m-%dT%H:%M:%fZ','now')");
   if (d.estado === 'entregada') sets.push("fecha_entregada = strftime('%Y-%m-%dT%H:%M:%fZ','now')");
   if (o.estado === 'entregada') sets.push('fecha_entregada = NULL');
+  // Rentabilidad: al quedar lista/entregada se congela la estimación de mano de obra con los costos horarios de ese momento; al reabrirla se descarta y se vuelve a congelar al cerrarla.
+  const cierraAhora = d.estado === 'lista' || d.estado === 'entregada';
+  if (cierraAhora && o.estado !== 'lista' && o.estado !== 'entregada') {
+    const est = (await estimarManoObra(c.env.DB, s.tallerId, [id]))[0];
+    sets.push("mo_estimado_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')", 'mo_costo_estimado = ?', 'mo_estimado_completo = ?');
+    vals.push(est.importe, est.completo ? 1 : 0);
+  } else if (!cierraAhora) {
+    sets.push('mo_estimado_at = NULL', 'mo_costo_estimado = NULL', 'mo_estimado_completo = NULL');
+  }
   stmts.push(
     c.env.DB.prepare(`UPDATE ordenes SET ${sets.join(', ')} WHERE taller_id = ? AND id = ?`).bind(...vals, s.tallerId, id),
     c.env.DB.prepare('INSERT INTO orden_eventos (id, taller_id, orden_id, estado_anterior, estado_nuevo, nota, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -457,18 +471,27 @@ ordenes.post('/:id/comprobante', requirePerm('ventas.emitir', 'ordenes.ver'), as
       observaciones: zTextoOpt(500),
       // Emitir y cobrar el total en el acto (contado): el cobro y su ingreso de caja van en la misma transacción.
       cobro: zCobroInmediato.nullish(),
+      // Saldo a favor (anticipos de esta OT o del cliente) que se imputa al comprobante en la misma transacción.
+      creditos: z.array(z.object({ origen_tipo: z.enum(['anticipo', 'devolucion']), origen_id: zId, importe: z.number().int().positive() })).max(20).default([]),
     }),
   );
   const o = await first<{ estado: EstadoOT; total: number; numero: number; cliente_id: string }>(c.env.DB, 'SELECT estado, total, numero, cliente_id FROM ordenes WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!o) throw notFound('Orden de trabajo');
   if (d.condicion === 'cuenta_corriente' && d.cobro) throw badRequest('Un comprobante a cuenta corriente no se cobra en el acto');
+  const claves = d.creditos.map((x) => x.origen_tipo + ':' + x.origen_id);
+  if (new Set(claves).size !== claves.length) throw badRequest('Un mismo saldo a favor aparece más de una vez');
+  const totalCreditos = d.creditos.reduce((a, x) => a + x.importe, 0);
+  if (totalCreditos > o.total) throw badRequest('El saldo a favor aplicado supera el total del comprobante');
+  const fechaHoy = hoy();
+  for (const x of d.creditos) await validarOrigenCredito(c.env.DB, s.tallerId, { clienteId: o.cliente_id, origenTipo: x.origen_tipo, origenId: x.origen_id, importe: x.importe, fecha: fechaHoy });
+  const aCobrar = o.total - totalCreditos;
   // "Contado" significa cobrado; la cuenta corriente exige un cliente identificado.
-  if (d.condicion === 'contado' && o.total > 0 && !d.cobro) throw badRequest('Un comprobante de contado se cobra en el momento: elegí el medio de pago o emitilo a cuenta corriente');
-  if (d.cobro) await validarMediosCobro(c.env.DB, s.tallerId, [medioDeCobroInmediato(d.cobro, o.total)]);
+  if (d.condicion === 'contado' && aCobrar > 0 && !d.cobro) throw badRequest('Un comprobante de contado se cobra en el momento: elegí el medio de pago o emitilo a cuenta corriente');
+  if (d.cobro) await validarMediosCobro(c.env.DB, s.tallerId, [medioDeCobroInmediato(d.cobro, aCobrar)]);
   if (d.condicion === 'cuenta_corriente' && (await first(c.env.DB, 'SELECT 1 FROM clientes WHERE taller_id = ? AND id = ? AND codigo = 0', s.tallerId, o.cliente_id))) {
     throw badRequest('La cuenta corriente requiere un cliente identificado (no "Consumidor final")');
   }
-  const cobrar = d.condicion === 'contado' && !!d.cobro && o.total > 0;
+  const cobrar = d.condicion === 'contado' && !!d.cobro && aCobrar > 0;
   if (cobrar) await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   if (!ESTADOS_OT_CON_STOCK.includes(o.estado)) throw conflict('El comprobante se genera cuando la OT está "Lista para entregar" o "Entregada"');
   if (await first(c.env.DB, "SELECT 1 FROM ventas WHERE taller_id = ? AND orden_id = ? AND estado = 'emitida'", s.tallerId, id)) throw conflict('La OT ya tiene un comprobante vigente', 'duplicado');
@@ -498,10 +521,13 @@ ordenes.post('/:id/comprobante', requirePerm('ventas.emitir', 'ordenes.ver'), as
     ...(cobrar
       ? sentenciasCobro(c.env.DB, s, {
           id: uid(), clienteId: o.cliente_id, fecha: fechaVenta, idemKey: `comprobante:${ventaId}`, notas: `Cobro del comprobante de OT #${o.numero}`,
-          medios: [medioDeCobroInmediato(d.cobro!, o.total)],
-          aplicaciones: [{ ventaId, importe: o.total }],
+          medios: [medioDeCobroInmediato(d.cobro!, aCobrar)],
+          aplicaciones: [{ ventaId, importe: aCobrar }],
         })
       : []),
+    ...d.creditos.flatMap((x, i) =>
+      sentenciasAplicarCredito(c.env.DB, s, { ventaId, clienteId: o.cliente_id, origenTipo: x.origen_tipo, origenId: x.origen_id, importe: x.importe, fecha: fechaVenta, idemKey: `comprobante:${ventaId}:${i}` }),
+    ),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'venta', ventaId, 'crear_desde_ot', { orden_id: id }),
   ]);
   return c.json(await first(c.env.DB, 'SELECT id, numero, total FROM ventas WHERE taller_id = ? AND id = ?', s.tallerId, ventaId), 201);

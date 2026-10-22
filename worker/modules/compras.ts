@@ -355,15 +355,50 @@ compras.get('/proveedores/:id/cuenta', async (c) => {
 });
 
 // ───────────── Reposición ─────────────
-/** Artículos en o por debajo del stock mínimo, con lo que ya está pedido (órdenes abiertas) y la cantidad sugerida para reponer. */
+const EN_CAMINO_SQL = `COALESCE((SELECT SUM(ROUND(i.cantidad - i.cantidad_recibida, 3)) FROM orden_compra_items i JOIN ordenes_compra oc ON oc.taller_id = i.taller_id AND oc.id = i.orden_id
+                       WHERE i.taller_id = a.taller_id AND i.articulo_id = a.id AND oc.estado IN ('pendiente','parcial')), 0)`;
+
+/**
+ * Artículos en o por debajo del stock mínimo, con lo que ya está pedido (órdenes abiertas) y la cantidad sugerida para reponer.
+ *  * Sin `deposito_id`: mínimo GENERAL del artículo contra su stock total (como siempre).
+ *  * `deposito_id` = un depósito o `todos`: mínimos configurados POR DEPÓSITO contra el stock de ese depósito. Las órdenes de compra no tienen depósito, así que
+ *    lo ya pedido de un artículo se descuenta de sus faltantes en orden de depósito (sin pedirlo dos veces). Nunca se crea una orden de compra sola:
+ *    eso lo hace el usuario con "Generar orden de compra".
+ */
 compras.get('/reposicion', requirePerm('stock.ver'), async (c) => {
   const s = c.get('sesion');
-  const { proveedor_id } = query(c, z.object({ proveedor_id: z.string().optional() }));
+  const { proveedor_id, deposito_id } = query(c, z.object({ proveedor_id: z.string().optional(), deposito_id: z.string().optional() }));
+  const verCosto = tiene(s, 'precios.costo.ver');
+  if (deposito_id) {
+    if (deposito_id !== 'todos' && !(await first(c.env.DB, 'SELECT 1 FROM depositos WHERE taller_id = ? AND id = ?', s.tallerId, deposito_id))) throw notFound('Depósito');
+    const filas = await all<{ id: string; stock: number; stock_minimo: number; stock_objetivo: number | null; en_camino: number; deposito_id: string }>(
+      c.env.DB,
+      `SELECT a.id, a.codigo, a.nombre, a.marca, a.unidad, d.id AS deposito_id, d.nombre AS deposito, ROUND(COALESCE(sd.stock, 0), 3) AS stock, m.minimo AS stock_minimo, m.objetivo AS stock_objetivo,
+              a.stock AS stock_total, a.costo, a.proveedor_id, p.nombre AS proveedor, ${EN_CAMINO_SQL} AS en_camino
+         FROM stock_minimos_deposito m
+         JOIN articulos a ON a.taller_id = m.taller_id AND a.id = m.articulo_id
+         JOIN depositos d ON d.taller_id = m.taller_id AND d.id = m.deposito_id
+         LEFT JOIN stock_depositos sd ON sd.taller_id = m.taller_id AND sd.articulo_id = m.articulo_id AND sd.deposito_id = m.deposito_id
+         LEFT JOIN proveedores p ON p.taller_id = a.taller_id AND p.id = a.proveedor_id
+        WHERE m.taller_id = ? AND a.activo = 1 AND d.activo = 1 AND m.minimo > 0 AND ROUND(COALESCE(sd.stock, 0), 3) <= ROUND(m.minimo, 3) ${proveedor_id ? 'AND a.proveedor_id = ?' : ''}
+        ORDER BY d.es_principal DESC, d.nombre COLLATE NOCASE, a.nombre COLLATE NOCASE LIMIT 1000`,
+      s.tallerId,
+      ...(proveedor_id ? [proveedor_id] : []),
+    );
+    const pendiente = new Map<string, number>(); // lo ya pedido de cada artículo que todavía no se asignó a algún faltante
+    for (const f of filas) if (!pendiente.has(f.id)) pendiente.set(f.id, f.en_camino);
+    const salida = filas.map((a) => {
+      const objetivo = a.stock_objetivo ?? redondearCantidad(a.stock_minimo * 2);
+      const falta = Math.max(0, redondearCantidad(objetivo - a.stock));
+      const cubierto = Math.min(falta, pendiente.get(a.id) ?? 0);
+      pendiente.set(a.id, redondearCantidad((pendiente.get(a.id) ?? 0) - cubierto));
+      return { ...a, ...(verCosto ? {} : { costo: undefined }), en_camino: redondearCantidad(a.en_camino), objetivo, sugerido: redondearCantidad(falta - cubierto) };
+    });
+    return c.json(deposito_id === 'todos' ? salida : salida.filter((a) => a.deposito_id === deposito_id));
+  }
   const filas = await all<{ stock: number; stock_minimo: number; stock_objetivo: number | null; en_camino: number }>(
     c.env.DB,
-    `SELECT a.id, a.codigo, a.nombre, a.marca, a.unidad, a.stock, a.stock_minimo, a.stock_objetivo, a.costo, a.proveedor_id, p.nombre AS proveedor,
-            COALESCE((SELECT SUM(ROUND(i.cantidad - i.cantidad_recibida, 3)) FROM orden_compra_items i JOIN ordenes_compra oc ON oc.taller_id = i.taller_id AND oc.id = i.orden_id
-                       WHERE i.taller_id = a.taller_id AND i.articulo_id = a.id AND oc.estado IN ('pendiente','parcial')), 0) AS en_camino
+    `SELECT a.id, a.codigo, a.nombre, a.marca, a.unidad, a.stock, a.stock_minimo, a.stock_objetivo, a.costo, a.proveedor_id, p.nombre AS proveedor, ${EN_CAMINO_SQL} AS en_camino
        FROM articulos a LEFT JOIN proveedores p ON p.taller_id = a.taller_id AND p.id = a.proveedor_id
       WHERE a.taller_id = ? AND a.activo = 1 AND a.stock_minimo > 0 AND ROUND(a.stock, 3) <= ROUND(a.stock_minimo, 3) ${proveedor_id ? 'AND a.proveedor_id = ?' : ''}
       ORDER BY p.nombre COLLATE NOCASE, a.nombre COLLATE NOCASE LIMIT 500`,
@@ -374,7 +409,7 @@ compras.get('/reposicion', requirePerm('stock.ver'), async (c) => {
   return c.json(
     filas.map((a) => {
       const objetivo = a.stock_objetivo ?? redondearCantidad(a.stock_minimo * 2);
-      return { ...a, ...(tiene(c.get('sesion'), 'precios.costo.ver') ? {} : { costo: undefined }), en_camino: redondearCantidad(a.en_camino), objetivo, sugerido: Math.max(0, redondearCantidad(objetivo - a.stock - a.en_camino)) };
+      return { ...a, ...(verCosto ? {} : { costo: undefined }), en_camino: redondearCantidad(a.en_camino), objetivo, sugerido: Math.max(0, redondearCantidad(objetivo - a.stock - a.en_camino)) };
     }),
   );
 });

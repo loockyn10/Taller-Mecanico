@@ -11,6 +11,45 @@ import { useMarcas } from '@/components/selectores';
 import { TIPOS_VEHICULO, TIPO_VEHICULO_LABEL } from '@shared/dominio';
 import { AVISO_TIEMPOS_ORIENTATIVOS, formatearMinutos, precioPorTiempo } from '@shared/tempario';
 
+/** Costo horario INTERNO de la mano de obra (confidencial): general y por persona. Solo con permisos económicos. */
+function CostosManoObra() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { puede } = useAuth();
+  const edita = puede('precios.gestionar');
+  const { data } = useQuery({ queryKey: ['costos-mano-obra'], queryFn: () => api.get<any>('/costos-mano-obra') });
+  const [f, setF] = useState<{ general: number | null; personas: Record<string, number | null> } | null>(null);
+  const actual = f ?? (data ? { general: data.general as number | null, personas: Object.fromEntries(data.personas.map((x: any) => [x.usuario_id, x.costo_hora])) as Record<string, number | null> } : null);
+  const guardar = useMutation({
+    mutationFn: () => api.put('/costos-mano-obra', { general: actual!.general, personas: Object.entries(actual!.personas).map(([usuario_id, costo_hora]) => ({ usuario_id, costo_hora })) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['costos-mano-obra'] }); setF(null); toast.ok('Costos guardados'); },
+    onError: toast.error,
+  });
+  if (!actual || !data) return null;
+  return (
+    <Tarjeta titulo="Costo interno de la mano de obra" subtitulo="Confidencial: lo que le cuesta al taller una hora de trabajo. Se usa solo para calcular la rentabilidad; no se muestra a quienes no tienen permisos económicos" className="mb-5"
+      acciones={edita && f && <><Boton tam="sm" onClick={() => setF(null)}>Descartar</Boton><Boton tam="sm" variante="primario" cargando={guardar.isPending} onClick={() => guardar.mutate()}>Guardar costos</Boton></>}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Campo label="Costo general por hora" hint="Se usa para quien no tiene un costo propio. En blanco = sin costo general (la rentabilidad queda parcial)">
+          <InputMoneda value={actual.general ?? 0} onChange={(v) => setF({ ...actual, general: v || null })} disabled={!edita} />
+        </Campo>
+        <Aviso tono="ambar">Cambiar un costo no modifica la rentabilidad de lo ya trabajado: cada tramo del cronómetro guarda el costo vigente cuando se cierra.</Aviso>
+      </div>
+      <details className="mt-4" open={data.personas.some((x: any) => x.mecanico)}>
+        <summary className="cursor-pointer text-sm font-medium">Costo por persona (opcional)</summary>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {data.personas.filter((x: any) => x.activo).map((x: any) => (
+            <Campo key={x.usuario_id} label={`${x.nombre}${x.mecanico ? ' · mecánico' : ''}`} hint="En blanco usa el general">
+              <InputMoneda value={actual.personas[x.usuario_id] ?? 0} onChange={(v) => setF({ ...actual, personas: { ...actual.personas, [x.usuario_id]: v || null } })} disabled={!edita} />
+            </Campo>
+          ))}
+        </div>
+      </details>
+      <p className="mt-3 text-xs text-tenue">No es una liquidación de sueldos. Tarifa de venta actual: {money(data.tarifa_hora)} por hora.</p>
+    </Tarjeta>
+  );
+}
+
 function Tarifas({ cats }: { cats: any[] }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -208,6 +247,7 @@ export function Tempario() {
       />
       <Aviso tono="ambar" className="mb-5">{AVISO_TIEMPOS_ORIENTATIVOS}{orientativas ? ` Tenés ${orientativas} operaciones con tiempo orientativo para revisar.` : ''}</Aviso>
       {verPrecios && puede('catalogo.ver') && <Tarifas cats={cats} />}
+      {puede('margenes.ver') && <CostosManoObra />}
 
       <Tarjeta
         titulo="Operaciones"

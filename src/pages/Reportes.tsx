@@ -50,12 +50,14 @@ export function Reportes() {
             <Indicador titulo="Mano de obra" valor={money(data.resumen.servicios)} tono="violeta" />
             <Indicador titulo="Repuestos" valor={money(data.resumen.articulos)} tono="cian" />
             <Indicador titulo="Ticket promedio" valor={money(Math.round(data.resumen.ticket_promedio))} tono="verde" />
+            {data.devoluciones && <Indicador titulo="Devoluciones (notas de crédito)" valor={money(data.devoluciones.total)} detalle={`${data.devoluciones.cantidad} en el período · reintegrado ${money(data.devoluciones.reintegrado)}`} tono="rojo" />}
+            {data.anticipos && <Indicador titulo="Anticipos recibidos" valor={money(data.anticipos.total)} detalle={`${data.anticipos.cantidad} · no son ventas`} tono="ambar" />}
             <Indicador titulo="OT ingresadas" valor={data.ordenesPeriodo.ingresadas ?? 0} detalle={`${data.ordenesPeriodo.entregadas ?? 0} entregadas · ${data.ordenesPeriodo.canceladas ?? 0} canceladas`} tono="gris" />
             <Indicador titulo="Compras" valor={money(data.compras.total)} detalle={`${data.compras.cantidad} comprobantes`} tono="ambar" />
           </div>
           <div className="mt-5 grid gap-5 lg:grid-cols-2">
             <Tarjeta titulo="Ventas por día"><Barras filas={data.porDia} etiqueta={(f) => fecha(f.fecha)} valor={(f) => f.total} /></Tarjeta>
-            <Tarjeta titulo="Cobros por medio de pago"><Barras filas={data.porMedio} etiqueta={(f) => MEDIO_PAGO_LABEL[f.medio as MedioPago]} valor={(f) => f.total} /></Tarjeta>
+            <Tarjeta titulo="Cobros por medio de pago (incluye anticipos)"><Barras filas={data.porMedio} etiqueta={(f) => MEDIO_PAGO_LABEL[f.medio as MedioPago]} valor={(f) => f.total} /></Tarjeta>
             <Tarjeta titulo="Servicios más vendidos"><Barras filas={data.topServicios} etiqueta={(f) => `${f.descripcion} (${f.cantidad})`} valor={(f) => f.total} /></Tarjeta>
             <Tarjeta titulo="Repuestos más vendidos">
               <Barras filas={data.topArticulos} etiqueta={(f) => `${f.descripcion} (${f.cantidad})${f.costo ? ` · margen ${money(f.total - f.costo)}` : ''}`} valor={(f) => f.total} />

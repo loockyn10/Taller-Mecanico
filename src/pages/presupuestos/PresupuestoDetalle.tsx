@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Check, MessageCircle, Pencil, Printer, Wrench, X } from 'lucide-react';
+import { Check, MessageCircle, Pencil, Printer, Wallet, Wrench, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, km, money, numero, whatsapp } from '@/lib/format';
@@ -9,17 +9,21 @@ import { Aviso, Boton, Campo, Cargando, Dato, Encabezado, ErrorCaja, Input, Moda
 import { EstadoPresupuestoBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi } from '@/components/EditorItems';
 import { useMecanicos } from '@/components/selectores';
+import { ModalAnticipo } from '@/components/Devolucion';
+import { ESTADO_ANTICIPO_LABEL, type EstadoAnticipo } from '@shared/dominio';
 
 export function PresupuestoDetalle() {
   const { id } = useParams();
   const nav = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
-  const { me } = useAuth();
+  const { me, puede } = useAuth();
   const { confirmar, dialogo } = useConfirmar();
   const { data: p, isLoading, error, refetch } = useQuery({ queryKey: ['presupuesto', id], queryFn: () => api.get(`/presupuestos/${id}`) });
   const { data: mecanicos = [] } = useMecanicos();
   const [convertir, setConvertir] = useState(false);
+  const [anticipo, setAnticipo] = useState(false);
+  const { data: anticipos = [] } = useQuery({ queryKey: ['anticipos', { presupuesto: id }], queryFn: () => api.get<any[]>(`/anticipos?presupuesto_id=${id}`), enabled: puede('ventas.ver') });
   const [mec, setMec] = useState('');
   const [prometida, setPrometida] = useState('');
 
@@ -90,6 +94,21 @@ export function PresupuestoDetalle() {
             </Tarjeta>
           )}
           {p.estado === 'rechazado' && <Boton className="w-full" onClick={() => estado.mutate('pendiente')}>Reabrir presupuesto</Boton>}
+          {puede('ventas.ver') && p.cliente_codigo !== 0 && (anticipos.length > 0 || (abierto && puede('cobros.registrar'))) && (
+            <Tarjeta titulo="Anticipos" subtitulo="Dinero entregado antes de empezar (no es una venta)" acciones={abierto && puede('cobros.registrar') && <Boton tam="sm" icono={<Wallet className="size-4" />} onClick={() => setAnticipo(true)}>Registrar anticipo</Boton>}>
+              {anticipos.length === 0 ? <p className="text-sm text-tenue">Sin anticipos.</p> : (
+                <ul className="divide-y divide-borde text-sm">
+                  {anticipos.map((a: any) => (
+                    <li key={a.id} className="flex flex-wrap justify-between gap-2 py-1.5">
+                      <span>Recibo #{numero(a.numero)} · {fecha(a.fecha)} · {ESTADO_ANTICIPO_LABEL[a.estado_uso as EstadoAnticipo]}</span>
+                      <span className="tabular-nums">{money(a.total)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="mt-2 text-xs text-tenue">Al convertir el presupuesto en OT los anticipos siguen vinculados: se aplican al comprobante de la orden.</p>
+            </Tarjeta>
+          )}
           <Tarjeta titulo="Datos">
             <dl className="grid grid-cols-2 gap-4">
               <Dato etiqueta="Fecha">{fecha(p.fecha)}</Dato>
@@ -104,6 +123,7 @@ export function PresupuestoDetalle() {
         </div>
       </div>
 
+      {anticipo && <ModalAnticipo clienteFijo={{ id: p.cliente_id, nombre: p.cliente } as any} presupuestoId={p.id} onCerrar={() => setAnticipo(false)} />}
       <Modal
         abierto={convertir}
         onCerrar={() => setConvertir(false)}

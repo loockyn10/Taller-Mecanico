@@ -130,7 +130,7 @@ export const FRECUENCIA_GASTO_LABEL: Record<FrecuenciaGasto, string> = {
   anual: 'Anual',
 };
 
-export const RUBROS_CAJA = ['cobro', 'pago_proveedor', 'gasto', 'otro_ingreso', 'traspaso'] as const;
+export const RUBROS_CAJA = ['cobro', 'pago_proveedor', 'gasto', 'otro_ingreso', 'traspaso', 'devolucion'] as const;
 export type RubroCaja = (typeof RUBROS_CAJA)[number];
 export const RUBRO_CAJA_LABEL: Record<RubroCaja, string> = {
   cobro: 'Cobros de clientes',
@@ -138,6 +138,7 @@ export const RUBRO_CAJA_LABEL: Record<RubroCaja, string> = {
   gasto: 'Gastos',
   otro_ingreso: 'Otros ingresos',
   traspaso: 'Traspasos con bancos',
+  devolucion: 'Reintegros a clientes',
 };
 
 export const DESTINOS_PRECIO_BASE = ['costo', 'precio'] as const;
@@ -171,6 +172,7 @@ export const CATEGORIA_BANCO_LABEL: Record<string, string> = {
   manual: 'Movimiento manual',
   ajuste: 'Ajuste autorizado',
   reverso: 'Anulación',
+  devolucion: 'Reintegro a cliente',
 };
 
 export const ESTADOS_CHEQUE = ['en_cartera', 'depositado', 'entregado', 'acreditado', 'rechazado', 'anulado'] as const;
@@ -243,3 +245,35 @@ export const MOTIVO_AJUSTE_LABEL: Record<MotivoAjuste, string> = {
   uso_interno: 'Uso interno del taller',
   otro: 'Otro motivo',
 };
+
+// ───── Devoluciones, anticipos y saldo a favor ─────
+/** Medios con los que se reintegra dinero a un cliente (no se emiten cheques propios en un reintegro). */
+export const MEDIOS_REINTEGRO: readonly MedioPago[] = ['efectivo', 'transferencia', 'debito', 'credito', 'otro'];
+
+export const MOTIVOS_DEVOLUCION = ['arrepentimiento', 'repuesto_incorrecto', 'repuesto_defectuoso', 'servicio_no_conforme', 'error_de_facturacion', 'otro'] as const;
+export type MotivoDevolucion = (typeof MOTIVOS_DEVOLUCION)[number];
+export const MOTIVO_DEVOLUCION_LABEL: Record<MotivoDevolucion, string> = {
+  arrepentimiento: 'Arrepentimiento / ya no lo necesita',
+  repuesto_incorrecto: 'Repuesto incorrecto',
+  repuesto_defectuoso: 'Repuesto defectuoso',
+  servicio_no_conforme: 'Trabajo no conforme',
+  error_de_facturacion: 'Error de facturación',
+  otro: 'Otro',
+};
+
+/** Estado de uso de un anticipo, derivado de lo aplicado y devuelto. */
+export type EstadoAnticipo = 'pendiente' | 'parcial' | 'utilizado' | 'devuelto' | 'anulado';
+export const ESTADO_ANTICIPO_LABEL: Record<EstadoAnticipo, string> = {
+  pendiente: 'Pendiente de aplicar',
+  parcial: 'Aplicado en parte',
+  utilizado: 'Utilizado',
+  devuelto: 'Devuelto',
+  anulado: 'Anulado',
+};
+export function estadoAnticipo(a: { estado: string; total: number; credito_aplicado: number; devuelto: number }): EstadoAnticipo {
+  if (a.estado === 'anulado') return 'anulado';
+  const libre = a.total - a.credito_aplicado - a.devuelto;
+  if (libre === a.total) return 'pendiente';
+  if (libre > 0) return 'parcial';
+  return a.credito_aplicado > 0 ? 'utilizado' : 'devuelto';
+}

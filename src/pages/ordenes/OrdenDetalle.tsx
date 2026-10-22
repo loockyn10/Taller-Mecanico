@@ -12,9 +12,31 @@ import { Cronometro, EquipoOrden, NotasTecnicas, Tareas } from '@/components/Tra
 import { SelectorDeposito, useDepositos } from '@/components/SelectorDeposito';
 import { useMecanicos } from '@/components/selectores';
 import { ModalCobro, ModalEmitirCobrar } from '@/components/Cobro';
+import { ModalAnticipo } from '@/components/Devolucion';
 import { SelectorLista } from '@/components/SelectorLista';
 import { calcularTotales } from '@shared/totals';
-import { CHECKLIST_ITEMS, COMBUSTIBLE_NIVELES, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, type EstadoOT } from '@shared/dominio';
+import { ESTADO_ANTICIPO_LABEL, type EstadoAnticipo, CHECKLIST_ITEMS, COMBUSTIBLE_NIVELES, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, type EstadoOT } from '@shared/dominio';
+
+/** Reparte el saldo a favor del cliente sobre el total del comprobante: primero lo vinculado a esta OT (o a su presupuesto), después lo más antiguo. */
+function repartirCreditos(creditos: any[], total: number, ordenId: string): Array<{ origen_tipo: string; origen_id: string; importe: number }> {
+  const propio = (c: any) => c.orden_id === ordenId;
+  const orden = [...creditos].sort((a, b) => Number(propio(b)) - Number(propio(a)));
+  let resto = total;
+  const out: Array<{ origen_tipo: string; origen_id: string; importe: number }> = [];
+  for (const c of orden) {
+    if (resto <= 0) break;
+    const u = Math.min(c.disponible, resto);
+    out.push({ origen_tipo: c.origen_tipo, origen_id: c.origen_id, importe: u });
+    resto -= u;
+  }
+  return out;
+}
+
+const CALIDAD: Record<string, { texto: string; tono: string }> = {
+  definitivo: { texto: 'Margen definitivo', tono: 'text-emerald-700' },
+  estimado: { texto: 'Margen estimado (no definitivo)', tono: 'text-amber-700' },
+  parcial: { texto: 'Margen parcial: faltan datos', tono: 'text-red-600' },
+};
 
 function Checklist({ orden }: { orden: any }) {
   const qc = useQueryClient();
@@ -153,6 +175,11 @@ export function OrdenDetalle() {
   const [cab, setCab] = useState({ mecanico_id: '', km_ingreso: '', falla_reportada: '', diagnostico: '', observaciones: '', fecha_prometida: '' });
   const [lista, setLista] = useState<string | null>(null);
   const [emitirCobrar, setEmitirCobrar] = useState(false);
+  const [anticipo, setAnticipo] = useState(false);
+  const [usarCreditos, setUsarCreditos] = useState(true);
+  const verDinero = puede('ventas.ver');
+  const { data: anticiposOT = [] } = useQuery({ queryKey: ['anticipos', { orden: id }], queryFn: () => api.get<any[]>(`/anticipos?orden_id=${id}`), enabled: verDinero && !!o });
+  const { data: creditosCli } = useQuery({ queryKey: ['creditos', o?.cliente_id], queryFn: () => api.get<any>(`/creditos?cliente_id=${o.cliente_id}`), enabled: verDinero && !!o && !o.venta_id && o.cliente_codigo !== 0 });
   const { data: depositos = [] } = useDepositos();
   const cambiarDeposito = useMutation({
     mutationFn: (deposito_id: string) => api.patch(`/ordenes/${id}/deposito`, { deposito_id: deposito_id || null }),
@@ -203,7 +230,7 @@ export function OrdenDetalle() {
   });
 
   const comprobante = useMutation({
-    mutationFn: (datos: { condicion: string; cobro?: Record<string, unknown> }) => api.post(`/ordenes/${id}/comprobante`, datos),
+    mutationFn: (datos: { condicion: string; cobro?: Record<string, unknown>; creditos?: Array<Record<string, unknown>> }) => api.post(`/ordenes/${id}/comprobante`, datos),
     onSuccess: (v) => {
       ['orden', 'ventas', 'dashboard', 'cuentas', 'cobros', 'caja', 'finanzas'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       toast.ok(`Comprobante interno #${numero(v.numero)} generado`);
@@ -224,7 +251,11 @@ export function OrdenDetalle() {
   const puedeAsignar = !cerrada && (puedeModificar || puede('ordenes.asignar'));
   // Editar ítems exige ver precios e importes (el servidor también lo verifica).
   const editable = ESTADOS_OT_EDITABLES.includes(o.estado) && puedeModificar && valorizado && puede('precios.venta.ver');
-  const saldo = o.venta_id ? o.venta_total - o.venta_cobrado : null;
+  const saldo = o.venta_id ? o.venta_total - o.venta_cobrado - (o.venta_devuelto ?? 0) : null;
+  const creditosAplicar = usarCreditos && creditosCli?.creditos ? repartirCreditos(creditosCli.creditos, o.total ?? 0, o.id) : [];
+  const aplicadoCreditos = creditosAplicar.reduce((a, x) => a + x.importe, 0);
+  const vigentesAnt = anticiposOT.filter((a) => a.estado === 'registrado');
+  const abonado = vigentesAnt.reduce((a, x) => a + x.total - x.devuelto, 0);
   const vehiculo = [o.marca, o.modelo, o.anio].filter(Boolean).join(' ');
   const wa = !o.cliente ? null : whatsapp(
     o.cliente_telefono,
@@ -335,9 +366,17 @@ export function OrdenDetalle() {
                     <div className="space-y-4">
                       <p className="text-sm text-tenue">Generá el comprobante interno con los ítems de la OT para registrar la deuda del cliente y cobrarla.</p>
                       {valorizado && <ResumenTotales t={calcularTotales(o.items, o)} params={o} />}
+                      {creditosCli?.total > 0 && (
+                        <Aviso tono="verde">
+                          <label className="flex items-start gap-2">
+                            <input type="checkbox" className="mt-0.5 accent-marca-600" checked={usarCreditos} onChange={(e) => setUsarCreditos(e.target.checked)} />
+                            <span>Aplicar el saldo a favor del cliente (anticipos y créditos): <strong>{money(aplicadoCreditos)}</strong>. {usarCreditos ? `Se cobra el resto: ${money(Math.max(0, o.total - aplicadoCreditos))}.` : 'No se aplica ahora (se puede aplicar después desde el comprobante).'}</span>
+                          </label>
+                        </Aviso>
+                      )}
                       <div className="flex flex-wrap gap-2">
-                        {puede('cobros.registrar') && <Boton variante="primario" icono={<Wallet className="size-4" />} cargando={comprobante.isPending} onClick={() => setEmitirCobrar(true)}>Emitir y cobrar ({money(o.total)})</Boton>}
-                        <Boton icono={<Receipt className="size-4" />} disabled={o.cliente_codigo === 0} title={o.cliente_codigo === 0 ? 'La cuenta corriente requiere un cliente identificado' : undefined} cargando={comprobante.isPending} onClick={() => comprobante.mutate({ condicion: 'cuenta_corriente' })}>Emitir a cuenta corriente</Boton>
+                        {puede('cobros.registrar') && (o.total - aplicadoCreditos > 0 ? <Boton variante="primario" icono={<Wallet className="size-4" />} cargando={comprobante.isPending} onClick={() => setEmitirCobrar(true)}>Emitir y cobrar ({money(o.total - aplicadoCreditos)})</Boton> : <Boton variante="primario" icono={<Wallet className="size-4" />} cargando={comprobante.isPending} onClick={() => comprobante.mutate({ condicion: 'cuenta_corriente', creditos: creditosAplicar })}>Emitir y cancelar con saldo a favor</Boton>)}
+                        <Boton icono={<Receipt className="size-4" />} disabled={o.cliente_codigo === 0} title={o.cliente_codigo === 0 ? 'La cuenta corriente requiere un cliente identificado' : undefined} cargando={comprobante.isPending} onClick={() => comprobante.mutate({ condicion: 'cuenta_corriente', creditos: creditosAplicar })}>Emitir a cuenta corriente</Boton>
                       </div>
                       <p className="text-xs text-tenue">Comprobante interno, no fiscal. La facturación electrónica ARCA todavía no está integrada.</p>
                     </div>
@@ -390,6 +429,26 @@ export function OrdenDetalle() {
               )}
             </dl>
           </Tarjeta>
+          {verDinero && o.cliente_codigo !== 0 && (anticiposOT.length > 0 || (puede('cobros.registrar') && !cerrada)) && (
+            <Tarjeta titulo="Anticipos del cliente" subtitulo="Dinero entregado antes de la venta (no es una venta)" acciones={puede('cobros.registrar') && !cerrada && <Boton tam="sm" icono={<Wallet className="size-4" />} onClick={() => setAnticipo(true)}>Registrar anticipo</Boton>}>
+              {anticiposOT.length === 0 ? <p className="text-sm text-tenue">Sin anticipos para esta orden.</p> : (
+                <>
+                  <ul className="divide-y divide-borde text-sm">
+                    {anticiposOT.map((a: any) => (
+                      <li key={a.id} className="flex flex-wrap justify-between gap-2 py-1.5">
+                        <span><Link className="text-marca-700" to="/cobros?tab=anticipos">Recibo #{numero(a.numero)}</Link> · {fecha(a.fecha)} · {ESTADO_ANTICIPO_LABEL[a.estado_uso as EstadoAnticipo]}</span>
+                        <span className="tabular-nums">{money(a.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <dl className="mt-2 space-y-1 border-t border-borde pt-2 text-sm">
+                    <div className="flex justify-between"><dt className="text-tenue">Abonado por el cliente (anticipos netos)</dt><dd className="tabular-nums">{money(abonado)}</dd></div>
+                    {valorizado && <div className="flex justify-between font-medium"><dt>{o.venta_id ? 'Saldo del comprobante' : 'Falta cobrar (estimado)'}</dt><dd className="tabular-nums">{money(o.venta_id ? saldo! : Math.max(0, o.total - abonado))}</dd></div>}
+                  </dl>
+                </>
+              )}
+            </Tarjeta>
+          )}
           {valorizado ? (
             <Tarjeta titulo="Importe">
               <div className="text-3xl font-bold tabular-nums">{money(o.total)}</div>
@@ -397,16 +456,20 @@ export function OrdenDetalle() {
               {o.stock_aplicado ? <p className="mt-2 text-xs text-tenue">Repuestos descontados del stock.</p> : null}
             </Tarjeta>
           ) : null}
-          {rent && (
-            <Tarjeta titulo="Rentabilidad" subtitulo={rent.costo_estimado ? 'Costo estimado (los repuestos aún no se descontaron)' : 'Con el costo de los repuestos al descontarlos del stock'}>
+          {rent?.resumen && (
+            <Tarjeta titulo="Rentabilidad" subtitulo="Neto de descuentos, sin IVA y neto de devoluciones">
               <dl className="space-y-1.5 text-sm">
-                <div className="flex justify-between"><dt className="text-tenue">Repuestos (venta)</dt><dd className="tabular-nums">{money(rent.totales_repuestos.venta)}</dd></div>
-                <div className="flex justify-between"><dt className="text-tenue">Repuestos (costo)</dt><dd className="tabular-nums">{money(rent.totales_repuestos.costo)}</dd></div>
-                <div className="flex justify-between border-t border-borde pt-1.5 font-medium"><dt>Margen de repuestos</dt><dd className="tabular-nums">{money(rent.totales_repuestos.margen)}</dd></div>
-                <div className="flex justify-between"><dt className="text-tenue">Mano de obra (venta)</dt><dd className="tabular-nums">{money(rent.mano_obra.venta)}</dd></div>
-                {rent.mano_obra.horas_registradas_seg > 0 && <div className="flex justify-between"><dt className="text-tenue">Horas cronometradas</dt><dd className="tabular-nums">{duracion(rent.mano_obra.horas_registradas_seg)}</dd></div>}
+                <div className="flex justify-between"><dt className="text-tenue">Mano de obra cobrada</dt><dd className="tabular-nums">{money(rent.resumen.mo_cobrada)}</dd></div>
+                <div className="flex justify-between"><dt className="text-tenue">Costo de mano de obra estimado</dt><dd className="tabular-nums">{rent.resumen.mo_costo_estimado != null ? money(rent.resumen.mo_costo_estimado) : 'sin dato'}{!rent.resumen.mo_estimado_congelado && rent.resumen.mo_costo_estimado != null ? ' (provisorio)' : ''}</dd></div>
+                <div className="flex justify-between"><dt className="text-tenue">Costo de mano de obra real{rent.resumen.mo_segundos > 0 ? ` (${duracion(rent.resumen.mo_segundos)})` : ''}</dt><dd className="tabular-nums">{rent.resumen.mo_segundos > 0 ? money(rent.resumen.mo_costo_real) : 'sin tiempo registrado'}</dd></div>
+                <div className="flex justify-between"><dt className="text-tenue">Repuestos (venta)</dt><dd className="tabular-nums">{money(rent.resumen.repuestos_venta)}</dd></div>
+                <div className="flex justify-between"><dt className="text-tenue">Repuestos (costo){rent.resumen.repuestos_costo_estimado ? ' · estimado' : ''}</dt><dd className="tabular-nums">{money(rent.resumen.repuestos_costo)}</dd></div>
+                {(rent.resumen.mo_devuelta > 0 || rent.resumen.repuestos_devuelto > 0) && <div className="flex justify-between"><dt className="text-tenue">Devuelto al cliente</dt><dd className="tabular-nums">−{money(rent.resumen.mo_devuelta + rent.resumen.repuestos_devuelto)}</dd></div>}
+                <div className="flex justify-between border-t border-borde pt-1.5 font-semibold"><dt>Margen bruto{rent.resumen.margen_pct != null ? ` (${String(rent.resumen.margen_pct).replace('.', ',')}%)` : ''}</dt><dd className="tabular-nums">{money(rent.resumen.margen_bruto)}</dd></div>
               </dl>
-              <p className="mt-2 text-xs text-tenue">{rent.nota} La mano de obra no tiene costo cargado.</p>
+              <p className={`mt-2 text-sm font-medium ${CALIDAD[rent.resumen.calidad].tono}`}>{CALIDAD[rent.resumen.calidad].texto}</p>
+              {rent.resumen.faltantes.length > 0 && <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-tenue">{rent.resumen.faltantes.map((f: string, i: number) => <li key={i}>{f}</li>)}</ul>}
+              <p className="mt-2 text-xs text-tenue">El costo de la mano de obra usa el costo horario vigente cuando se trabajó; cambiarlo después no modifica órdenes ya trabajadas.</p>
             </Tarjeta>
           )}
           {o.estado === 'cancelada' && puedeModificar && (
@@ -428,7 +491,8 @@ export function OrdenDetalle() {
 
       {estadoModal && <CambiarEstado orden={o} soloTaller={!puedeModificar} onCerrar={() => setEstadoModal(false)} />}
       {cobro && <ModalCobro abierto onCerrar={() => setCobro(false)} clienteId={o.cliente_id} ventaId={o.venta_id} />}
-      {emitirCobrar && <ModalEmitirCobrar total={o.total} cargando={comprobante.isPending} onCerrar={() => setEmitirCobrar(false)} onConfirmar={(cobro) => comprobante.mutate({ condicion: 'contado', cobro })} />}
+      {emitirCobrar && <ModalEmitirCobrar total={o.total - aplicadoCreditos} cargando={comprobante.isPending} onCerrar={() => setEmitirCobrar(false)} onConfirmar={(cobro) => comprobante.mutate({ condicion: 'contado', cobro, creditos: creditosAplicar })} />}
+      {anticipo && <ModalAnticipo clienteFijo={{ id: o.cliente_id, nombre: o.cliente } as any} ordenId={o.id} onCerrar={() => setAnticipo(false)} />}
     </>
   );
 }

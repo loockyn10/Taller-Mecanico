@@ -30,6 +30,9 @@ import { historial } from './modules/historial';
 import { mantenimientos } from './modules/mantenimientos';
 import { productividad } from './modules/productividad';
 import { depositos } from './modules/depositos';
+import { anticipos } from './modules/anticipos';
+import { devoluciones } from './modules/devoluciones';
+import { costos } from './modules/costos';
 
 const app = new Hono<AppEnv>();
 
@@ -63,6 +66,9 @@ api.route('/', catalogo);
 api.route('/presupuestos', presupuestos);
 api.route('/ordenes', ordenes);
 api.route('/', comercial);
+api.route('/', anticipos);
+api.route('/', devoluciones);
+api.route('/', costos);
 api.route('/', compras);
 api.route('/turnos', agenda);
 api.route('/', reportes);

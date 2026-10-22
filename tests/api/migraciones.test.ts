@@ -164,4 +164,63 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(() => db.exec("INSERT INTO transferencias_stock (id, taller_id, numero, fecha, origen_id, destino_id, idem_key) VALUES ('x1', 't1', 1, '2026-10-01', 'd7', 'd7', 'k1')")).toThrow(/CHECK/);
     db.close();
   });
+
+  it('0009 conserva caja, bancos, cobros y comprobantes del Sprint 08 y deja la base lista para devoluciones, anticipos y costos', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    const migraciones = fs.readdirSync(path.join(RAIZ, 'migrations')).sort();
+    for (const m of migraciones.filter((f) => f < '0009')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all() as Array<Record<string, any>>;
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Viejo');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x');
+      INSERT INTO taller_config (taller_id) VALUES ('t1');
+      INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES ('c1', 't1', 1, 'Cliente');
+      INSERT INTO vehiculos (id, taller_id, cliente_id, patente) VALUES ('veh1', 't1', 'c1', 'AAA111');
+      INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, total, cobrado) VALUES ('v1', 't1', 1, 'c1', '2026-10-01', 10000, 4000);
+      INSERT INTO cobros (id, taller_id, numero, cliente_id, fecha, total, idem_key) VALUES ('co1', 't1', 1, 'c1', '2026-10-01', 4000, 'k1');
+      INSERT INTO cobro_medios (id, taller_id, cobro_id, medio, importe) VALUES ('cm1', 't1', 'co1', 'efectivo', 4000);
+      INSERT INTO cobro_aplicaciones (id, taller_id, cobro_id, venta_id, importe) VALUES ('ca1', 't1', 'co1', 'v1', 4000);
+      INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('mv1', 't1', 'ingreso', 'cobro', 'efectivo', 4000, 'Cobro', 'cobro', 'cm1', '2026-10-01');
+      INSERT INTO cuentas_bancarias (id, taller_id, nombre, banco) VALUES ('cb1', 't1', 'Cuenta', 'Banco');
+      INSERT INTO banco_movimientos (id, taller_id, cuenta_id, fecha, tipo, categoria, importe, concepto, origen_tipo, origen_id) VALUES ('bm1', 't1', 'cb1', '2026-10-01', 'ingreso', 'manual', 500, 'Manual', 'manual', 'bm1');
+      INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, fecha_ingreso) VALUES ('o1', 't1', 1, 'c1', 'veh1', '2026-10-01');
+      INSERT INTO orden_tiempos (id, taller_id, orden_id, usuario_id, inicio_at, fin_at, duracion_seg) VALUES ('ti1', 't1', 'o1', 'u1', '2026-10-01T10:00:00Z', '2026-10-01T11:00:00Z', 3600);
+    `);
+    db.exec(leer('migrations', migraciones.find((f) => f.startsWith('0009'))!));
+    // Nada se perdió y los saldos son los mismos (devuelto arranca en 0)
+    expect({ ...uno('SELECT total, cobrado, devuelto FROM ventas') }).toEqual({ total: 10000, cobrado: 4000, devuelto: 0 });
+    expect(uno('SELECT COUNT(*) AS n FROM caja_movimientos').n).toBe(1);
+    expect(uno('SELECT COUNT(*) AS n FROM banco_movimientos').n).toBe(1);
+    expect({ ...uno('SELECT tipo, credito_aplicado, devuelto FROM cobros') }).toEqual({ tipo: 'cobro', credito_aplicado: 0, devuelto: 0 });
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    // Los tramos anteriores no se reconstruyen con costos de hoy: quedan sin costo histórico
+    expect({ ...uno('SELECT costo_hora, costo_origen FROM orden_tiempos') }).toEqual({ costo_hora: null, costo_origen: null });
+    expect({ ...uno('SELECT mo_estimado_at, mo_costo_estimado FROM ordenes') }).toEqual({ mo_estimado_at: null, mo_costo_estimado: null });
+    // Los índices antiduplicación sobrevivieron a la reconstrucción de la caja y del banco
+    expect(() => db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('mv2', 't1', 'ingreso', 'cobro', 'efectivo', 1, 'Dup', 'cobro', 'cm1', '2026-10-01')")).toThrow(/UNIQUE/);
+    expect(() => db.exec("INSERT INTO banco_movimientos (id, taller_id, cuenta_id, fecha, tipo, categoria, importe, concepto, origen_tipo, origen_id) VALUES ('bm2', 't1', 'cb1', '2026-10-01', 'ingreso', 'manual', 1, 'Dup', 'manual', 'bm1')")).toThrow(/UNIQUE/);
+    // Nuevos rubros y categorías admitidos
+    db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('mv3', 't1', 'egreso', 'devolucion', 'efectivo', 100, 'Reintegro', 'reintegro', 'rm1', '2026-10-02')");
+    db.exec("INSERT INTO banco_movimientos (id, taller_id, cuenta_id, fecha, tipo, categoria, importe, concepto, origen_tipo, origen_id) VALUES ('bm3', 't1', 'cb1', '2026-10-02', 'egreso', 'devolucion', 100, 'Reintegro', 'reintegro_medio', 'rm1')");
+    // No se puede devolver más de lo vendido ni aplicar un anticipo más de una vez
+    expect(() => db.exec("UPDATE ventas SET devuelto = 7000 WHERE id = 'v1'")).toThrow(/CHECK/);
+    db.exec("UPDATE ventas SET devuelto = 6000 WHERE id = 'v1'");
+    expect(() => db.exec("UPDATE cobros SET tipo = 'anticipo', credito_aplicado = 3000, devuelto = 2000 WHERE id = 'co1'")).toThrow(/CHECK/);
+    expect(() => db.exec("UPDATE cobros SET tipo = 'otro' WHERE id = 'co1'")).toThrow(/CHECK/);
+    // El cierre de un tramo congela el costo vigente (de la persona o el general) y no se reescribe después
+    db.exec("UPDATE taller_config SET costo_hora_general = 1000 WHERE taller_id = 't1'");
+    db.exec("INSERT INTO orden_tiempos (id, taller_id, orden_id, usuario_id, inicio_at) VALUES ('ti2', 't1', 'o1', 'u1', '2026-10-02T10:00:00Z')");
+    db.exec("UPDATE orden_tiempos SET fin_at = '2026-10-02T11:00:00Z', duracion_seg = 3600 WHERE id = 'ti2'");
+    expect({ ...uno("SELECT costo_hora, costo_origen FROM orden_tiempos WHERE id = 'ti2'") }).toEqual({ costo_hora: 1000, costo_origen: 'general' });
+    db.exec("UPDATE usuarios SET costo_hora = 5000 WHERE id = 'u1'");
+    db.exec("UPDATE taller_config SET costo_hora_general = 9999 WHERE taller_id = 't1'");
+    expect(uno("SELECT costo_hora FROM orden_tiempos WHERE id = 'ti2'").costo_hora).toBe(1000);
+    db.exec("INSERT INTO orden_tiempos (id, taller_id, orden_id, usuario_id, inicio_at) VALUES ('ti3', 't1', 'o1', 'u1', '2026-10-03T10:00:00Z')");
+    db.exec("UPDATE orden_tiempos SET fin_at = '2026-10-03T11:00:00Z', duracion_seg = 3600 WHERE id = 'ti3'");
+    expect({ ...uno("SELECT costo_hora, costo_origen FROM orden_tiempos WHERE id = 'ti3'") }).toEqual({ costo_hora: 5000, costo_origen: 'persona' });
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    db.close();
+  });
 });

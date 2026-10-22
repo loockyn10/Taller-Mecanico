@@ -54,6 +54,7 @@ function StockDeDeposito({ dep, onCerrar }: { dep: DepositoApi; onCerrar: () => 
             { clave: 'c', titulo: 'Código', render: (i) => i.codigo ?? '—', movil: 'meta' },
             { clave: 'n', titulo: 'Artículo', render: (i) => <span className="font-medium">{i.nombre}</span>, movil: 'titulo' },
             { clave: 's', titulo: 'Stock', alinear: 'derecha', render: (i) => `${cantidad(i.stock)} ${i.unidad}`, movil: 'derecha' },
+            { clave: 'mn', titulo: 'Mínimo del depósito', alinear: 'derecha', render: (i: any) => (i.minimo_deposito != null ? <span className={i.bajo_minimo ? 'font-semibold text-amber-700' : ''}>{cantidad(i.minimo_deposito)}{i.bajo_minimo ? ' · reponer' : ''}</span> : '—'), movil: 'meta' },
             { clave: 't', titulo: 'Total taller', alinear: 'derecha', render: (i) => cantidad(i.stock_total), movil: 'oculta' },
             ...(conValor ? [{ clave: 'v', titulo: 'Valor al costo', alinear: 'derecha' as const, render: (i: any) => money(i.valor_costo), movil: 'meta' as const }] : []),
           ]}

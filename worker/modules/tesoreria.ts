@@ -50,7 +50,7 @@ tesoreria.get('/resumen', async (c) => {
   const cfg = await first<{ d: number }>(db, 'SELECT alerta_cheques_dias AS d FROM taller_config WHERE taller_id = ?', t);
   const alerta = cfg?.d ?? 7;
 
-  const [efectivo, cuentas, saldos, rubros, bancarios, internos, cxc, deudas, recurrentes, cheq, serieCaja, serieBanco] = await Promise.all([
+  const [efectivo, cuentas, saldos, rubros, bancarios, internos, cxc, deudas, recurrentes, cheq, serieCaja, serieBanco, aFavor] = await Promise.all([
     efectivoEnCaja(db, t),
     all<any>(db, 'SELECT id, nombre, banco, moneda, activa FROM cuentas_bancarias WHERE taller_id = ? ORDER BY activa DESC, nombre', t),
     saldosCuentas(db, t),
@@ -73,10 +73,10 @@ tesoreria.get('/resumen', async (c) => {
     ),
     first<{ por_cobrar: number; vencido: number; periodo: number }>(
       db,
-      `SELECT COALESCE(SUM(total - cobrado), 0) AS por_cobrar,
-              COALESCE(SUM(CASE WHEN julianday(?) - julianday(fecha) > 30 THEN total - cobrado END), 0) AS vencido,
-              COALESCE(SUM(CASE WHEN fecha BETWEEN ? AND ? THEN total - cobrado END), 0) AS periodo
-         FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND cobrado < total`,
+      `SELECT COALESCE(SUM(total - devuelto - cobrado), 0) AS por_cobrar,
+              COALESCE(SUM(CASE WHEN julianday(?) - julianday(fecha) > 30 THEN total - devuelto - cobrado END), 0) AS vencido,
+              COALESCE(SUM(CASE WHEN fecha BETWEEN ? AND ? THEN total - devuelto - cobrado END), 0) AS periodo
+         FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND cobrado + devuelto < total`,
       h, desde, hasta, t,
     ),
     deudaProveedores(db, t),
@@ -96,6 +96,13 @@ tesoreria.get('/resumen', async (c) => {
         WHERE m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.afecta_resultado = 1 AND cb.moneda = 'ARS' GROUP BY m.fecha`,
       t, desde, hasta,
     ),
+    first<{ anticipos: number; devoluciones: number; recibidos: number }>(
+      db,
+      `SELECT (SELECT COALESCE(SUM(total - credito_aplicado - devuelto), 0) FROM cobros WHERE taller_id = ? AND tipo = 'anticipo' AND estado = 'registrado') AS anticipos,
+              (SELECT COALESCE(SUM(liberado - reintegrado - credito_aplicado), 0) FROM devoluciones WHERE taller_id = ? AND estado = 'registrada') AS devoluciones,
+              (SELECT COALESCE(SUM(total), 0) FROM cobros WHERE taller_id = ? AND tipo = 'anticipo' AND estado = 'registrado' AND fecha BETWEEN ? AND ?) AS recibidos`,
+      t, t, t, desde, hasta,
+    ),
   ]);
 
   const cuentasConSaldo = cuentas.map((x) => ({ ...x, ...(saldos.find((v) => v.id === x.id) ?? { saldo: 0, saldo_conciliado: 0, pendientes: 0 }) }));
@@ -105,7 +112,7 @@ tesoreria.get('/resumen', async (c) => {
 
   const neto = (r: string) => rubros.find((x) => x.rubro === r)?.neto ?? 0;
   const ingCaja = neto('cobro') + neto('otro_ingreso');
-  const egrCaja = -(neto('pago_proveedor') + neto('gasto'));
+  const egrCaja = -(neto('pago_proveedor') + neto('gasto') + neto('devolucion'));
   const ingBanco = bancarios?.ingresos ?? 0;
   const egrBanco = bancarios?.egresos ?? 0;
   const ingresos = ingCaja + ingBanco;
@@ -140,6 +147,8 @@ tesoreria.get('/resumen', async (c) => {
       dias_alerta: alerta,
     },
     cuentas_por_cobrar: { total: cxc?.por_cobrar ?? 0, vencido_30: cxc?.vencido ?? 0, ventas_del_periodo: cxc?.periodo ?? 0 },
+    // Plata de clientes que todavía no es una venta (anticipos sin aplicar) o que se les debe (crédito de devoluciones): una obligación, no un ingreso.
+    a_favor_clientes: { anticipos: aFavor?.anticipos ?? 0, devoluciones: aFavor?.devoluciones ?? 0, total: (aFavor?.anticipos ?? 0) + (aFavor?.devoluciones ?? 0), anticipos_recibidos_periodo: aFavor?.recibidos ?? 0 },
     cuentas_por_pagar: { total: cxp, vencido: cxpVencido, vence_7_dias: cxpSemana, proveedores_con_deuda: deudas.filter((d) => d.saldo > 0).length },
     obligaciones: {
       gastos_recurrentes_vencidos: recurrentes?.n ?? 0,
@@ -149,7 +158,7 @@ tesoreria.get('/resumen', async (c) => {
     },
     periodo: {
       ingresos: { cobros: neto('cobro'), otros: neto('otro_ingreso'), bancarios: ingBanco, total: ingresos },
-      egresos: { pagos_proveedor: -neto('pago_proveedor'), gastos: -neto('gasto'), bancarios: egrBanco, total: egresos },
+      egresos: { pagos_proveedor: -neto('pago_proveedor'), gastos: -neto('gasto'), devoluciones_clientes: -neto('devolucion'), bancarios: egrBanco, total: egresos },
       resultado: ingresos - egresos,
       transferencias_internas: { depositos: interno('deposito'), extracciones: interno('extraccion'), entre_cuentas: interno('transferencia'), nota: 'Mueven plata entre caja y bancos: no son ingresos ni egresos.' },
     },

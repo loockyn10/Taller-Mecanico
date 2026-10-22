@@ -7,6 +7,7 @@ import { all, auditar, delTaller, first, like, run, SEQ_VALOR, seqIncrementar, u
 import { requireAny, requirePerm, tiene } from '../lib/auth';
 import { limpiarDocumento, limpiarMantenimiento } from '../lib/privacidad';
 import { estadoMantenimientos } from '../lib/mantenimiento';
+import { credito_cliente_sql, creditosDisponibles } from '../lib/creditos';
 import { CONDICIONES_IVA, normalizarPatente } from '../../shared/dominio';
 
 export const maestros = new Hono<AppEnv>();
@@ -33,7 +34,8 @@ maestros.get('/clientes', requirePerm('clientes.ver'), async (c) => {
     c.env.DB,
     `SELECT c.id, c.codigo, c.nombre, c.documento_tipo, c.documento, c.condicion_iva, c.telefono, c.email, c.localidad, c.activo,
             (SELECT COUNT(*) FROM vehiculos v WHERE v.taller_id = c.taller_id AND v.cliente_id = c.id AND v.activo = 1) AS vehiculos,
-            (SELECT COALESCE(SUM(total - cobrado), 0) FROM ventas ve WHERE ve.taller_id = c.taller_id AND ve.cliente_id = c.id AND ve.estado = 'emitida') AS saldo
+            (SELECT COALESCE(SUM(total - devuelto - cobrado), 0) FROM ventas ve WHERE ve.taller_id = c.taller_id AND ve.cliente_id = c.id AND ve.estado = 'emitida') AS saldo,
+            ${credito_cliente_sql('c')} AS a_favor
        FROM clientes c
       WHERE c.taller_id = ? ${inactivos ? '' : 'AND c.activo = 1'} ${filtroQ}
       ORDER BY c.codigo = 0 DESC, c.nombre COLLATE NOCASE LIMIT ?`,
@@ -42,7 +44,7 @@ maestros.get('/clientes', requirePerm('clientes.ver'), async (c) => {
     limite,
   );
   // El saldo es información de cuenta corriente: solo para quien puede ver ventas y cobranzas.
-  return c.json(tiene(s, 'ventas.ver') ? rows : rows.map((r) => ({ ...r, saldo: undefined })));
+  return c.json(tiene(s, 'ventas.ver') ? rows : rows.map((r) => ({ ...r, saldo: undefined, a_favor: undefined })));
 });
 
 maestros.get('/clientes/:id', requirePerm('clientes.ver'), async (c) => {
@@ -68,9 +70,10 @@ maestros.get('/clientes/:id', requirePerm('clientes.ver'), async (c) => {
       )).map((o) => limpiarDocumento(s, o))
     : [];
   const saldo = tiene(s, 'ventas.ver')
-    ? (await first<{ saldo: number }>(c.env.DB, "SELECT COALESCE(SUM(total - cobrado), 0) AS saldo FROM ventas WHERE taller_id = ? AND cliente_id = ? AND estado = 'emitida'", s.tallerId, cli.id))?.saldo ?? 0
+    ? (await first<{ saldo: number }>(c.env.DB, "SELECT COALESCE(SUM(total - devuelto - cobrado), 0) AS saldo FROM ventas WHERE taller_id = ? AND cliente_id = ? AND estado = 'emitida'", s.tallerId, cli.id))?.saldo ?? 0
     : undefined;
-  return c.json({ ...cli, vehiculos, ordenes, saldo });
+  const aFavor = tiene(s, 'ventas.ver') ? (await creditosDisponibles(c.env.DB, s.tallerId, cli.id as string)).reduce((x, k) => x + k.disponible, 0) : undefined;
+  return c.json({ ...cli, vehiculos, ordenes, saldo, a_favor: aFavor });
 });
 
 maestros.post('/clientes', requirePerm('clientes.crear'), async (c) => {

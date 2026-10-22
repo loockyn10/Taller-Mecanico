@@ -18,7 +18,7 @@ const RUTA: Record<string, string> = { presupuesto: '/presupuestos/', orden: '/o
 export function Imprimir() {
   const { tipo = '' } = useParams();
   if (tipo === 'orden-compra' || tipo === 'cuenta-proveedor' || tipo === 'recepcion' || tipo === 'orden-pago') return <ImprimirCompras />;
-  return tipo === 'recibo' || tipo === 'cuenta' ? <ImprimirDinero /> : <ImprimirDocumento />;
+  return tipo === 'recibo' || tipo === 'cuenta' || tipo === 'devolucion' ? <ImprimirDinero /> : <ImprimirDocumento />;
 }
 
 function ImprimirDocumento() {

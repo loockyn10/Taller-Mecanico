@@ -7,7 +7,8 @@ import { useAuth } from '@/lib/auth';
 import { invalidarDinero } from '@/lib/caja';
 import { descargarCSV, pesosCSV } from '@/lib/csv';
 import { fecha, hoyISO, money, numero, sumarDias } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Input, Insignia, Modal, Select, Tabla, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
+import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Input, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
+import { AnticiposTab, DevolucionesTab } from './AnticiposDevoluciones';
 import { MEDIOS_PAGO, MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
 
 function DetalleCobro({ id, onCerrar, onAnular }: { id: string; onCerrar: () => void; onAnular: (c: any) => void }) {
@@ -17,7 +18,7 @@ function DetalleCobro({ id, onCerrar, onAnular }: { id: string; onCerrar: () => 
     <Modal
       abierto
       onCerrar={onCerrar}
-      titulo={c ? `Recibo N° ${numero(c.numero)}` : 'Cobro'}
+      titulo={c ? `${c.tipo === 'anticipo' ? 'Recibo de anticipo' : 'Recibo'} N° ${numero(c.numero)}` : 'Cobro'}
       ancho="lg"
       pie={c && (
         <>
@@ -41,7 +42,8 @@ function DetalleCobro({ id, onCerrar, onAnular }: { id: string; onCerrar: () => 
               {c.medios.map((m: any, i: number) => <li key={i} className="flex justify-between px-3 py-2"><span>{MEDIO_PAGO_LABEL[m.medio as MedioPago]}{m.referencia ? ` · ${m.referencia}` : ''}</span><span className="tabular-nums">{money(m.importe)}</span></li>)}
             </ul>
           </div>
-          <div>
+          {c.tipo === 'anticipo' && <Aviso>Anticipo: dinero recibido antes de la venta (no es una venta). Aplicado {money(c.credito_aplicado)} · devuelto {money(c.devuelto)} · disponible {money(c.estado === 'registrado' ? c.total - c.credito_aplicado - c.devuelto : 0)}. El detalle de aplicaciones está en la pestaña Anticipos.</Aviso>}
+          {c.tipo !== 'anticipo' && <div>
             <h3 className="mb-2 text-sm font-semibold">Comprobantes cancelados</h3>
             <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
               {c.aplicaciones.map((a: any) => (
@@ -51,7 +53,7 @@ function DetalleCobro({ id, onCerrar, onAnular }: { id: string; onCerrar: () => 
                 </li>
               ))}
             </ul>
-          </div>
+          </div>}
           {c.notas && <p className="text-sm"><span className="font-medium">Notas:</span> {c.notas}</p>}
         </div>
       )}
@@ -73,6 +75,7 @@ export function Cobros() {
   const [motivo, setMotivo] = useState('');
   const dq = useDebounce(q);
   const ver = sp.get('ver');
+  const tab = (sp.get('tab') as 'cobros' | 'anticipos' | 'devoluciones' | null) ?? 'cobros';
   const { data = [], isLoading, error, refetch } = useQuery({ queryKey: ['cobros', { desde, hasta, estado, medio, dq }], queryFn: () => api.get<any[]>(`/cobros${qs({ desde, hasta, estado, medio, q: dq })}`) });
   const m = useMutation({
     mutationFn: () => api.post(`/cobros/${anular.id}/anular`, { motivo }),
@@ -91,12 +94,16 @@ export function Cobros() {
   return (
     <>
       <Encabezado
-        titulo="Cobros"
-        subtitulo="Recibos registrados. Para cobrar, abrí la OT, el comprobante o la cuenta del cliente."
-        acciones={data.length > 0 && (
+        titulo="Cobranzas"
+        subtitulo="Recibos, anticipos de clientes y devoluciones. Para cobrar, abrí la OT, el comprobante o la cuenta del cliente."
+        acciones={tab === 'cobros' && data.length > 0 && (
           <Boton icono={<Download className="size-4" />} onClick={() => descargarCSV(`cobros-${desde}_${hasta}`, ['Recibo', 'Fecha', 'Cliente', 'Medios', 'Importe', 'Estado'], data.map((c) => [c.numero, c.fecha, c.cliente, c.medios.map((x: any) => MEDIO_PAGO_LABEL[x.medio as MedioPago]).join(' + '), pesosCSV(c.total), c.estado]))}>CSV</Boton>
         )}
       />
+      <Pestanas items={[{ clave: 'cobros', titulo: 'Cobros' }, { clave: 'anticipos', titulo: 'Anticipos' }, { clave: 'devoluciones', titulo: 'Devoluciones' }]} activo={tab} onCambio={(k) => setSp(k === 'cobros' ? {} : { tab: k })} />
+      {tab === 'anticipos' && <AnticiposTab />}
+      {tab === 'devoluciones' && <DevolucionesTab abrirId={ver} />}
+      {tab === 'cobros' && <>
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Campo>
         <Campo label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Campo>
@@ -121,7 +128,7 @@ export function Cobros() {
               { clave: 'c', titulo: 'Cliente', render: (c) => c.cliente, movil: 'titulo' },
               { clave: 'm', titulo: 'Medios', render: (c) => c.medios.map((x: any) => `${MEDIO_PAGO_LABEL[x.medio as MedioPago]}${x.referencia ? ` (${x.referencia})` : ''}`).join(', '), movil: 'subtitulo' },
               { clave: 'u', titulo: 'Registró', render: (c) => c.usuario ?? '—', movil: 'oculta' },
-              { clave: 'e', titulo: 'Estado', render: (c) => (c.estado === 'anulado' ? <Insignia tono="gris">Anulado</Insignia> : <Insignia tono="verde">Vigente</Insignia>), movil: 'meta' },
+              { clave: 'e', titulo: 'Estado', render: (c) => (c.estado === 'anulado' ? <Insignia tono="gris">Anulado</Insignia> : c.tipo === 'anticipo' ? <Insignia tono="violeta">Anticipo</Insignia> : <Insignia tono="verde">Vigente</Insignia>), movil: 'meta' },
               { clave: 't', titulo: 'Importe', alinear: 'derecha', render: (c) => <span className={c.estado === 'anulado' ? 'text-tenue line-through' : ''}>{money(c.total)}</span>, movil: 'derecha' },
               {
                 clave: 'a',
@@ -139,7 +146,8 @@ export function Cobros() {
           />
         </Tarjeta>
       )}
-      {ver && <DetalleCobro id={ver} onCerrar={() => setSp({})} onAnular={(c) => { setSp({}); setAnular(c); }} />}
+      </>}
+      {ver && tab === 'cobros' && <DetalleCobro id={ver} onCerrar={() => setSp({})} onAnular={(c) => { setSp({}); setAnular(c); }} />}
       <Modal abierto={!!anular} onCerrar={() => setAnular(null)} titulo={`Anular cobro #${anular ? numero(anular.numero) : ''}`} ancho="sm" pie={<><Boton onClick={() => setAnular(null)}>Cancelar</Boton><Boton variante="peligro" disabled={motivo.trim().length < 3} cargando={m.isPending} onClick={() => m.mutate()}>Anular cobro</Boton></>}>
         <div className="space-y-3">
           <p className="text-sm text-tenue">El importe volverá a figurar como saldo pendiente de los comprobantes y se registrará la salida en la caja abierta.</p>

@@ -207,7 +207,7 @@ function ModalCierre({ sesion, onCerrar }: { sesion: NonNullable<ReturnType<type
 }
 
 // ───────────── Hoy ─────────────
-const TONO_RUBRO: Record<string, 'verde' | 'rojo' | 'azul' | 'gris'> = { cobro: 'verde', otro_ingreso: 'azul', pago_proveedor: 'rojo', gasto: 'rojo' };
+const TONO_RUBRO: Record<string, 'verde' | 'rojo' | 'azul' | 'gris'> = { cobro: 'verde', otro_ingreso: 'azul', pago_proveedor: 'rojo', gasto: 'rojo', devolucion: 'rojo' };
 
 function TablaMovimientos({ filas, puedeAnular, onAnular }: { filas: any[]; puedeAnular?: boolean; onAnular?: (m: any) => void }) {
   const link = (m: any) =>

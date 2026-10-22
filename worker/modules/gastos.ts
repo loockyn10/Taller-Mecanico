@@ -303,18 +303,23 @@ finanzas.get('/resumen', requirePerm('finanzas.ver'), async (c) => {
          (SELECT COALESCE(SUM(total),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND fecha BETWEEN ? AND ?) AS ventas_emitidas,
          (SELECT COUNT(*) FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND fecha BETWEEN ? AND ?) AS ventas_cantidad,
          (SELECT COALESCE(SUM(total),0) FROM compras WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?) AS compras_registradas,
-         (SELECT COALESCE(SUM(total - cobrado),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida') AS por_cobrar,
+         (SELECT COALESCE(SUM(total - devuelto - cobrado),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida') AS por_cobrar,
+         (SELECT COALESCE(SUM(total),0) FROM devoluciones WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?) AS devoluciones_emitidas,
+         (SELECT COALESCE(SUM(total),0) FROM cobros WHERE taller_id = ? AND tipo = 'anticipo' AND estado = 'registrado' AND fecha BETWEEN ? AND ?) AS anticipos_recibidos,
+         (SELECT COALESCE(SUM(co.total - co.credito_aplicado - co.devuelto),0) FROM cobros co WHERE co.taller_id = ? AND co.tipo = 'anticipo' AND co.estado = 'registrado') AS anticipos_sin_aplicar,
+         (SELECT COALESCE(SUM(d.liberado - d.reintegrado - d.credito_aplicado),0) FROM devoluciones d WHERE d.taller_id = ? AND d.estado = 'registrada') AS credito_devoluciones,
          ${DEUDA_TOTAL_SQL} AS por_pagar`,
-      ...p, ...p, ...p, s.tallerId, s.tallerId, s.tallerId, s.tallerId,
+      ...p, ...p, ...p, s.tallerId, ...p, ...p, s.tallerId, s.tallerId, s.tallerId, s.tallerId, s.tallerId,
     ),
   ]);
   const neto = (r: string) => rubros.find((x) => x.rubro === r)?.neto ?? 0;
   const ingresos = neto('cobro') + neto('otro_ingreso');
-  const egresos = -(neto('pago_proveedor') + neto('gasto'));
+  const egresos = -(neto('pago_proveedor') + neto('gasto') + neto('devolucion'));
   return c.json({
     desde, hasta,
+    // Los cobros incluyen los anticipos (dinero recibido, no ventas); se informan aparte para no confundirlos con la facturación.
     ingresos: { cobros: neto('cobro'), otros: neto('otro_ingreso'), total: ingresos },
-    egresos: { pagos_proveedor: -neto('pago_proveedor'), gastos: -neto('gasto'), total: egresos },
+    egresos: { pagos_proveedor: -neto('pago_proveedor'), gastos: -neto('gasto'), devoluciones_clientes: -neto('devolucion'), total: egresos },
     resultado: ingresos - egresos,
     por_medio: porMedio,
     // Mensual si el período abarca más de 62 días; diario en otro caso.

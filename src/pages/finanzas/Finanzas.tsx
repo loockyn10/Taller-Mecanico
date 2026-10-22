@@ -32,7 +32,7 @@ function Resumen() {
           <Aviso>Resumen en base <strong>caja</strong>: cuenta lo efectivamente cobrado y pagado, una sola vez. Las ventas a crédito y las compras sin pagar se muestran aparte como “devengado”.</Aviso>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Indicador titulo="Ingresos" valor={money(data.ingresos.total)} detalle={`Cobros ${money(data.ingresos.cobros)} · otros ${money(data.ingresos.otros)}`} tono="verde" />
-            <Indicador titulo="Egresos" valor={money(data.egresos.total)} detalle={`Proveedores ${money(data.egresos.pagos_proveedor)} · gastos ${money(data.egresos.gastos)}`} tono="rojo" />
+            <Indicador titulo="Egresos" valor={money(data.egresos.total)} detalle={`Proveedores ${money(data.egresos.pagos_proveedor)} · gastos ${money(data.egresos.gastos)}${data.egresos.devoluciones_clientes ? ` · reintegros a clientes ${money(data.egresos.devoluciones_clientes)}` : ''}`} tono="rojo" />
             <Indicador titulo="Resultado" valor={money(data.resultado)} detalle="Ingresos − egresos" tono={data.resultado >= 0 ? 'azul' : 'ambar'} />
             <Indicador titulo="Por cobrar / por pagar" valor={`${money(data.devengado.por_cobrar)} / ${money(data.devengado.por_pagar)}`} detalle="Saldos actuales" tono="gris" />
           </div>
@@ -61,6 +61,10 @@ function Resumen() {
               <dl className="grid grid-cols-2 gap-4">
                 <Dato etiqueta={`Ventas emitidas (${data.devengado.ventas_cantidad})`}>{money(data.devengado.ventas_emitidas)}</Dato>
                 <Dato etiqueta="Compras registradas">{money(data.devengado.compras_registradas)}</Dato>
+                <Dato etiqueta="Devoluciones emitidas (notas de crédito internas)">{money(data.devengado.devoluciones_emitidas)}</Dato>
+                <Dato etiqueta="Anticipos recibidos (incluidos en cobros; no son ventas)">{money(data.devengado.anticipos_recibidos)}</Dato>
+                <Dato etiqueta="Anticipos sin aplicar (a favor de clientes)">{money(data.devengado.anticipos_sin_aplicar)}</Dato>
+                <Dato etiqueta="Crédito de devoluciones sin usar">{money(data.devengado.credito_devoluciones)}</Dato>
               </dl>
             </Tarjeta>
             <Tarjeta titulo={data.serie_tipo === 'mes' ? 'Evolución mensual' : 'Evolución diaria'} acciones={<Boton tam="sm" icono={<Download className="size-4" />} onClick={exportar}>CSV</Boton>} sinPadding>

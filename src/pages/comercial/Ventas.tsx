@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Ban, Plus, Printer, Receipt, ShoppingBag, Wallet } from 'lucide-react';
+import { Ban, PiggyBank, Plus, Printer, Receipt, ShoppingBag, Undo2, Wallet } from 'lucide-react';
 import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, money, numero } from '@/lib/format';
@@ -11,6 +11,7 @@ import { EstadoCobroBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, useDefectosEnParams, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 import { SelectorCliente, type ClienteMin } from '@/components/selectores';
 import { AvisoCaja, ModalCobro, useCajaBloqueada } from '@/components/Cobro';
+import { ModalAplicarCreditos, ModalDevolucion } from '@/components/Devolucion';
 import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
 import { invalidarDinero } from '@/lib/caja';
 import { calcularTotales } from '@shared/totals';
@@ -41,6 +42,7 @@ export function Ventas() {
           <option value="pendientes">Pendientes de cobro</option>
           <option value="parciales">Con cobro parcial</option>
           <option value="cobradas">Cobradas</option>
+          <option value="devueltas">Con devoluciones</option>
           <option value="anuladas">Anuladas</option>
         </Select>
         <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-auto" aria-label="Desde" />
@@ -58,7 +60,7 @@ export function Ventas() {
               { clave: 'f', titulo: 'Fecha', render: (v) => fecha(v.fecha), movil: 'meta' },
               { clave: 'c', titulo: 'Cliente', render: (v) => v.cliente, movil: 'titulo' },
               { clave: 'o', titulo: 'Origen', render: (v) => (v.orden_numero ? `OT #${numero(v.orden_numero)}` : 'Mostrador'), movil: 'subtitulo' },
-              { clave: 'e', titulo: 'Estado', render: (v) => <EstadoCobroBadge total={v.total} cobrado={v.cobrado} estado={v.estado} />, movil: 'meta' },
+              { clave: 'e', titulo: 'Estado', render: (v) => <span className="flex flex-wrap gap-1"><EstadoCobroBadge total={v.total} cobrado={v.cobrado} devuelto={v.devuelto} estado={v.estado} />{v.devuelto > 0 && v.devuelto < v.total && <Insignia tono="violeta">Dev. parcial</Insignia>}</span>, movil: 'meta' },
               { clave: 's', titulo: 'Saldo', alinear: 'derecha', render: (v) => (v.estado === 'emitida' && v.saldo > 0 ? money(v.saldo) : '—'), movil: 'oculta' },
               { clave: 't', titulo: 'Total', alinear: 'derecha', render: (v) => money(v.total), movil: 'derecha' },
             ]}
@@ -75,9 +77,18 @@ export function VentaDetalle() {
   const toast = useToast();
   const { puede } = useAuth();
   const [cobro, setCobro] = useState(false);
+  const [devolver, setDevolver] = useState(false);
+  const [aplicar, setAplicar] = useState(false);
   const [anular, setAnular] = useState(false);
   const [motivo, setMotivo] = useState('');
   const { data: v, isLoading, error, refetch } = useQuery({ queryKey: ['venta', id], queryFn: () => api.get(`/ventas/${id}`) });
+  const { data: cred } = useQuery({ queryKey: ['creditos', v?.cliente_id], queryFn: () => api.get<any>(`/creditos?cliente_id=${v.cliente_id}`), enabled: !!v && v.estado === 'emitida' && v.saldo > 0 && puede('cobros.registrar') });
+  const [deshacer, setDeshacer] = useState<any>(null);
+  const des = useMutation({
+    mutationFn: () => api.post(`/credito-aplicaciones/${deshacer.id}/anular`, { motivo }),
+    onSuccess: () => { invalidarDinero(qc); toast.ok('Aplicación deshecha'); setDeshacer(null); setMotivo(''); },
+    onError: toast.error,
+  });
   const m = useMutation({
     mutationFn: () => api.post(`/ventas/${id}/anular`, { motivo }),
     onSuccess: () => {
@@ -94,12 +105,14 @@ export function VentaDetalle() {
     <>
       <Encabezado
         volver="/ventas"
-        titulo={<span className="flex flex-wrap items-center gap-3">Comprobante interno #{numero(v.numero)} <EstadoCobroBadge total={v.total} cobrado={v.cobrado} estado={v.estado} /></span>}
+        titulo={<span className="flex flex-wrap items-center gap-3">Comprobante interno #{numero(v.numero)} <EstadoCobroBadge total={v.total} cobrado={v.cobrado} devuelto={v.devuelto} estado={v.estado} /></span>}
         subtitulo={`${v.cliente} · ${fecha(v.fecha)} · ${v.condicion === 'cuenta_corriente' ? 'Cuenta corriente' : 'Contado'}`}
         acciones={
           <>
             <Boton icono={<Printer className="size-4" />} onClick={() => window.open(`/imprimir/venta/${v.id}`, '_blank')}>Imprimir</Boton>
             {v.estado === 'emitida' && v.saldo > 0 && puede('cobros.registrar') && <Boton variante="exito" icono={<Wallet className="size-4" />} onClick={() => setCobro(true)}>Cobrar {money(v.saldo)}</Boton>}
+            {v.estado === 'emitida' && v.saldo > 0 && cred?.total > 0 && <Boton icono={<PiggyBank className="size-4" />} onClick={() => setAplicar(true)}>Aplicar saldo a favor {money(cred.total)}</Boton>}
+            {v.estado === 'emitida' && puede('ventas.anular') && v.devuelto < v.total && <Boton icono={<Undo2 className="size-4" />} onClick={() => setDevolver(true)}>Registrar devolución</Boton>}
             {v.estado === 'emitida' && puede('ventas.anular') && <Boton icono={<Ban className="size-4" />} onClick={() => setAnular(true)}>Anular</Boton>}
           </>
         }
@@ -116,6 +129,7 @@ export function VentaDetalle() {
               <Dato etiqueta="Origen">{v.orden_id ? <Link className="text-marca-700" to={`/ordenes/${v.orden_id}`}>OT #{numero(v.orden_numero)}</Link> : 'Mostrador'}</Dato>
               <Dato etiqueta="Total">{money(v.total)}</Dato>
               <Dato etiqueta="Saldo">{money(v.saldo)}</Dato>
+              {v.devuelto > 0 && <Dato etiqueta="Devuelto (notas de crédito)">{money(v.devuelto)}</Dato>}
               <Dato etiqueta="Tipo" className="col-span-2"><Insignia>Interno · no fiscal</Insignia></Dato>
               <Dato etiqueta="Observaciones" className="col-span-2">{v.observaciones}</Dato>
               {v.lista_precio_nombre && <Dato etiqueta="Lista de precios" className="col-span-2">{v.lista_precio_nombre}</Dato>}
@@ -133,12 +147,44 @@ export function VentaDetalle() {
               </ul>
             )}
           </Tarjeta>
+          {v.devoluciones.length > 0 && (
+            <Tarjeta titulo="Devoluciones" sinPadding>
+              <ul className="divide-y divide-borde text-sm">
+                {v.devoluciones.map((d: any) => (
+                  <li key={d.id} className="flex justify-between px-4 py-2.5">
+                    <span><Link className="text-marca-700" to={`/cobros?tab=devoluciones&ver=${d.id}`}>Nota de crédito interna #{numero(d.numero)}</Link> · {fecha(d.fecha)} {d.estado === 'anulada' && <Insignia tono="gris">Anulada</Insignia>}</span>
+                    <span className="tabular-nums">{money(d.total)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Tarjeta>
+          )}
+          {v.creditos.length > 0 && (
+            <Tarjeta titulo="Saldo a favor aplicado" sinPadding>
+              <ul className="divide-y divide-borde text-sm">
+                {v.creditos.map((c: any) => (
+                  <li key={c.id} className="flex items-center justify-between gap-2 px-4 py-2.5">
+                    <span>{c.origen_tipo === 'anticipo' ? `Anticipo (recibo #${numero(c.origen_numero)})` : `Devolución #${numero(c.origen_numero)}`} · {fecha(c.fecha)} {c.estado === 'anulada' && <Insignia tono="gris">Deshecha</Insignia>}</span>
+                    <span className="flex items-center gap-2"><span className="tabular-nums">{money(c.importe)}</span>{c.estado === 'vigente' && puede('cobros.anular') && <Boton tam="sm" variante="fantasma" onClick={() => setDeshacer(c)}>Deshacer</Boton>}</span>
+                  </li>
+                ))}
+              </ul>
+            </Tarjeta>
+          )}
           <Tarjeta titulo="Facturación electrónica">
             <p className="text-sm text-tenue">{v.fiscal.mensaje}</p>
           </Tarjeta>
         </div>
       </div>
       {cobro && <ModalCobro abierto onCerrar={() => setCobro(false)} clienteId={v.cliente_id} ventaId={v.id} />}
+      {devolver && <ModalDevolucion ventaId={v.id} onCerrar={() => setDevolver(false)} />}
+      {aplicar && <ModalAplicarCreditos venta={{ id: v.id, cliente_id: v.cliente_id, numero: v.numero, saldo: v.saldo, orden_id: v.orden_id }} onCerrar={() => setAplicar(false)} />}
+      <Modal abierto={!!deshacer} onCerrar={() => setDeshacer(null)} titulo="Deshacer aplicación de saldo a favor" ancho="sm" pie={<><Boton onClick={() => setDeshacer(null)}>Cancelar</Boton><Boton variante="peligro" disabled={motivo.trim().length < 3} cargando={des.isPending} onClick={() => des.mutate()}>Deshacer</Boton></>}>
+        <div className="space-y-3">
+          <p className="text-sm text-tenue">El comprobante recupera su deuda y el saldo a favor vuelve a quedar disponible. No se mueve dinero.</p>
+          <Campo label="Motivo" requerido><Input value={motivo} onChange={(e) => setMotivo(e.target.value)} autoFocus /></Campo>
+        </div>
+      </Modal>
       <Modal abierto={anular} onCerrar={() => setAnular(false)} titulo="Anular comprobante" ancho="sm" pie={<><Boton onClick={() => setAnular(false)}>Cancelar</Boton><Boton variante="peligro" disabled={motivo.trim().length < 3} cargando={m.isPending} onClick={() => m.mutate()}>Anular</Boton></>}>
         <div className="space-y-3">
           <p className="text-sm text-tenue">{v.orden_id ? 'La OT quedará sin comprobante y podrá reabrirse.' : 'Los artículos vendidos volverán al stock.'} Si tiene cobros, primero hay que anularlos.</p>

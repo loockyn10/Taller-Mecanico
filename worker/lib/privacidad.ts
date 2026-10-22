@@ -17,6 +17,9 @@ export const CAMPOS_TOTALES = [
   'desc_global_pct', 'desc_global_monto', 'iva_pct', 'recargo_pct', 'subtotal_articulos', 'subtotal_servicios', 'descuento', 'neto', 'iva', 'recargo', 'total',
 ] as const;
 
+/** Costo interno de la mano de obra guardado en la orden. */
+export const CAMPOS_COSTO_MO = ['mo_costo_estimado', 'mo_estimado_at', 'mo_estimado_completo'] as const;
+
 export const puedeValorizados = (s: Sesion) => tiene(s, 'presupuestos.valorizados.ver');
 export const puedePrecioVenta = (s: Sesion) => tiene(s, 'precios.venta.ver');
 export const puedeCosto = (s: Sesion) => tiene(s, 'precios.costo.ver');
@@ -32,9 +35,11 @@ export function exigirValorizado(s: Sesion) {
 /** Presupuesto, orden de trabajo u otro documento con cabecera valorizada y datos del cliente. */
 export function limpiarDocumento<T extends Fila>(s: Sesion, d: T): T {
   let r: Fila = d;
-  if (!puedeValorizados(s)) r = sin(r, [...CAMPOS_TOTALES, 'venta_total', 'venta_cobrado']);
-  if (!tiene(s, 'ventas.ver')) r = sin(r, ['venta_id', 'venta_numero', 'venta_total', 'venta_cobrado']);
+  if (!puedeValorizados(s)) r = sin(r, [...CAMPOS_TOTALES, 'venta_total', 'venta_cobrado', 'venta_devuelto']);
+  if (!tiene(s, 'ventas.ver')) r = sin(r, ['venta_id', 'venta_numero', 'venta_total', 'venta_cobrado', 'venta_devuelto']);
   if (!tiene(s, 'clientes.ver')) r = sin(r, ['cliente', 'cliente_telefono', 'cliente_codigo']);
+  // Estimación congelada del costo de mano de obra: dato de costo interno, solo con permiso de márgenes.
+  if (!puedeMargenes(s)) r = sin(r, [...CAMPOS_COSTO_MO]);
   return r as T;
 }
 

@@ -110,6 +110,48 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
   );
 }
 
+/** Stock mínimo (y stock ideal) por depósito. Convive con el mínimo general del artículo, que sigue controlando el total. */
+function MinimosDeposito({ articulo }: { articulo: any }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { puede } = useAuth();
+  const edita = puede('catalogo.editar');
+  const [f, setF] = useState<Record<string, { minimo: string; objetivo: string }> | null>(null);
+  const deps: Array<{ id: string; nombre: string; es_principal: number; stock: number }> = articulo.depositos ?? [];
+  const base = Object.fromEntries(deps.map((d) => {
+    const m = (articulo.minimos_deposito ?? []).find((x: any) => x.deposito_id === d.id);
+    return [d.id, { minimo: m ? String(m.minimo) : '', objetivo: m?.objetivo != null ? String(m.objetivo) : '' }];
+  }));
+  const actual = f ?? base;
+  const guardar = useMutation({
+    mutationFn: () => api.put(`/articulos/${articulo.id}/minimos-deposito`, {
+      minimos: Object.entries(actual).filter(([, v]) => v.minimo !== '' && Number(v.minimo) >= 0).map(([deposito_id, v]) => ({ deposito_id, minimo: Number(v.minimo), objetivo: v.objetivo === '' ? null : Number(v.objetivo) })),
+    }),
+    onSuccess: () => { ['articulo', 'articulos', 'reposicion', 'dashboard', 'depositos'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setF(null); toast.ok('Mínimos por depósito guardados'); },
+    onError: toast.error,
+  });
+  return (
+    <Tarjeta titulo="Stock mínimo por depósito" subtitulo="Opcional. Genera alertas de reposición específicas de cada depósito; el mínimo general del artículo se conserva" className="lg:col-span-3"
+      acciones={edita && f && <><Boton tam="sm" onClick={() => setF(null)}>Descartar</Boton><Boton tam="sm" variante="primario" cargando={guardar.isPending} onClick={() => guardar.mutate()}>Guardar</Boton></>}>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {deps.map((d) => {
+          const v = actual[d.id];
+          const bajo = v.minimo !== '' && d.stock <= Number(v.minimo);
+          return (
+            <div key={d.id} className="rounded-lg border border-borde p-3 text-sm">
+              <div className="mb-2 flex items-center justify-between"><span className="font-medium">{d.nombre}</span><span className={bajo ? 'font-semibold text-amber-700' : 'text-tenue'}>Stock {cantidad(d.stock)}{bajo ? ' · bajo el mínimo' : ''}</span></div>
+              <div className="grid grid-cols-2 gap-2">
+                <Campo label="Mínimo"><Input type="number" min={0} step="any" disabled={!edita} value={v.minimo} onChange={(e) => setF({ ...actual, [d.id]: { ...v, minimo: e.target.value } })} placeholder="Sin mínimo" /></Campo>
+                <Campo label="Ideal"><Input type="number" min={0} step="any" disabled={!edita} value={v.objetivo} onChange={(e) => setF({ ...actual, [d.id]: { ...v, objetivo: e.target.value } })} placeholder="Doble del mínimo" /></Campo>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Tarjeta>
+  );
+}
+
 export function ModalMovimiento({ articulo, onCerrar }: { articulo: any; onCerrar: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -264,6 +306,7 @@ export function ArticuloDetalle() {
             </ul>
           </Tarjeta>
         )}
+        {(a.depositos?.length > 1 || a.minimos_deposito?.length > 0) && <MinimosDeposito articulo={a} />}
         {costos && costos.historial.length > 0 && (
           <Tarjeta titulo="Historial de costos" subtitulo="Cada cambio del costo queda registrado, venga de una compra, una recepción o una edición" className="lg:col-span-3" sinPadding>
             <ul className="divide-y divide-borde text-sm">

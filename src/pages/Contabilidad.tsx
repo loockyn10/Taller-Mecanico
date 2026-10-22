@@ -25,7 +25,7 @@ function Resumen({ desde, hasta }: { desde: string; hasta: string }) {
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
   const exportar = () => exportarAutorizado(`/contabilidad/resumen?desde=${desde}&hasta=${hasta}`, () => descargarCSV(`resumen-contable-${desde}_${hasta}`, ['Concepto', 'Importe'], [
     ['Cobros de clientes', pesosCSV(r.ingresos.cobros)], ['Otros ingresos', pesosCSV(r.ingresos.otros)], ['Ingresos bancarios', pesosCSV(r.ingresos.bancarios)], ['TOTAL INGRESOS', pesosCSV(r.ingresos.total)],
-    ['Pagos a proveedores', pesosCSV(r.egresos.pagos_proveedor)], ['Gastos', pesosCSV(r.egresos.gastos)], ['Egresos bancarios', pesosCSV(r.egresos.bancarios)], ['TOTAL EGRESOS', pesosCSV(r.egresos.total)], ['RESULTADO', pesosCSV(r.resultado)],
+    ['Pagos a proveedores', pesosCSV(r.egresos.pagos_proveedor)], ['Gastos', pesosCSV(r.egresos.gastos)], ['Reintegros a clientes', pesosCSV(r.egresos.devoluciones_clientes)], ['Egresos bancarios', pesosCSV(r.egresos.bancarios)], ['TOTAL EGRESOS', pesosCSV(r.egresos.total)], ['RESULTADO', pesosCSV(r.resultado)],
     ['Ventas netas (devengado)', pesosCSV(r.devengado.ventas_netas)], ['Compras netas (devengado)', pesosCSV(r.devengado.compras_netas)], ['IVA registrado en ventas', pesosCSV(r.impuestos_registrados.iva_ventas)], ['IVA registrado en compras', pesosCSV(r.impuestos_registrados.iva_compras)],
   ])).catch((e) => toast.error(e));
   return (
@@ -42,7 +42,7 @@ function Resumen({ desde, hasta }: { desde: string; hasta: string }) {
           <dl className="grid grid-cols-2 gap-4"><Dato etiqueta="Cobros de clientes">{money(r.ingresos.cobros)}</Dato><Dato etiqueta="Otros ingresos">{money(r.ingresos.otros)}</Dato><Dato etiqueta="Ingresos bancarios (intereses, etc.)">{money(r.ingresos.bancarios)}</Dato><Dato etiqueta="Total"><strong>{money(r.ingresos.total)}</strong></Dato></dl>
         </Tarjeta>
         <Tarjeta titulo="Resumen de egresos">
-          <dl className="grid grid-cols-2 gap-4"><Dato etiqueta="Pagos a proveedores">{money(r.egresos.pagos_proveedor)}</Dato><Dato etiqueta="Gastos">{money(r.egresos.gastos)}</Dato><Dato etiqueta="Egresos bancarios (comisiones, etc.)">{money(r.egresos.bancarios)}</Dato><Dato etiqueta="Total"><strong>{money(r.egresos.total)}</strong></Dato></dl>
+          <dl className="grid grid-cols-2 gap-4"><Dato etiqueta="Pagos a proveedores">{money(r.egresos.pagos_proveedor)}</Dato><Dato etiqueta="Gastos">{money(r.egresos.gastos)}</Dato><Dato etiqueta="Reintegros a clientes">{money(r.egresos.devoluciones_clientes)}</Dato><Dato etiqueta="Egresos bancarios (comisiones, etc.)">{money(r.egresos.bancarios)}</Dato><Dato etiqueta="Total"><strong>{money(r.egresos.total)}</strong></Dato></dl>
         </Tarjeta>
         <Tarjeta titulo="Devengado en el período" subtitulo="Lo facturado y comprado, cobrado o no">
           <dl className="grid grid-cols-2 gap-4"><Dato etiqueta={`Ventas netas (${r.devengado.ventas_comprobantes} comprobantes)`}>{money(r.devengado.ventas_netas)}</Dato><Dato etiqueta="Ventas con IVA incluido">{money(r.devengado.ventas_total)}</Dato><Dato etiqueta="Compras netas">{money(r.devengado.compras_netas)}</Dato></dl>

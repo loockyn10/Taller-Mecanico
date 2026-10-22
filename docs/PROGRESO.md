@@ -1,6 +1,6 @@
 # Progreso del desarrollo · Fierro v0.1.0
 
-Última actualización: 2026-10-21 (ver la sección 33 en adelante: Sprint 08, integración comercial y control de stock). Documento para retomar el trabajo en nuevas sesiones.
+Última actualización: 2026-10-22 (ver la sección 39 en adelante: Sprint 09, devoluciones, anticipos y rentabilidad). Documento para retomar el trabajo en nuevas sesiones.
 
 ## 1. Arquitectura implementada
 - **Un único Worker** (`worker/index.ts`, Hono) sirve la API en `/api/*` y la SPA compilada (assets estáticos). En desarrollo, Vite sirve la SPA y redirige `/api` a `wrangler dev`.
@@ -446,3 +446,46 @@ Trabajo directo sobre `main` (sin ramas, PR ni `gh`). Primero se revisó qué ci
 - Reposición, inventario valorizado y stock mínimo trabajan con el stock **total** del artículo (no por depósito); no hay reserva de stock para presupuestos ni depósito por presupuesto.
 - Las transferencias son inmediatas (sin estado "en tránsito").
 - Importación masiva de artículos y exportaciones CSV adicionales siguen pendientes (el CSV existente cubre los listados principales y las pantallas nuevas).
+
+---
+
+# Sprint 09 — Devoluciones, anticipos y rentabilidad
+
+Trabajo directo sobre `main` (sin ramas, PR ni `gh`). Sin ARCA, sin cambios en licencias. El sprint se desarrolló en dos tramos (el primero se cortó por límite de uso): el segundo reutilizó íntegramente la migración, el backend y los componentes ya escritos y completó interfaz, informes, impresión y pruebas.
+
+## 39. Qué se implementó
+- **Devoluciones parciales (nota de crédito comercial interna, no fiscal)** — `worker/modules/devoluciones.ts`, `shared/devoluciones.ts`.
+  - Nacen de un comprobante y de sus líneas; el comprobante original nunca se modifica (solo `ventas.devuelto` y, cuando se libera lo ya pagado, `ventas.cobrado`). Saldo pendiente = `total − devuelto − cobrado` (actualizado en todas las consultas).
+  - Se controla cantidad e importe acumulados por línea al calcular y de nuevo dentro del batch (guards), también ante devoluciones simultáneas. Servicios y mano de obra se devuelven por cantidad o por importe (bonificación); los repuestos pueden reingresar al inventario (depósito elegido, costo histórico del comprobante) o no (dañado/instalado). No se reincorpora nada sin indicarlo.
+  - El crédito se reparte en deuda impaga que se cancela (`a_deuda`) y dinero ya cobrado (`liberado`), que se reintegra por los medios de pago (egreso de caja rubro `devolucion` y espejo bancario) y/o queda como saldo a favor. Consumidor final debe reintegrar el total cobrado.
+  - Simulación previa (`POST /api/devoluciones/simular`) con las consecuencias sobre comprobante, cuenta corriente, dinero y stock; registro idempotente (`idem_key`); anulación de la devolución (revierte stock y comprobante) y de cada reintegro (contra-asiento). Un comprobante con devoluciones no se anula ni se le anula el cobro hasta deshacerlas.
+  - Permisos: `ventas.anular` para devolver y `cobros.anular` para reintegrar dinero. Auditoría de cada operación.
+- **Anticipos** — `worker/modules/anticipos.ts`, `worker/lib/creditos.ts`, `worker/lib/reintegros.ts`.
+  - Un anticipo es un cobro `tipo='anticipo'` (mismo circuito de caja, banco, cheques, recibo y cuenta corriente), asociable a una OT o a un presupuesto; no es una venta. Se aplica total o parcialmente a una o varias ventas (`credito_aplicaciones`) sin mover dinero otra vez; los CHECK de la base impiden aplicarlo dos veces o más allá de lo disponible. Se puede devolver en dinero, deshacer una aplicación o anular (si no está en uso).
+  - Consultas: pendientes, utilizados, devueltos y anulados, con los comprobantes que originaron cada movimiento. El saldo a favor (anticipos + crédito de devoluciones) figura en la cuenta corriente (saldo negativo = a favor).
+  - Al emitir el comprobante de una OT se pueden imputar los anticipos disponibles en la misma transacción (`creditos` en `POST /api/ordenes/:id/comprobante`; el resto se cobra en el acto o queda a cuenta corriente).
+- **Costo de mano de obra** — `worker/modules/costos.ts`, `worker/lib/rentabilidad.ts`.
+  - Costo horario interno general y por persona (`/api/costos-mano-obra`), confidencial: exige `margenes.ver` (y `precios.gestionar` para editar), no viaja en `/taller/config`, en la ficha de la OT ni en listados para quien no lo tiene; la auditoría no guarda importes.
+  - Se usa el mismo cronómetro de las OT (`orden_tiempos`): un trigger congela el costo horario vigente al cerrar cada tramo. La estimación (tiempo estimado de las tareas × costo del responsable) se congela cuando la OT queda lista/entregada y se descarta si se reabre. Cambiar costos después no altera lo ya trabajado; los tramos anteriores no se reconstruyen con costos actuales.
+  - `GET /api/ordenes/:id/rentabilidad` devuelve `resumen`: mano de obra cobrada, costo estimado, costo real, repuestos (venta/costo), devoluciones, margen bruto, **calidad** (`definitivo`, `estimado`, `parcial`) y la lista de lo que falta. Un margen incompleto nunca se presenta como definitivo.
+  - No hay liquidación de sueldos ni se imputa tiempo sin cronómetro.
+- **Stock mínimo por depósito** — `stock_minimos_deposito`, `PUT /api/articulos/:id/minimos-deposito`, `GET /api/reposicion?deposito_id=<id|todos>`. Convive con el mínimo general (que sigue controlando el total). Alertas en reposición, existencias del depósito y tablero. Lo ya pedido en órdenes de compra abiertas se descuenta de los faltantes sin duplicar pedidos; nunca se crean órdenes automáticamente (las genera el usuario con "Generar orden de compra", sumando por artículo).
+- **Informes y resúmenes**: ventas por día/mes/comprobante con devuelto y neto de devoluciones; ventas por artículo/categoría/servicios, rentabilidad y estadísticas netas de devoluciones (el costo de lo devuelto que no vuelve al inventario sigue siendo costo); cobranzas con tipo (los anticipos figuran el día que se cobran y no se vuelven a contar al aplicarse); deudores con saldo a favor; informes nuevos **Devoluciones**, **Anticipos**, **Rentabilidad por OT** y **Costo de mano de obra por mecánico**; Finanzas, Tesorería y Contabilidad separan los reintegros a clientes, informan anticipos y saldo a favor (una obligación, no un ingreso) y el libro interno de ventas resta las notas de crédito. Costos y márgenes respetan los permisos.
+- **Interfaz** (sin pantallas nuevas): comprobante de venta (registrar devolución con consecuencias previas, aplicar saldo a favor, devoluciones y aplicaciones), cuentas corrientes (a favor, anticipos, notas de crédito y reintegros), Cobranzas (pestañas Anticipos y Devoluciones), OT (anticipos, imputación en el comprobante, rentabilidad con mano de obra y calidad del dato), presupuesto (anticipos), Tempario (costo interno de mano de obra), artículo (mínimos por depósito), Reposición (vista por depósito), Depósitos, Informes, Caja, Finanzas, Tesorería e Inicio. Impresión `/imprimir/devolucion/:id` (nota de crédito interna, marcada como documento comercial no fiscal) y recibo de anticipo.
+
+## 40. Migración
+`migrations/0009_devoluciones_anticipos_rentabilidad.sql`: reconstruye `caja_movimientos` (rubro `devolucion`, origen `reintegro`) y `banco_movimientos` (categoría `devolucion`) copiando todas las filas y recreando sus índices; agrega `ventas.devuelto`, columnas de anticipo en `cobros`, `devoluciones`, `devolucion_items`, `reintegros`, `reintegro_medios`, `credito_aplicaciones`, `usuarios.costo_hora`, `taller_config.costo_hora_general`, `orden_tiempos.costo_hora/costo_origen` (+ trigger), la estimación congelada en `ordenes` y `stock_minimos_deposito`. Aditiva para los datos de negocio. Probada en `tests/api/migraciones.test.ts` sobre datos previos.
+
+## 41. Cambios de comportamiento
+- El saldo de un comprobante pasa a ser `total − devuelto − cobrado`; `GET /ventas/:id` incluye `devoluciones` y `creditos`; `GET /cuentas-corrientes` agrega `a_favor` y `devuelto`.
+- "Cobros" pasa a llamarse **Cobranzas** y suma las pestañas Anticipos y Devoluciones.
+- Anular un cobro de un comprobante con devoluciones, o un anticipo en uso, se rechaza con 409 hasta deshacer esas operaciones.
+
+## 42. Pruebas
+`npm run typecheck` y `npm run build` OK. 50 unitarias (incluye `tests/unit/devoluciones.test.ts`) y 237 de integración (en tandas de archivos) OK. Nuevas: `tests/api/devoluciones.test.ts` (17 pruebas: devolución parcial, tope de cantidades e importes, devoluciones simultáneas, reintegro por caja, saldo a favor, anulaciones, consumidor final, permisos, aislamiento entre talleres, anticipos, aplicaciones simultáneas, devolución del anticipo, anticipos en el comprobante de la OT, informes sin doble conteo) y `tests/api/rentabilidad.test.ts` (11 pruebas: costo confidencial, margen parcial/estimado/definitivo, congelamiento histórico, repuestos y devoluciones, mínimos por depósito, informes). Se verifica la consistencia de cuentas corrientes, stock y dinero.
+
+## 43. Pendiente
+- Las órdenes de compra no tienen depósito: la reposición por depósito suma por artículo y el destino se elige al recibir.
+- Las transferencias siguen siendo inmediatas (sin estado "en tránsito"); no hay comisiones ni liquidación de sueldos.
+- Una venta de mostrador no imputa saldo a favor al emitirse: se aplica después desde el comprobante (la OT sí lo hace en el mismo paso).
+- Sin pruebas de interfaz automatizadas; la verificación visual fue mínima.

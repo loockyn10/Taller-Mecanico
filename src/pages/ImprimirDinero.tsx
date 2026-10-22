@@ -35,16 +35,17 @@ export function ImprimirDinero() {
   const { tipo, id } = useParams();
   const { me } = useAuth();
   const esRecibo = tipo === 'recibo';
+  const esDevolucion = tipo === 'devolucion';
   const desde = new URLSearchParams(window.location.search).get('desde') ?? '';
-  const { data: d, isLoading, error } = useQuery({ queryKey: ['imprimir', tipo, id, desde], queryFn: () => api.get(esRecibo ? `/cobros/${id}` : `/cuentas-corrientes/${id}${desde ? `?desde=${desde}` : ''}`) });
+  const { data: d, isLoading, error } = useQuery({ queryKey: ['imprimir', tipo, id, desde], queryFn: () => api.get(esRecibo ? `/cobros/${id}` : esDevolucion ? `/devoluciones/${id}` : `/cuentas-corrientes/${id}${desde ? `?desde=${desde}` : ''}`) });
   const { data: cfg } = useQuery({ queryKey: ['config'], queryFn: () => api.get('/taller/config') });
   useEffect(() => {
     if (d && cfg) {
-      document.title = esRecibo ? `recibo-${d.numero}` : `estado-de-cuenta-${d.cliente.nombre}`;
+      document.title = esRecibo ? `recibo-${d.numero}` : esDevolucion ? `nota-de-credito-interna-${d.numero}` : `estado-de-cuenta-${d.cliente.nombre}`;
       const t = setTimeout(() => window.print(), 400);
       return () => clearTimeout(t);
     }
-  }, [d, cfg, esRecibo]);
+  }, [d, cfg, esRecibo, esDevolucion]);
   if (isLoading || !cfg) return <Cargando />;
   if (error) return <div className="p-6"><ErrorCaja error={error} /></div>;
 
@@ -55,9 +56,47 @@ export function ImprimirDinero() {
         <Boton onClick={() => window.close()}>Cerrar</Boton>
       </div>
 
-      {esRecibo ? (
+      {esDevolucion ? (
         <>
-          <Cabecera cfg={cfg} titulo={`Recibo N° ${numero(d.numero)}`}>
+          <Cabecera cfg={cfg} titulo={`Nota de crédito interna N° ${numero(d.numero)}`} aviso="DOCUMENTO COMERCIAL INTERNO · NO VÁLIDO COMO NOTA DE CRÉDITO FISCAL">
+            <div>Fecha: {fecha(d.fecha)}</div>
+            <div>Comprobante origen: N° {numero(d.venta_numero)}{d.orden_numero ? ` (OT #${numero(d.orden_numero)})` : ''}</div>
+            {d.estado === 'anulada' && <div className="mt-1 text-base font-bold">ANULADA</div>}
+          </Cabecera>
+          <section className="border-b border-slate-300 py-3">
+            <div className="text-[11px] font-semibold uppercase text-slate-500">Cliente</div>
+            <div className="font-medium">{d.cliente}</div>
+            <div className="mt-1"><strong>Motivo:</strong> {d.motivo}</div>
+          </section>
+          <table className="mt-3 w-full border-collapse">
+            <thead><tr className="border-b border-black text-left text-[11px] uppercase"><th className="py-1.5">Descripción</th><th className="py-1.5 text-right">Cantidad</th><th className="py-1.5">Mercadería</th><th className="py-1.5 text-right">Importe</th></tr></thead>
+            <tbody>
+              {d.items.map((i: any) => (
+                <tr key={i.id} className="border-b border-slate-200">
+                  <td className="py-1.5">{i.descripcion}</td>
+                  <td className="py-1.5 text-right">{i.cantidad}</td>
+                  <td className="py-1.5">{i.tipo !== 'articulo' ? '—' : i.reingresa ? `Vuelve a ${i.deposito ?? 'depósito'}` : 'No vuelve al inventario'}</td>
+                  <td className="py-1.5 text-right">{money(i.importe)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="ml-auto mt-4 w-72 space-y-0.5">
+            <div className="flex justify-between border-t border-black pt-1 text-base font-bold"><span>Total acreditado</span><span>{money(d.total)}</span></div>
+            <div className="flex justify-between text-xs"><span>Cancela deuda del comprobante</span><span>{money(d.a_deuda)}</span></div>
+            <div className="flex justify-between text-xs"><span>Ya cobrado</span><span>{money(d.liberado)}</span></div>
+            <div className="flex justify-between text-xs"><span>Reintegrado en dinero</span><span>{money(d.reintegrado)}</span></div>
+            <div className="flex justify-between text-xs"><span>Saldo a favor del cliente</span><span>{money(d.liberado - d.reintegrado)}</span></div>
+          </div>
+          <p className="mt-4 text-xs text-slate-600">Documento comercial interno de gestión. No es una nota de crédito fiscal ni reemplaza comprobantes ante ARCA.</p>
+          <div className="mt-16 grid grid-cols-2 gap-10 text-center text-xs">
+            <div className="border-t border-black pt-1">Firma del cliente</div>
+            <div className="border-t border-black pt-1">Emitió: {d.usuario ?? me?.taller.nombre}</div>
+          </div>
+        </>
+      ) : esRecibo ? (
+        <>
+          <Cabecera cfg={cfg} titulo={`${d.tipo === 'anticipo' ? 'Recibo de anticipo' : 'Recibo'} N° ${numero(d.numero)}`}>
             <div>Fecha: {fecha(d.fecha)}</div>
             {d.estado === 'anulado' && <div className="mt-1 text-base font-bold">ANULADO</div>}
           </Cabecera>
@@ -79,7 +118,8 @@ export function ImprimirDinero() {
             </table>
           </section>
           <section className="py-3">
-            <h2 className="mb-1 text-[11px] font-semibold uppercase text-slate-500">En concepto de pago de</h2>
+            <h2 className="mb-1 text-[11px] font-semibold uppercase text-slate-500">{d.tipo === 'anticipo' ? 'En concepto de anticipo (no es una venta)' : 'En concepto de pago de'}</h2>
+            {d.tipo === 'anticipo' && <p className="text-xs">Importe entregado a cuenta de un trabajo futuro; se aplicará al comprobante que se emita.</p>}
             <table className="w-full border-collapse">
               <thead><tr className="border-b border-black text-left text-[11px] uppercase"><th className="py-1">Comprobante interno</th><th className="py-1">Fecha</th><th className="py-1 text-right">Total</th><th className="py-1 text-right">Este pago</th></tr></thead>
               <tbody>
@@ -118,7 +158,7 @@ export function ImprimirDinero() {
               {d.movimientos.map((m: any) => (
                 <tr key={`${m.tipo}-${m.id}`} className="border-b border-slate-200">
                   <td className="py-1.5">{fecha(m.fecha)}</td>
-                  <td className="py-1.5">{m.tipo === 'venta' ? `Comprobante interno N° ${numero(m.numero)}` : `Recibo N° ${numero(m.numero)}`}</td>
+                  <td className="py-1.5">{m.tipo === 'venta' ? `Comprobante interno N° ${numero(m.numero)}` : m.tipo === 'devolucion' ? `Nota de crédito interna N° ${numero(m.numero)}` : m.tipo === 'reintegro' ? `Reintegro de dinero N° ${numero(m.numero)}` : m.tipo === 'anticipo' ? `Recibo de anticipo N° ${numero(m.numero)}` : `Recibo N° ${numero(m.numero)}`}</td>
                   <td className="py-1.5 text-right">{m.debe ? money(m.debe) : ''}</td>
                   <td className="py-1.5 text-right">{m.haber ? money(m.haber) : ''}</td>
                   <td className="py-1.5 text-right">{money(m.saldo)}</td>
@@ -126,7 +166,7 @@ export function ImprimirDinero() {
               ))}
             </tbody>
           </table>
-          <div className="ml-auto mt-4 w-64"><div className="flex justify-between border-t border-black pt-1 text-base font-bold"><span>Saldo adeudado</span><span>{money(d.saldo)}</span></div></div>
+          <div className="ml-auto mt-4 w-64"><div className="flex justify-between border-t border-black pt-1 text-base font-bold"><span>{d.saldo < 0 ? 'Saldo a favor del cliente' : 'Saldo adeudado'}</span><span>{money(Math.abs(d.saldo))}</span></div></div>
           {d.pendientes.length > 0 && (
             <section className="mt-6">
               <h2 className="mb-1 text-[11px] font-semibold uppercase text-slate-500">Comprobantes pendientes</h2>

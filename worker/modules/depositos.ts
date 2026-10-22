@@ -82,10 +82,12 @@ depositos.get('/depositos/:id/stock', requirePerm('stock.ver'), async (c) => {
   const valoriza = puedeCosto(s) && tiene(s, 'stock.valorizar');
   const filas = await all<Record<string, unknown>>(
     c.env.DB,
-    `SELECT a.id AS articulo_id, a.codigo, a.codigo_barras, a.nombre, a.unidad, a.stock_minimo, ROUND(COALESCE(sd.stock, 0), 3) AS stock, a.stock AS stock_total, a.costo
+    `SELECT a.id AS articulo_id, a.codigo, a.codigo_barras, a.nombre, a.unidad, a.stock_minimo, ROUND(COALESCE(sd.stock, 0), 3) AS stock, a.stock AS stock_total, a.costo,
+            sm.minimo AS minimo_deposito, sm.objetivo AS objetivo_deposito, CASE WHEN sm.minimo > 0 AND ROUND(COALESCE(sd.stock, 0), 3) <= ROUND(sm.minimo, 3) THEN 1 ELSE 0 END AS bajo_minimo
        FROM articulos a LEFT JOIN stock_depositos sd ON sd.taller_id = a.taller_id AND sd.articulo_id = a.id AND sd.deposito_id = ?
+       LEFT JOIN stock_minimos_deposito sm ON sm.taller_id = a.taller_id AND sm.articulo_id = a.id AND sm.deposito_id = ?
       WHERE ${cond.join(' AND ')} ORDER BY a.nombre COLLATE NOCASE LIMIT 1000`,
-    id, ...params,
+    id, id, ...params,
   );
   return c.json({ deposito: dep, items: filas.map(({ costo, ...f }) => (valoriza ? { ...f, costo, valor_costo: Math.round(Number(f.stock) * Number(costo)) } : f)) });
 });

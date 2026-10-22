@@ -16,6 +16,8 @@ import { redondearCantidad as r3 } from '../../shared/dominio';
 import { deudaProveedores } from '../lib/proveedores';
 import { IMPORTE_FIRMADO_SQL } from '../lib/caja';
 import { forbidden } from '../lib/http';
+import { credito_cliente_sql } from '../lib/creditos';
+import { rentabilidadOrdenes } from '../lib/rentabilidad';
 
 export const informes = new Hono<AppEnv>();
 
@@ -44,18 +46,24 @@ type Filtros = z.infer<typeof zFiltros>;
 interface Ctx { db: D1Database; t: string; f: Filtros; puedeCostos: boolean }
 
 // ───────────── Ventas ─────────────
+const NOTA_VENTAS = 'Facturación comercial interna (comprobantes no fiscales). "Devuelto" son las notas de crédito internas aplicadas a esos comprobantes; los anticipos no son ventas y no figuran acá. "Cobrado" es lo efectivamente cobrado (cobros y anticipos aplicados) y descuenta lo reintegrado al devolver.';
+
+/** Lo devuelto de cada línea de comprobante (devoluciones vigentes): cantidad, subtotal y costo de lo que volvió al inventario. */
+const DEV_LINEA = (campo: 'cantidad' | 'subtotal' | 'costo') =>
+  `COALESCE((SELECT SUM(${campo === 'costo' ? 'CASE WHEN di.reingresa = 1 THEN di.cantidad * COALESCE(di.costo_unitario, 0) ELSE 0 END' : `di.${campo}`}) FROM devolucion_items di
+      JOIN devoluciones dv ON dv.taller_id = di.taller_id AND dv.id = di.devolucion_id AND dv.estado = 'registrada' WHERE di.taller_id = vi.taller_id AND di.venta_item_id = vi.id), 0)`;
 async function ventasPeriodo({ db, t, f }: Ctx): Promise<Informe> {
   const cond = ['ve.taller_id = ?', 've.fecha BETWEEN ? AND ?', 've.estado = ?'];
   const params: unknown[] = [t, f.desde, f.hasta, f.estado === 'anulada' ? 'anulada' : 'emitida'];
   if (f.cliente_id) (cond.push('ve.cliente_id = ?'), params.push(f.cliente_id));
   const detalle = f.agrupar === 'detalle';
   if (detalle) {
-    const filas = await all(db, `SELECT ve.fecha, ve.numero, c.nombre AS cliente, ve.condicion, ve.neto, ve.iva, ve.total, ve.cobrado, ve.total - ve.cobrado AS saldo FROM ventas ve JOIN clientes c ON c.taller_id = ve.taller_id AND c.id = ve.cliente_id WHERE ${cond.join(' AND ')} ORDER BY ve.fecha, ve.numero LIMIT 5000`, ...params);
-    return { titulo: 'Ventas por comprobante', columnas: [col('fecha', 'Fecha', 'fecha'), col('numero', 'N°', 'entero'), col('cliente', 'Cliente'), col('condicion', 'Condición'), col('neto', 'Neto', 'moneda'), col('iva', 'IVA', 'moneda'), col('total', 'Total', 'moneda'), col('cobrado', 'Cobrado', 'moneda'), col('saldo', 'Saldo', 'moneda')], filas, totales: sumar(filas, ['neto', 'iva', 'total', 'cobrado', 'saldo']) };
+    const filas = await all(db, `SELECT ve.fecha, ve.numero, c.nombre AS cliente, ve.condicion, ve.neto, ve.iva, ve.total, ve.devuelto, ve.total - ve.devuelto AS neto_final, ve.cobrado, ve.total - ve.devuelto - ve.cobrado AS saldo FROM ventas ve JOIN clientes c ON c.taller_id = ve.taller_id AND c.id = ve.cliente_id WHERE ${cond.join(' AND ')} ORDER BY ve.fecha, ve.numero LIMIT 5000`, ...params);
+    return { titulo: 'Ventas por comprobante', columnas: [col('fecha', 'Fecha', 'fecha'), col('numero', 'N°', 'entero'), col('cliente', 'Cliente'), col('condicion', 'Condición'), col('neto', 'Neto', 'moneda'), col('iva', 'IVA', 'moneda'), col('total', 'Total', 'moneda'), col('devuelto', 'Devuelto', 'moneda'), col('neto_final', 'Neto de devoluciones', 'moneda'), col('cobrado', 'Cobrado', 'moneda'), col('saldo', 'Saldo', 'moneda')], filas, totales: sumar(filas, ['neto', 'iva', 'total', 'devuelto', 'neto_final', 'cobrado', 'saldo']), nota: NOTA_VENTAS };
   }
   const clave = f.agrupar === 'mes' ? 'substr(ve.fecha,1,7)' : 've.fecha';
-  const filas = await all(db, `SELECT ${clave} AS periodo, COUNT(*) AS comprobantes, SUM(ve.neto) AS neto, SUM(ve.iva) AS iva, SUM(ve.total) AS total, SUM(ve.cobrado) AS cobrado, SUM(ve.total - ve.cobrado) AS saldo FROM ventas ve WHERE ${cond.join(' AND ')} GROUP BY periodo ORDER BY periodo`, ...params);
-  return { titulo: f.agrupar === 'mes' ? 'Ventas por mes' : 'Ventas por día', columnas: [col('periodo', f.agrupar === 'mes' ? 'Mes' : 'Fecha', f.agrupar === 'mes' ? 'texto' : 'fecha'), col('comprobantes', 'Comprobantes', 'entero'), col('neto', 'Neto', 'moneda'), col('iva', 'IVA', 'moneda'), col('total', 'Total', 'moneda'), col('cobrado', 'Cobrado', 'moneda'), col('saldo', 'Saldo', 'moneda')], filas, totales: sumar(filas, ['comprobantes', 'neto', 'iva', 'total', 'cobrado', 'saldo']) };
+  const filas = await all(db, `SELECT ${clave} AS periodo, COUNT(*) AS comprobantes, SUM(ve.neto) AS neto, SUM(ve.iva) AS iva, SUM(ve.total) AS total, SUM(ve.devuelto) AS devuelto, SUM(ve.total - ve.devuelto) AS neto_final, SUM(ve.cobrado) AS cobrado, SUM(ve.total - ve.devuelto - ve.cobrado) AS saldo FROM ventas ve WHERE ${cond.join(' AND ')} GROUP BY periodo ORDER BY periodo`, ...params);
+  return { titulo: f.agrupar === 'mes' ? 'Ventas por mes' : 'Ventas por día', columnas: [col('periodo', f.agrupar === 'mes' ? 'Mes' : 'Fecha', f.agrupar === 'mes' ? 'texto' : 'fecha'), col('comprobantes', 'Comprobantes', 'entero'), col('neto', 'Neto', 'moneda'), col('iva', 'IVA', 'moneda'), col('total', 'Total', 'moneda'), col('devuelto', 'Devuelto', 'moneda'), col('neto_final', 'Neto de devoluciones', 'moneda'), col('cobrado', 'Cobrado', 'moneda'), col('saldo', 'Saldo', 'moneda')], filas, totales: sumar(filas, ['comprobantes', 'neto', 'iva', 'total', 'devuelto', 'neto_final', 'cobrado', 'saldo']), nota: NOTA_VENTAS };
 }
 
 function baseItems(f: Filtros, t: string, tipo: 'articulo' | 'servicio'): { cond: string[]; params: unknown[] } {
@@ -77,8 +85,8 @@ async function ventasArticulo({ db, t, f, puedeCostos }: Ctx, orden: 'cantidad' 
   const { cond, params } = baseItems(f, t, 'articulo');
   const filas = await all<any>(
     db,
-    `SELECT COALESCE(a.codigo, '') AS codigo, vi.descripcion AS articulo, COALESCE(ca.nombre, 'Sin categoría') AS categoria, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total,
-            SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0)) AS costo
+    `SELECT COALESCE(a.codigo, '') AS codigo, vi.descripcion AS articulo, COALESCE(ca.nombre, 'Sin categoría') AS categoria, SUM(vi.cantidad - ${DEV_LINEA('cantidad')}) AS cantidad, SUM(vi.subtotal - ${DEV_LINEA('subtotal')}) AS total,
+            SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0) - ${DEV_LINEA('costo')}) AS costo
        ${FROM_ITEMS} WHERE ${cond.join(' AND ')} GROUP BY COALESCE(vi.articulo_id, vi.descripcion) ORDER BY ${orden === 'cantidad' ? 'cantidad' : orden === 'margen' ? '(total - costo)' : 'total'} DESC LIMIT ?`,
     ...params, limite,
   );
@@ -87,7 +95,7 @@ async function ventasArticulo({ db, t, f, puedeCostos }: Ctx, orden: 'cantidad' 
   if (puedeCostos) cols.push(col('costo', 'Costo', 'moneda'), col('margen', 'Margen', 'moneda'), col('margen_pct', 'Margen %', 'pct'));
   const tot: Record<string, number | string> = sumar(out, ['cantidad', 'total', ...(puedeCostos ? ['costo', 'margen'] : [])]);
   if (puedeCostos) tot.margen_pct = pctMargen(Number(tot.total), Number(tot.costo));
-  return { titulo: orden === 'cantidad' ? 'Productos más vendidos' : orden === 'margen' ? 'Rentabilidad por artículo' : 'Ventas por artículo', columnas: cols, filas: out, totales: tot, nota: puedeCostos ? 'El costo es el vigente al emitir cada comprobante (en comprobantes anteriores a esta función, el costo actual del artículo).' : undefined };
+  return { titulo: orden === 'cantidad' ? 'Productos más vendidos' : orden === 'margen' ? 'Rentabilidad por artículo' : 'Ventas por artículo', columnas: cols, filas: out, totales: tot, nota: (puedeCostos ? 'El costo es el vigente al emitir cada comprobante (en comprobantes anteriores a esta función, el costo actual del artículo). ' : '') + 'Cantidades e importes netos de las devoluciones de esos comprobantes; el costo de lo devuelto que no volvió al inventario sigue contando como costo.' };
 }
 
 async function ventasCategoria(ctx: Ctx): Promise<Informe> {
@@ -95,8 +103,8 @@ async function ventasCategoria(ctx: Ctx): Promise<Informe> {
   const art = baseItems(f, t, 'articulo');
   const srv = baseItems(f, t, 'servicio');
   const [a, s] = await Promise.all([
-    all<any>(db, `SELECT COALESCE(ca.nombre, 'Sin categoría') AS categoria, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total, SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0)) AS costo ${FROM_ITEMS} WHERE ${art.cond.join(' AND ')} GROUP BY categoria ORDER BY total DESC`, ...art.params),
-    first<any>(db, `SELECT SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total ${FROM_ITEMS} WHERE ${srv.cond.join(' AND ')}`, ...srv.params),
+    all<any>(db, `SELECT COALESCE(ca.nombre, 'Sin categoría') AS categoria, SUM(vi.cantidad - ${DEV_LINEA('cantidad')}) AS cantidad, SUM(vi.subtotal - ${DEV_LINEA('subtotal')}) AS total, SUM(vi.cantidad * COALESCE(vi.costo_unitario, a.costo, 0) - ${DEV_LINEA('costo')}) AS costo ${FROM_ITEMS} WHERE ${art.cond.join(' AND ')} GROUP BY categoria ORDER BY total DESC`, ...art.params),
+    first<any>(db, `SELECT SUM(vi.cantidad - ${DEV_LINEA('cantidad')}) AS cantidad, SUM(vi.subtotal - ${DEV_LINEA('subtotal')}) AS total ${FROM_ITEMS} WHERE ${srv.cond.join(' AND ')}`, ...srv.params),
   ]);
   const filas = [...a.map((x) => ({ ...x, cantidad: r3(x.cantidad), costo: Math.round(x.costo) })), ...(s?.total ? [{ categoria: 'Servicios y mano de obra', cantidad: r3(s.cantidad), total: s.total, costo: 0 }] : [])].map((x) => ({ ...x, margen: x.total - x.costo, margen_pct: pctMargen(x.total, x.costo) }));
   const cols = [col('categoria', 'Categoría'), col('cantidad', 'Cantidad', 'numero'), col('total', 'Vendido', 'moneda')];
@@ -108,7 +116,7 @@ async function ventasCategoria(ctx: Ctx): Promise<Informe> {
 
 async function serviciosRealizados({ db, t, f }: Ctx): Promise<Informe> {
   const { cond, params } = baseItems(f, t, 'servicio');
-  const filas = await all<any>(db, `SELECT vi.descripcion AS servicio, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total, ROUND(SUM(vi.subtotal) * 1.0 / SUM(vi.cantidad)) AS promedio ${FROM_ITEMS} WHERE ${cond.join(' AND ')} GROUP BY vi.descripcion ORDER BY cantidad DESC LIMIT 500`, ...params);
+  const filas = await all<any>(db, `SELECT vi.descripcion AS servicio, SUM(vi.cantidad - ${DEV_LINEA('cantidad')}) AS cantidad, SUM(vi.subtotal - ${DEV_LINEA('subtotal')}) AS total, ROUND(SUM(vi.subtotal - ${DEV_LINEA('subtotal')}) * 1.0 / NULLIF(SUM(vi.cantidad - ${DEV_LINEA('cantidad')}), 0)) AS promedio ${FROM_ITEMS} WHERE ${cond.join(' AND ')} GROUP BY vi.descripcion ORDER BY cantidad DESC LIMIT 500`, ...params);
   const out = filas.map((x) => ({ ...x, cantidad: r3(x.cantidad) }));
   return { titulo: 'Servicios más realizados', columnas: [col('servicio', 'Servicio'), col('cantidad', 'Veces', 'numero'), col('total', 'Facturado', 'moneda'), col('promedio', 'Promedio', 'moneda')], filas: out, totales: sumar(out, ['cantidad', 'total']) };
 }
@@ -144,29 +152,29 @@ async function gastosInforme({ db, t, f }: Ctx): Promise<Informe> {
 async function cobranzasInforme({ db, t, f }: Ctx): Promise<Informe> {
   if (f.agrupar === 'medio') {
     const filas = await all(db, `SELECT cm.medio, COUNT(*) AS cantidad, SUM(cm.importe) AS importe FROM cobro_medios cm JOIN cobros co ON co.taller_id = cm.taller_id AND co.id = cm.cobro_id WHERE cm.taller_id = ? AND co.estado = 'registrado' AND co.fecha BETWEEN ? AND ? ${f.cliente_id ? 'AND co.cliente_id = ?' : ''} GROUP BY cm.medio ORDER BY importe DESC`, t, f.desde, f.hasta, ...(f.cliente_id ? [f.cliente_id] : []));
-    return { titulo: 'Cobranzas por medio de pago', columnas: [col('medio', 'Medio'), col('cantidad', 'Cobros', 'entero'), col('importe', 'Importe', 'moneda')], filas, totales: sumar(filas, ['cantidad', 'importe']) };
+    return { titulo: 'Cobranzas por medio de pago', columnas: [col('medio', 'Medio'), col('cantidad', 'Cobros', 'entero'), col('importe', 'Importe', 'moneda')], filas, totales: sumar(filas, ['cantidad', 'importe']), nota: 'Incluye los anticipos de clientes (dinero recibido, no ventas). No descuenta los reintegros.' };
   }
   const cond = ['co.taller_id = ?', 'co.fecha BETWEEN ? AND ?', f.estado === 'anulado' ? "co.estado = 'anulado'" : "co.estado = 'registrado'"];
   const params: unknown[] = [t, f.desde, f.hasta];
   if (f.cliente_id) (cond.push('co.cliente_id = ?'), params.push(f.cliente_id));
-  const filas = await all(db, `SELECT co.fecha, co.numero, c.nombre AS cliente, (SELECT GROUP_CONCAT(DISTINCT medio) FROM cobro_medios x WHERE x.taller_id = co.taller_id AND x.cobro_id = co.id) AS medios, co.total FROM cobros co JOIN clientes c ON c.taller_id = co.taller_id AND c.id = co.cliente_id WHERE ${cond.join(' AND ')} ORDER BY co.fecha, co.numero LIMIT 5000`, ...params);
-  return { titulo: 'Cobranzas', columnas: [col('fecha', 'Fecha', 'fecha'), col('numero', 'Recibo', 'entero'), col('cliente', 'Cliente'), col('medios', 'Medios'), col('total', 'Total', 'moneda')], filas, totales: sumar(filas, ['total']) };
+  const filas = await all(db, `SELECT co.fecha, co.numero, CASE co.tipo WHEN 'anticipo' THEN 'Anticipo' ELSE 'Cobro' END AS tipo, c.nombre AS cliente, (SELECT GROUP_CONCAT(DISTINCT medio) FROM cobro_medios x WHERE x.taller_id = co.taller_id AND x.cobro_id = co.id) AS medios, co.total FROM cobros co JOIN clientes c ON c.taller_id = co.taller_id AND c.id = co.cliente_id WHERE ${cond.join(' AND ')} ORDER BY co.fecha, co.numero LIMIT 5000`, ...params);
+  return { titulo: 'Cobranzas', columnas: [col('fecha', 'Fecha', 'fecha'), col('numero', 'Recibo', 'entero'), col('tipo', 'Tipo'), col('cliente', 'Cliente'), col('medios', 'Medios'), col('total', 'Total', 'moneda')], filas, totales: sumar(filas, ['total']), nota: 'Dinero recibido de clientes, una sola vez: los anticipos figuran el día en que se cobran y no vuelven a contarse cuando se aplican a una venta. No incluye los reintegros (ver el informe de devoluciones).' };
 }
 
 async function deudoresInforme({ db, t, f }: Ctx): Promise<Informe> {
   const dias = "(julianday(date('now', '-3 hours')) - julianday(ve.fecha))";
-  const cond = ['ve.taller_id = ?', "ve.estado = 'emitida'", 've.cobrado < ve.total'];
+  const cond = ['ve.taller_id = ?', "ve.estado = 'emitida'", 've.cobrado + ve.devuelto < ve.total'];
   const params: unknown[] = [t];
   if (f.cliente_id) (cond.push('ve.cliente_id = ?'), params.push(f.cliente_id));
   const filas = await all(
     db,
-    `SELECT c.nombre AS cliente, c.telefono, COUNT(*) AS comprobantes, MIN(ve.fecha) AS deuda_desde, SUM(ve.total - ve.cobrado) AS saldo,
-            SUM(CASE WHEN ${dias} <= 30 THEN ve.total - ve.cobrado ELSE 0 END) AS v_0, SUM(CASE WHEN ${dias} > 30 AND ${dias} <= 60 THEN ve.total - ve.cobrado ELSE 0 END) AS v_30,
-            SUM(CASE WHEN ${dias} > 60 AND ${dias} <= 90 THEN ve.total - ve.cobrado ELSE 0 END) AS v_60, SUM(CASE WHEN ${dias} > 90 THEN ve.total - ve.cobrado ELSE 0 END) AS v_90
+    `SELECT c.nombre AS cliente, c.telefono, COUNT(*) AS comprobantes, MIN(ve.fecha) AS deuda_desde, SUM(ve.total - ve.devuelto - ve.cobrado) AS saldo,
+            SUM(CASE WHEN ${dias} <= 30 THEN ve.total - ve.devuelto - ve.cobrado ELSE 0 END) AS v_0, SUM(CASE WHEN ${dias} > 30 AND ${dias} <= 60 THEN ve.total - ve.devuelto - ve.cobrado ELSE 0 END) AS v_30,
+            SUM(CASE WHEN ${dias} > 60 AND ${dias} <= 90 THEN ve.total - ve.devuelto - ve.cobrado ELSE 0 END) AS v_60, SUM(CASE WHEN ${dias} > 90 THEN ve.total - ve.devuelto - ve.cobrado ELSE 0 END) AS v_90, ${credito_cliente_sql('c')} AS a_favor
        FROM ventas ve JOIN clientes c ON c.taller_id = ve.taller_id AND c.id = ve.cliente_id WHERE ${cond.join(' AND ')} GROUP BY c.id ORDER BY saldo DESC`,
     ...params,
   );
-  return { titulo: 'Deudores (cuentas corrientes de clientes)', columnas: [col('cliente', 'Cliente'), col('telefono', 'Teléfono'), col('comprobantes', 'Comprob.', 'entero'), col('deuda_desde', 'Deuda desde', 'fecha'), col('v_0', '0-30 días', 'moneda'), col('v_30', '31-60', 'moneda'), col('v_60', '61-90', 'moneda'), col('v_90', '+90', 'moneda'), col('saldo', 'Saldo', 'moneda')], filas, totales: sumar(filas, ['comprobantes', 'v_0', 'v_30', 'v_60', 'v_90', 'saldo']), nota: 'Al día de hoy; no depende del período elegido.' };
+  return { titulo: 'Deudores (cuentas corrientes de clientes)', columnas: [col('cliente', 'Cliente'), col('telefono', 'Teléfono'), col('comprobantes', 'Comprob.', 'entero'), col('deuda_desde', 'Deuda desde', 'fecha'), col('v_0', '0-30 días', 'moneda'), col('v_30', '31-60', 'moneda'), col('v_60', '61-90', 'moneda'), col('v_90', '+90', 'moneda'), col('saldo', 'Saldo', 'moneda'), col('a_favor', 'Saldo a favor', 'moneda')], filas, totales: sumar(filas, ['comprobantes', 'v_0', 'v_30', 'v_60', 'v_90', 'saldo', 'a_favor']), nota: 'Al día de hoy; no depende del período elegido. El saldo es la deuda de los comprobantes ya descontadas las devoluciones; el saldo a favor (anticipos y créditos de devoluciones) se informa aparte y no se resta automáticamente.' };
 }
 
 async function proveedoresInforme({ db, t, f }: Ctx): Promise<Informe> {
@@ -219,10 +227,124 @@ async function actividadFinanciera({ db, t, f }: Ctx): Promise<Informe> {
     mapa.set(r.periodo, x);
   }
   const filas = [...mapa.values()].sort((a, b) => (a.periodo < b.periodo ? -1 : 1)).map((x) => ({ ...x, resultado: x.ingresos - x.egresos }));
-  return { titulo: 'Actividad financiera', columnas: [col('periodo', f.agrupar === 'mes' ? 'Mes' : 'Fecha', f.agrupar === 'mes' ? 'texto' : 'fecha'), col('ingresos', 'Ingresos', 'moneda'), col('egresos', 'Egresos', 'moneda'), col('resultado', 'Resultado', 'moneda')], filas, totales: sumar(filas, ['ingresos', 'egresos', 'resultado']), nota: 'Base caja: lo efectivamente cobrado y pagado. Depósitos y transferencias entre cuentas propias no se cuentan.' };
+  return { titulo: 'Actividad financiera', columnas: [col('periodo', f.agrupar === 'mes' ? 'Mes' : 'Fecha', f.agrupar === 'mes' ? 'texto' : 'fecha'), col('ingresos', 'Ingresos', 'moneda'), col('egresos', 'Egresos', 'moneda'), col('resultado', 'Resultado', 'moneda')], filas, totales: sumar(filas, ['ingresos', 'egresos', 'resultado']), nota: 'Base caja: lo efectivamente cobrado y pagado (los egresos incluyen los reintegros a clientes). Depósitos y transferencias entre cuentas propias no se cuentan.' };
+}
+
+// ───────────── Devoluciones, anticipos y rentabilidad de órdenes ─────────────
+async function devolucionesInforme({ db, t, f }: Ctx): Promise<Informe> {
+  if (f.agrupar === 'medio') {
+    const filas = await all(
+      db,
+      `SELECT rm.medio, COUNT(*) AS cantidad, SUM(rm.importe) AS importe FROM reintegro_medios rm JOIN reintegros r ON r.taller_id = rm.taller_id AND r.id = rm.reintegro_id
+        WHERE rm.taller_id = ? AND r.estado = 'registrado' AND r.fecha BETWEEN ? AND ? ${f.cliente_id ? 'AND r.cliente_id = ?' : ''} GROUP BY rm.medio ORDER BY importe DESC`,
+      t, f.desde, f.hasta, ...(f.cliente_id ? [f.cliente_id] : []),
+    );
+    return { titulo: 'Reintegros a clientes por medio de pago', columnas: [col('medio', 'Medio'), col('cantidad', 'Reintegros', 'entero'), col('importe', 'Importe', 'moneda')], filas, totales: sumar(filas, ['cantidad', 'importe']), nota: 'Dinero devuelto a clientes (sale de la caja o de la cuenta). Incluye devoluciones de anticipos.' };
+  }
+  const cond = ['d.taller_id = ?', 'd.fecha BETWEEN ? AND ?', f.estado === 'anulada' ? "d.estado = 'anulada'" : "d.estado = 'registrada'"];
+  const params: unknown[] = [t, f.desde, f.hasta];
+  if (f.cliente_id) (cond.push('d.cliente_id = ?'), params.push(f.cliente_id));
+  const filas = await all(
+    db,
+    `SELECT d.fecha, d.numero, ve.numero AS comprobante, c.nombre AS cliente, d.motivo, d.total, d.iva, d.a_deuda, d.reintegrado, d.liberado - d.reintegrado - d.credito_aplicado AS a_favor
+       FROM devoluciones d JOIN ventas ve ON ve.taller_id = d.taller_id AND ve.id = d.venta_id JOIN clientes c ON c.taller_id = d.taller_id AND c.id = d.cliente_id
+      WHERE ${cond.join(' AND ')} ORDER BY d.fecha, d.numero LIMIT 5000`,
+    ...params,
+  );
+  return {
+    titulo: 'Devoluciones (notas de crédito internas)',
+    columnas: [col('fecha', 'Fecha', 'fecha'), col('numero', 'N°', 'entero'), col('comprobante', 'Comprobante', 'entero'), col('cliente', 'Cliente'), col('motivo', 'Motivo'), col('total', 'Total', 'moneda'), col('iva', 'IVA', 'moneda'), col('a_deuda', 'Cancela deuda', 'moneda'), col('reintegrado', 'Reintegrado', 'moneda'), col('a_favor', 'Saldo a favor', 'moneda')],
+    filas, totales: sumar(filas, ['total', 'iva', 'a_deuda', 'reintegrado', 'a_favor']),
+    nota: 'Documentos internos, NO fiscales. "Cancela deuda": parte que reduce lo que el cliente debía; "Reintegrado": dinero devuelto; "Saldo a favor": crédito del cliente todavía sin usar ni reintegrar.',
+  };
+}
+
+async function anticiposInforme({ db, t, f }: Ctx): Promise<Informe> {
+  const cond = ['co.taller_id = ?', "co.tipo = 'anticipo'", 'co.fecha BETWEEN ? AND ?'];
+  const params: unknown[] = [t, f.desde, f.hasta];
+  if (f.cliente_id) (cond.push('co.cliente_id = ?'), params.push(f.cliente_id));
+  if (f.estado === 'pendientes') cond.push("co.estado = 'registrado' AND co.total - co.credito_aplicado - co.devuelto > 0");
+  else if (f.estado === 'utilizados') cond.push("co.estado = 'registrado' AND co.credito_aplicado > 0");
+  else if (f.estado === 'devueltos') cond.push("co.estado = 'registrado' AND co.devuelto > 0");
+  else if (f.estado === 'anulados') cond.push("co.estado = 'anulado'");
+  else cond.push("co.estado = 'registrado'");
+  const filas = await all(
+    db,
+    `SELECT co.fecha, co.numero, c.nombre AS cliente, o.numero AS orden, co.total, co.credito_aplicado AS aplicado, co.devuelto, co.total - co.credito_aplicado - co.devuelto AS disponible
+       FROM cobros co JOIN clientes c ON c.taller_id = co.taller_id AND c.id = co.cliente_id LEFT JOIN ordenes o ON o.taller_id = co.taller_id AND o.id = co.orden_id
+      WHERE ${cond.join(' AND ')} ORDER BY co.fecha, co.numero LIMIT 5000`,
+    ...params,
+  );
+  return {
+    titulo: 'Anticipos de clientes',
+    columnas: [col('fecha', 'Fecha', 'fecha'), col('numero', 'Recibo', 'entero'), col('cliente', 'Cliente'), col('orden', 'OT', 'entero'), col('total', 'Recibido', 'moneda'), col('aplicado', 'Aplicado a ventas', 'moneda'), col('devuelto', 'Devuelto', 'moneda'), col('disponible', 'Pendiente de aplicar', 'moneda')],
+    filas, totales: sumar(filas, ['total', 'aplicado', 'devuelto', 'disponible']),
+    nota: 'Dinero recibido antes de la venta. No es una venta: al aplicarse a un comprobante no se cuenta de nuevo como cobro.',
+  };
+}
+
+const ETIQUETA_CALIDAD: Record<string, string> = { definitivo: 'Definitivo', estimado: 'Estimado', parcial: 'Parcial' };
+
+async function rentabilidadOrdenesInforme({ db, t, f }: Ctx): Promise<Informe> {
+  const cond = ['o.taller_id = ?', "o.estado IN ('lista','entregada')", 'substr(COALESCE(o.fecha_lista, o.fecha_ingreso), 1, 10) BETWEEN ? AND ?'];
+  const params: unknown[] = [t, f.desde, f.hasta];
+  if (f.cliente_id) (cond.push('o.cliente_id = ?'), params.push(f.cliente_id));
+  if (f.mecanico_id) (cond.push(f.mecanico_id === 'sin' ? 'o.mecanico_id IS NULL' : 'o.mecanico_id = ?'), f.mecanico_id !== 'sin' && params.push(f.mecanico_id));
+  const ords = await all<{ id: string; fecha: string; numero: number; cliente: string; patente: string }>(
+    db,
+    `SELECT o.id, substr(COALESCE(o.fecha_lista, o.fecha_ingreso), 1, 10) AS fecha, o.numero, c.nombre AS cliente, v.patente FROM ordenes o
+       JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
+      WHERE ${cond.join(' AND ')} ORDER BY o.fecha_lista, o.numero LIMIT 1000`,
+    ...params,
+  );
+  const r = await rentabilidadOrdenes(db, t, ords.map((o) => o.id));
+  const filas = ords.map((o) => {
+    const x = r.get(o.id)!;
+    return {
+      fecha: o.fecha, numero: o.numero, cliente: o.cliente, patente: o.patente,
+      mo_cobrada: x.mo_cobrada, mo_costo: x.mo_costo, mo_costo_estimado: x.mo_costo_estimado ?? 0, horas: Math.round((x.mo_segundos / 3600) * 100) / 100,
+      repuestos_venta: x.repuestos_venta, repuestos_costo: x.repuestos_costo, margen: x.margen_bruto, margen_pct: x.margen_pct ?? 0, calidad: ETIQUETA_CALIDAD[x.calidad],
+      _calidad: x.calidad,
+    };
+  });
+  const tot = sumar(filas, ['mo_cobrada', 'mo_costo', 'mo_costo_estimado', 'horas', 'repuestos_venta', 'repuestos_costo', 'margen']);
+  const venta = Number(tot.mo_cobrada) + Number(tot.repuestos_venta);
+  tot.margen_pct = venta > 0 ? Math.round((Number(tot.margen) / venta) * 1000) / 10 : 0;
+  const n = (c: string) => filas.filter((x) => x._calidad === c).length;
+  const completas = filas.filter((x) => x._calidad === 'definitivo');
+  const ventaDef = completas.reduce((a, x) => a + x.mo_cobrada + x.repuestos_venta, 0);
+  const margenDef = completas.reduce((a, x) => a + x.margen, 0);
+  return {
+    titulo: 'Rentabilidad de órdenes de trabajo',
+    columnas: [col('fecha', 'Lista', 'fecha'), col('numero', 'OT', 'entero'), col('cliente', 'Cliente'), col('patente', 'Patente'), col('mo_cobrada', 'Mano de obra cobrada', 'moneda'), col('horas', 'Horas', 'numero'), col('mo_costo_estimado', 'Costo MO estimado', 'moneda'), col('mo_costo', 'Costo MO usado', 'moneda'), col('repuestos_venta', 'Repuestos', 'moneda'), col('repuestos_costo', 'Costo repuestos', 'moneda'), col('margen', 'Margen bruto', 'moneda'), col('margen_pct', 'Margen %', 'pct'), col('calidad', 'Dato')],
+    filas: filas.map(({ _calidad, ...x }) => x), totales: tot,
+    nota: `Importes netos de descuentos globales, sin IVA y netos de devoluciones. Costos históricos: repuestos al costo del consumo; mano de obra con el costo horario vigente cuando se trabajó (no se recalcula si cambia después). Datos: ${n('definitivo')} definitivo(s), ${n('estimado')} estimado(s), ${n('parcial')} parcial(es). Los márgenes "estimados" o "parciales" no son resultados exactos. Solo las órdenes definitivas suman ${ventaDef > 0 ? `un margen de ${Math.round((margenDef / ventaDef) * 1000) / 10}%` : 'margen'}.`,
+  };
+}
+
+async function manoObraInforme({ db, t, f }: Ctx): Promise<Informe> {
+  const filas = await all<any>(
+    db,
+    `SELECT COALESCE(NULLIF(TRIM(u.nombre || ' ' || COALESCE(u.apellido, '')), ''), u.nombre) AS mecanico, COUNT(DISTINCT x.orden_id) AS ordenes, COALESCE(SUM(x.duracion_seg), 0) AS seg,
+            COALESCE(SUM(CASE WHEN x.costo_hora IS NOT NULL THEN x.duracion_seg * x.costo_hora / 3600.0 END), 0) AS costo,
+            COALESCE(SUM(CASE WHEN x.fin_at IS NOT NULL AND x.costo_hora IS NULL THEN x.duracion_seg ELSE 0 END), 0) AS seg_sin_costo
+       FROM orden_tiempos x JOIN usuarios u ON u.taller_id = x.taller_id AND u.id = x.usuario_id
+      WHERE x.taller_id = ? AND substr(datetime(x.inicio_at, '-3 hours'), 1, 10) BETWEEN ? AND ? GROUP BY x.usuario_id ORDER BY costo DESC`,
+    t, f.desde, f.hasta,
+  );
+  const out = filas.map((x) => ({ mecanico: x.mecanico, ordenes: x.ordenes, horas: Math.round((x.seg / 3600) * 100) / 100, costo: Math.round(x.costo), horas_sin_costo: Math.round((x.seg_sin_costo / 3600) * 100) / 100 }));
+  return {
+    titulo: 'Costo de mano de obra por mecánico', columnas: [col('mecanico', 'Mecánico'), col('ordenes', 'OT trabajadas', 'entero'), col('horas', 'Horas registradas', 'numero'), col('costo', 'Costo', 'moneda'), col('horas_sin_costo', 'Horas sin costo configurado', 'numero')],
+    filas: out, totales: sumar(out, ['ordenes', 'horas', 'costo', 'horas_sin_costo']),
+    nota: 'Horas del cronómetro de las órdenes valuadas con el costo horario vigente al cerrar cada tramo. No es liquidación de sueldos: el tiempo sin cronómetro y las horas de asistencia no se imputan.',
+  };
 }
 
 const TIPOS: Record<string, { fn: (c: Ctx) => Promise<Informe>; permiso?: Permiso; costos?: boolean }> = {
+  devoluciones: { fn: devolucionesInforme },
+  anticipos: { fn: anticiposInforme },
+  'rentabilidad-ot': { fn: rentabilidadOrdenesInforme, permiso: 'margenes.ver', costos: true },
+  'mano-obra': { fn: manoObraInforme, permiso: 'margenes.ver', costos: true },
   ventas: { fn: ventasPeriodo },
   'ventas-articulo': { fn: (c) => ventasArticulo(c, 'total') },
   'ventas-categoria': { fn: ventasCategoria },
@@ -267,6 +389,17 @@ informes.get('/contabilidad/libro-ventas', requirePerm('contabilidad.ver'), asyn
       WHERE ve.taller_id = ? AND ve.fecha BETWEEN ? AND ? ${f.estado ? 'AND ve.estado = ?' : ''} ORDER BY ve.fecha, ve.numero LIMIT 10000`,
     s.tallerId, f.desde, f.hasta, ...(f.estado ? [f.estado] : []),
   );
+  // Notas de crédito internas (devoluciones): restan en el libro, con su comprobante de origen.
+  const ncs = await all<any>(
+    c.env.DB,
+    `SELECT d.fecha, d.numero, d.estado, c.nombre AS cliente, COALESCE(c.documento, '') AS documento, c.condicion_iva, ve.condicion, ve.iva_pct, -d.neto AS neto, -d.iva AS iva, 0 AS recargo, -d.total AS total,
+            'Nota de crédito interna (comp. #' || ve.numero || ')' AS tipo
+       FROM devoluciones d JOIN ventas ve ON ve.taller_id = d.taller_id AND ve.id = d.venta_id JOIN clientes c ON c.taller_id = d.taller_id AND c.id = d.cliente_id
+      WHERE d.taller_id = ? AND d.fecha BETWEEN ? AND ? ${f.estado ? 'AND d.estado = ?' : ''} ORDER BY d.fecha, d.numero LIMIT 5000`,
+    s.tallerId, f.desde, f.hasta, ...(f.estado ? [f.estado === 'emitida' ? 'registrada' : 'anulada'] : []),
+  );
+  filas.push(...ncs.map((x) => ({ ...x, estado: x.estado === 'registrada' ? 'emitida' : 'anulada', nota_credito: true })));
+  filas.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.numero - b.numero));
   const vigentes = filas.filter((x) => x.estado === 'emitida');
   const porAlicuota = new Map<number, { iva_pct: number; comprobantes: number; neto: number; iva: number; total: number }>();
   for (const x of vigentes) {
@@ -279,7 +412,7 @@ informes.get('/contabilidad/libro-ventas', requirePerm('contabilidad.ver'), asyn
   }
   return c.json({
     nota: NOTA_INTERNA, desde: f.desde, hasta: f.hasta, filas,
-    totales: { ...sumar(vigentes, ['neto', 'iva', 'recargo', 'total']), comprobantes: vigentes.length, anulados: filas.length - vigentes.length },
+    totales: { ...sumar(vigentes, ['neto', 'iva', 'recargo', 'total']), comprobantes: vigentes.filter((x) => !x.nota_credito).length, notas_credito: vigentes.filter((x) => x.nota_credito).length, anulados: filas.length - vigentes.length },
     por_alicuota: [...porAlicuota.values()].sort((a, b) => a.iva_pct - b.iva_pct),
   });
 });
@@ -324,24 +457,25 @@ informes.get('/contabilidad/resumen', requirePerm('contabilidad.ver'), async (c)
   await autorizarExportacion(c, 'contabilidad-resumen');
   const f = query(c, z.object({ desde: zFecha, hasta: zFecha }));
   const t = s.tallerId;
-  const [rubros, bancarios, ventas, ivaCompras, ivaFacturas, porMes] = await Promise.all([
+  const [rubros, bancarios, ventas, ivaCompras, ivaFacturas, porMes, devs] = await Promise.all([
     all<{ rubro: string; neto: number }>(c.env.DB, `SELECT rubro, SUM(${IMPORTE_FIRMADO_SQL}) AS neto FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro <> 'traspaso' GROUP BY rubro`, t, f.desde, f.hasta),
     first<{ ingresos: number; egresos: number }>(c.env.DB, `SELECT COALESCE(SUM(CASE WHEN m.tipo='ingreso' THEN m.importe END),0) AS ingresos, COALESCE(SUM(CASE WHEN m.tipo='egreso' THEN m.importe END),0) AS egresos FROM banco_movimientos m JOIN cuentas_bancarias cb ON cb.taller_id=m.taller_id AND cb.id=m.cuenta_id WHERE m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.afecta_resultado = 1 AND cb.moneda='ARS'`, t, f.desde, f.hasta),
     first<any>(c.env.DB, "SELECT COALESCE(SUM(neto),0) AS neto, COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(total),0) AS total, COUNT(*) AS n FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND fecha BETWEEN ? AND ?", t, f.desde, f.hasta),
     first<any>(c.env.DB, "SELECT COALESCE(SUM(neto),0) AS neto, COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(total),0) AS total, COUNT(*) AS n FROM compras WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?", t, f.desde, f.hasta),
     first<any>(c.env.DB, "SELECT COALESCE(SUM(CASE WHEN tipo LIKE 'nota_credito%' THEN -(iva_21+iva_10_5+iva_27) ELSE iva_21+iva_10_5+iva_27 END),0) AS iva, COALESCE(SUM(CASE WHEN tipo LIKE 'nota_credito%' THEN -neto_gravado ELSE neto_gravado END),0) AS neto, COUNT(*) AS n FROM facturas_proveedor WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ? AND (compra_id IS NULL OR tipo LIKE 'nota_credito%')", t, f.desde, f.hasta),
     all(c.env.DB, `SELECT substr(fecha,1,7) AS mes, SUM(CASE WHEN tipo='ingreso' THEN importe ELSE 0 END) AS ingresos, SUM(CASE WHEN tipo='egreso' THEN importe ELSE 0 END) AS egresos FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro <> 'traspaso' GROUP BY mes ORDER BY mes`, t, f.desde, f.hasta),
+    first<any>(c.env.DB, "SELECT COALESCE(SUM(neto),0) AS neto, COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(total),0) AS total FROM devoluciones WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?", t, f.desde, f.hasta),
   ]);
   const neto = (r: string) => rubros.find((x) => x.rubro === r)?.neto ?? 0;
   const ingresos = { cobros: neto('cobro'), otros: neto('otro_ingreso'), bancarios: bancarios?.ingresos ?? 0 };
-  const egresos = { pagos_proveedor: -neto('pago_proveedor'), gastos: -neto('gasto'), bancarios: bancarios?.egresos ?? 0 };
+  const egresos = { pagos_proveedor: -neto('pago_proveedor'), gastos: -neto('gasto'), devoluciones_clientes: -neto('devolucion'), bancarios: bancarios?.egresos ?? 0 };
   const ti = ingresos.cobros + ingresos.otros + ingresos.bancarios;
-  const te = egresos.pagos_proveedor + egresos.gastos + egresos.bancarios;
+  const te = egresos.pagos_proveedor + egresos.gastos + egresos.devoluciones_clientes + egresos.bancarios;
   return c.json({
     nota: NOTA_INTERNA, desde: f.desde, hasta: f.hasta,
     ingresos: { ...ingresos, total: ti }, egresos: { ...egresos, total: te }, resultado: ti - te,
-    devengado: { ventas_netas: ventas?.neto ?? 0, ventas_total: ventas?.total ?? 0, ventas_comprobantes: ventas?.n ?? 0, compras_netas: (ivaCompras?.neto ?? 0) + (ivaFacturas?.neto ?? 0), compras_total: ivaCompras?.total ?? 0 },
-    impuestos_registrados: { iva_ventas: ventas?.iva ?? 0, iva_compras: (ivaCompras?.iva ?? 0) + (ivaFacturas?.iva ?? 0), saldo_informativo: (ventas?.iva ?? 0) - ((ivaCompras?.iva ?? 0) + (ivaFacturas?.iva ?? 0)) },
+    devengado: { ventas_netas: (ventas?.neto ?? 0) - (devs?.neto ?? 0), ventas_total: (ventas?.total ?? 0) - (devs?.total ?? 0), ventas_brutas: ventas?.total ?? 0, devoluciones_total: devs?.total ?? 0, ventas_comprobantes: ventas?.n ?? 0, compras_netas: (ivaCompras?.neto ?? 0) + (ivaFacturas?.neto ?? 0), compras_total: ivaCompras?.total ?? 0 },
+    impuestos_registrados: { iva_ventas: (ventas?.iva ?? 0) - (devs?.iva ?? 0), iva_compras: (ivaCompras?.iva ?? 0) + (ivaFacturas?.iva ?? 0), saldo_informativo: ((ventas?.iva ?? 0) - (devs?.iva ?? 0)) - ((ivaCompras?.iva ?? 0) + (ivaFacturas?.iva ?? 0)) },
     por_mes: porMes,
   });
 });
@@ -356,7 +490,9 @@ informes.get('/contabilidad/operaciones', requirePerm('contabilidad.ver'), async
   const rango = [t, f.desde, f.hasta];
   const fuentes = await Promise.all([
     all<any>(c.env.DB, `SELECT ve.fecha, 'venta' AS tipo, ve.numero, c.nombre AS tercero, 'Comprobante interno' AS concepto, ve.total AS importe, 'devengado' AS efecto, ve.estado FROM ventas ve JOIN clientes c ON c.taller_id = ve.taller_id AND c.id = ve.cliente_id WHERE ve.taller_id = ? AND ve.fecha BETWEEN ? AND ? LIMIT 3000`, ...rango),
-    all<any>(c.env.DB, `SELECT co.fecha, 'cobro' AS tipo, co.numero, c.nombre AS tercero, 'Cobro de cliente' AS concepto, co.total AS importe, 'ingreso' AS efecto, co.estado FROM cobros co JOIN clientes c ON c.taller_id = co.taller_id AND c.id = co.cliente_id WHERE co.taller_id = ? AND co.fecha BETWEEN ? AND ? LIMIT 3000`, ...rango),
+    all<any>(c.env.DB, `SELECT co.fecha, 'cobro' AS tipo, co.numero, c.nombre AS tercero, CASE co.tipo WHEN 'anticipo' THEN 'Anticipo de cliente (no es venta)' ELSE 'Cobro de cliente' END AS concepto, co.total AS importe, 'ingreso' AS efecto, co.estado FROM cobros co JOIN clientes c ON c.taller_id = co.taller_id AND c.id = co.cliente_id WHERE co.taller_id = ? AND co.fecha BETWEEN ? AND ? LIMIT 3000`, ...rango),
+    all<any>(c.env.DB, `SELECT d.fecha, 'nota_credito_interna' AS tipo, d.numero, c.nombre AS tercero, 'Devolución del comprobante #' || ve.numero AS concepto, -d.total AS importe, 'devengado' AS efecto, d.estado FROM devoluciones d JOIN ventas ve ON ve.taller_id = d.taller_id AND ve.id = d.venta_id JOIN clientes c ON c.taller_id = d.taller_id AND c.id = d.cliente_id WHERE d.taller_id = ? AND d.fecha BETWEEN ? AND ? LIMIT 3000`, ...rango),
+    all<any>(c.env.DB, `SELECT r.fecha, 'reintegro' AS tipo, r.numero, c.nombre AS tercero, 'Reintegro a cliente' AS concepto, r.total AS importe, 'egreso' AS efecto, r.estado FROM reintegros r JOIN clientes c ON c.taller_id = r.taller_id AND c.id = r.cliente_id WHERE r.taller_id = ? AND r.fecha BETWEEN ? AND ? LIMIT 3000`, ...rango),
     all<any>(c.env.DB, `SELECT cp.fecha, 'compra' AS tipo, cp.numero, p.nombre AS tercero, 'Compra ' || COALESCE(cp.numero_doc, '') AS concepto, cp.total AS importe, 'devengado' AS efecto, cp.estado FROM compras cp JOIN proveedores p ON p.taller_id = cp.taller_id AND p.id = cp.proveedor_id WHERE cp.taller_id = ? AND cp.fecha BETWEEN ? AND ? LIMIT 3000`, ...rango),
     all<any>(c.env.DB, `SELECT fp.fecha, 'factura_proveedor' AS tipo, fp.numero, p.nombre AS tercero, fp.nro_comprobante AS concepto, fp.total AS importe, CASE WHEN fp.compra_id IS NULL THEN 'devengado' ELSE 'informativo' END AS efecto, fp.estado FROM facturas_proveedor fp JOIN proveedores p ON p.taller_id = fp.taller_id AND p.id = fp.proveedor_id WHERE fp.taller_id = ? AND fp.fecha BETWEEN ? AND ? LIMIT 3000`, ...rango),
     all<any>(c.env.DB, `SELECT pp.fecha, 'pago_proveedor' AS tipo, pp.numero, p.nombre AS tercero, 'Pago a proveedor (' || pp.medio || ')' AS concepto, pp.importe, 'egreso' AS efecto, pp.estado FROM pagos_proveedor pp JOIN proveedores p ON p.taller_id = pp.taller_id AND p.id = pp.proveedor_id WHERE pp.taller_id = ? AND pp.fecha BETWEEN ? AND ? LIMIT 3000`, ...rango),

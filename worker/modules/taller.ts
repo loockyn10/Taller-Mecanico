@@ -17,7 +17,7 @@ taller.get('/config', async (c) => {
   const t = await first(c.env.DB, 'SELECT id, nombre, razon_social, cuit, condicion_iva, direccion, localidad, telefono, email, ingresos_brutos, inicio_actividades, sitio_web FROM talleres WHERE id = ?', s.tallerId);
   const cfg = await first<{ medios_pago: string | null }>(c.env.DB, 'SELECT * FROM taller_config WHERE taller_id = ?', s.tallerId);
   // medios_pago se entrega como lista (null = todos habilitados). El margen sugerido es información de márgenes.
-  const config = cfg && { ...cfg, medios_pago: cfg.medios_pago ? JSON.parse(cfg.medios_pago) : null, ...(tiene(s, 'margenes.ver') ? {} : { margen_default: undefined }) };
+  const config = cfg && { ...cfg, medios_pago: cfg.medios_pago ? JSON.parse(cfg.medios_pago) : null, ...(tiene(s, 'margenes.ver') ? {} : { margen_default: undefined, costo_hora_general: undefined }) };
   return c.json({ taller: t, config });
 });
 

@@ -35,7 +35,7 @@ export const guardCuentaActiva = (db: D1Database, tallerId: string, cuentaId: st
 export interface MovBanco {
   cuentaId: string;
   tipo: 'ingreso' | 'egreso';
-  categoria: 'cobro' | 'pago_proveedor' | 'gasto' | 'deposito' | 'extraccion' | 'transferencia' | 'cheque' | 'manual' | 'ajuste';
+  categoria: 'cobro' | 'pago_proveedor' | 'gasto' | 'deposito' | 'extraccion' | 'transferencia' | 'cheque' | 'manual' | 'ajuste' | 'devolucion';
   importe: number;
   concepto: string;
   referencia?: string | null;

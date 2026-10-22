@@ -17,12 +17,13 @@ import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
 import { agrupar, permiteNegativo, resolverDeposito, sentenciasMovimiento, verificarDisponible } from '../lib/stock';
 import { puedeCosto } from '../lib/privacidad';
+import { credito_cliente_sql, creditosDisponibles } from '../lib/creditos';
 import { MEDIOS_PAGO } from '../../shared/dominio';
 
 export const comercial = new Hono<AppEnv>();
 
 const SELECT_VENTA = `SELECT ve.*, c.nombre AS cliente, c.documento, c.condicion_iva AS cliente_condicion_iva, o.numero AS orden_numero,
-    (ve.total - ve.cobrado) AS saldo,
+    (ve.total - ve.devuelto - ve.cobrado) AS saldo,
     (SELECT cf.estado FROM comprobantes_fiscales cf WHERE cf.taller_id = ve.taller_id AND cf.venta_id = ve.id ORDER BY cf.created_at DESC LIMIT 1) AS estado_fiscal
   FROM ventas ve
   JOIN clientes c ON c.taller_id = ve.taller_id AND c.id = ve.cliente_id
@@ -33,7 +34,7 @@ comercial.get('/ventas', requirePerm('ventas.ver'), async (c) => {
   const s = c.get('sesion');
   const { q, cliente_id, desde, hasta, pendientes, estado } = query(
     c,
-    z.object({ q: z.string().optional(), cliente_id: z.string().optional(), desde: z.string().optional(), hasta: z.string().optional(), pendientes: z.string().optional(), estado: z.enum(['pendientes', 'parciales', 'cobradas', 'anuladas']).optional() }),
+    z.object({ q: z.string().optional(), cliente_id: z.string().optional(), desde: z.string().optional(), hasta: z.string().optional(), pendientes: z.string().optional(), estado: z.enum(['pendientes', 'parciales', 'cobradas', 'anuladas', 'devueltas']).optional() }),
   );
   const cond = ['ve.taller_id = ?'];
   const params: unknown[] = [s.tallerId];
@@ -41,9 +42,10 @@ comercial.get('/ventas', requirePerm('ventas.ver'), async (c) => {
   if (q) (cond.push('(c.nombre LIKE ? OR CAST(ve.numero AS TEXT) = ?)'), params.push(like(q), q.replace(/\D/g, '')));
   if (desde) (cond.push('ve.fecha >= ?'), params.push(desde));
   if (hasta) (cond.push('ve.fecha <= ?'), params.push(hasta));
-  if (pendientes || estado === 'pendientes') cond.push("ve.estado = 'emitida' AND ve.cobrado < ve.total");
-  if (estado === 'parciales') cond.push("ve.estado = 'emitida' AND ve.cobrado > 0 AND ve.cobrado < ve.total");
-  if (estado === 'cobradas') cond.push("ve.estado = 'emitida' AND ve.cobrado >= ve.total");
+  if (pendientes || estado === 'pendientes') cond.push("ve.estado = 'emitida' AND ve.cobrado + ve.devuelto < ve.total");
+  if (estado === 'parciales') cond.push("ve.estado = 'emitida' AND ve.cobrado > 0 AND ve.cobrado + ve.devuelto < ve.total");
+  if (estado === 'cobradas') cond.push("ve.estado = 'emitida' AND ve.cobrado + ve.devuelto >= ve.total AND ve.devuelto < ve.total");
+  if (estado === 'devueltas') cond.push("ve.estado = 'emitida' AND ve.devuelto > 0");
   if (estado === 'anuladas') cond.push("ve.estado = 'anulada'");
   return c.json(await all(c.env.DB, `${SELECT_VENTA} WHERE ${cond.join(' AND ')} ORDER BY ve.numero DESC LIMIT 300`, ...params));
 });
@@ -53,11 +55,34 @@ comercial.get('/ventas/:id', requirePerm('ventas.ver'), async (c) => {
   const v = await first(c.env.DB, `${SELECT_VENTA} WHERE ve.taller_id = ? AND ve.id = ?`, s.tallerId, c.req.param('id'));
   if (!v) throw notFound('Comprobante');
   // El costo con el que se emitió es un dato de costo: solo lo ve quien tiene permiso.
-  const items = (await all<Record<string, unknown>>(c.env.DB, 'SELECT * FROM venta_items WHERE taller_id = ? AND venta_id = ? ORDER BY orden', s.tallerId, v.id)).map((i) => {
+  const items = (
+    await all<Record<string, unknown>>(
+      c.env.DB,
+      `SELECT vi.*, (SELECT COALESCE(SUM(di.cantidad), 0) FROM devolucion_items di JOIN devoluciones d ON d.taller_id = di.taller_id AND d.id = di.devolucion_id
+                       WHERE di.taller_id = vi.taller_id AND di.venta_item_id = vi.id AND d.estado = 'registrada') AS cantidad_devuelta,
+              (SELECT COALESCE(SUM(di.importe), 0) FROM devolucion_items di JOIN devoluciones d ON d.taller_id = di.taller_id AND d.id = di.devolucion_id
+                WHERE di.taller_id = vi.taller_id AND di.venta_item_id = vi.id AND d.estado = 'registrada') AS importe_devuelto
+         FROM venta_items vi WHERE vi.taller_id = ? AND vi.venta_id = ? ORDER BY vi.orden`,
+      s.tallerId, v.id,
+    )
+  ).map((i) => {
     if (puedeCosto(s)) return i;
     const { costo_unitario: _c, ...resto } = i;
     return resto;
   });
+  const devoluciones = await all(
+    c.env.DB,
+    `SELECT d.id, d.numero, d.fecha, d.estado, d.total, d.motivo, d.liberado, d.reintegrado, d.credito_aplicado FROM devoluciones d WHERE d.taller_id = ? AND d.venta_id = ? ORDER BY d.numero`,
+    s.tallerId, v.id,
+  );
+  const creditos = await all(
+    c.env.DB,
+    `SELECT ca.id, ca.origen_tipo, ca.origen_id, ca.importe, ca.fecha, ca.estado,
+            CASE ca.origen_tipo WHEN 'anticipo' THEN (SELECT co.numero FROM cobros co WHERE co.taller_id = ca.taller_id AND co.id = ca.origen_id)
+                                ELSE (SELECT d.numero FROM devoluciones d WHERE d.taller_id = ca.taller_id AND d.id = ca.origen_id) END AS origen_numero
+       FROM credito_aplicaciones ca WHERE ca.taller_id = ? AND ca.venta_id = ? ORDER BY ca.created_at`,
+    s.tallerId, v.id,
+  );
   const cobros = await all(
     c.env.DB,
     `SELECT co.id, co.numero, co.fecha, co.estado, ca.importe FROM cobro_aplicaciones ca JOIN cobros co ON co.taller_id = ca.taller_id AND co.id = ca.cobro_id
@@ -65,7 +90,7 @@ comercial.get('/ventas/:id', requirePerm('ventas.ver'), async (c) => {
     s.tallerId,
     v.id,
   );
-  return c.json({ ...v, items, cobros, fiscal: { disponible: false, mensaje: 'Comprobante interno. La facturación electrónica ARCA todavía no está integrada.' } });
+  return c.json({ ...v, items, cobros, devoluciones, creditos, fiscal: { disponible: false, mensaje: 'Comprobante interno. La facturación electrónica ARCA todavía no está integrada.' } });
 });
 
 /** Venta de mostrador (sin OT): descuenta stock de los artículos vendidos. */
@@ -164,12 +189,15 @@ comercial.post('/ventas/:id/anular', requirePerm('ventas.anular'), async (c) => 
   );
   if (!v) throw notFound('Comprobante');
   if (v.estado !== 'emitida') throw conflict('El comprobante ya está anulado');
-  if (v.cobrado > 0) throw conflict('El comprobante tiene cobros registrados. Anulá los cobros primero.');
+  if (v.cobrado > 0) throw conflict('El comprobante tiene cobros o saldo a favor aplicado. Anulá los cobros (o desaplicá el saldo a favor) primero.');
+  if (await first(c.env.DB, "SELECT 1 FROM devoluciones WHERE taller_id = ? AND venta_id = ? AND estado = 'registrada'", s.tallerId, id)) {
+    throw conflict('El comprobante tiene devoluciones registradas. Anulá las devoluciones primero.', 'tiene_devoluciones');
+  }
   if (await first(c.env.DB, "SELECT 1 FROM comprobantes_fiscales WHERE taller_id = ? AND venta_id = ? AND estado = 'autorizado'", s.tallerId, id)) {
     throw conflict('El comprobante tiene una factura fiscal autorizada: requiere nota de crédito.');
   }
   const stmts: Stmt[] = [
-    guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM ventas WHERE taller_id = ? AND id = ? AND estado = 'emitida' AND cobrado = 0)", s.tallerId, id),
+    guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM ventas WHERE taller_id = ? AND id = ? AND estado = 'emitida' AND cobrado = 0 AND devuelto = 0)", s.tallerId, id),
     c.env.DB.prepare("UPDATE ventas SET estado = 'anulada', anulada_motivo = ? WHERE taller_id = ? AND id = ?").bind(motivo, s.tallerId, id),
   ];
   // Las ventas de mostrador devuelven el stock. Las ventas desde OT no movieron stock (lo movió la OT).
@@ -272,13 +300,13 @@ comercial.post('/cobros', requirePerm('cobros.registrar'), async (c) => {
   if (new Set(ventaIds).size !== ventaIds.length) throw badRequest('Un comprobante aparece más de una vez');
   if (!(await first(c.env.DB, 'SELECT 1 FROM clientes WHERE taller_id = ? AND id = ?', s.tallerId, d.cliente_id))) throw badRequest('Cliente inexistente');
   const fecha = fechaComercial(s, d.fecha);
-  type FilaVenta = { id: string; cliente_id: string; estado: string; total: number; cobrado: number; numero: number; fecha: string };
+  type FilaVenta = { id: string; cliente_id: string; estado: string; total: number; cobrado: number; devuelto: number; numero: number; fecha: string };
   const ventas: FilaVenta[] = [];
   for (const lote of lotes(ventaIds)) {
     ventas.push(
       ...(await all<FilaVenta>(
         c.env.DB,
-        `SELECT id, cliente_id, estado, total, cobrado, numero, fecha FROM ventas WHERE taller_id = ? AND id IN (${lote.map(() => '?').join(',')})`,
+        `SELECT id, cliente_id, estado, total, cobrado, devuelto, numero, fecha FROM ventas WHERE taller_id = ? AND id IN (${lote.map(() => '?').join(',')})`,
         s.tallerId,
         ...lote,
       )),
@@ -290,7 +318,7 @@ comercial.post('/cobros', requirePerm('cobros.registrar'), async (c) => {
     if (v.cliente_id !== d.cliente_id) throw badRequest(`El comprobante #${v.numero} no pertenece al cliente`);
     if (v.estado !== 'emitida') throw conflict(`El comprobante #${v.numero} está anulado`);
     if (fecha < v.fecha) throw badRequest(`El cobro no puede ser anterior al comprobante #${v.numero} (${v.fecha})`);
-    if (a.importe > v.total - v.cobrado) throw conflict(`El importe supera el saldo del comprobante #${v.numero} (${(v.total - v.cobrado) / 100})`, 'saldo_excedido');
+    if (a.importe > v.total - v.devuelto - v.cobrado) throw conflict(`El importe supera el saldo del comprobante #${v.numero} (${(v.total - v.devuelto - v.cobrado) / 100})`, 'saldo_excedido');
   }
   await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   const id = uid();
@@ -317,15 +345,30 @@ comercial.post('/cobros/:id/anular', requirePerm('cobros.anular'), async (c) => 
   const s = c.get('sesion');
   const id = c.req.param('id');
   const { motivo } = await body(c, z.object({ motivo: z.string().trim().min(3).max(300) }));
-  const co = await first<{ estado: string }>(c.env.DB, 'SELECT estado FROM cobros WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  const co = await first<{ estado: string; tipo: string; credito_aplicado: number; devuelto: number }>(c.env.DB, 'SELECT estado, tipo, credito_aplicado, devuelto FROM cobros WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!co) throw notFound('Cobro');
   if (co.estado !== 'registrado') throw conflict('El cobro ya está anulado');
+  // Un anticipo ya aplicado a un comprobante o devuelto en dinero no se puede anular: primero hay que deshacer esas operaciones.
+  if (co.tipo === 'anticipo' && (co.credito_aplicado > 0 || co.devuelto > 0)) {
+    throw conflict('El anticipo ya se aplicó a un comprobante o se devolvió en dinero. Deshacé esas operaciones antes de anularlo.', 'anticipo_en_uso');
+  }
   await exigirCajaAbiertaSiCorresponde(c.env.DB, s.tallerId);
   const bloqueo = await chequesBloqueanAnulacion(c.env.DB, s.tallerId, "origen_tipo = 'cobro_medio' AND origen_id IN (SELECT id FROM cobro_medios WHERE taller_id = cheques.taller_id AND cobro_id = ?)", [id]);
   if (bloqueo) throw conflict(bloqueo, 'cheque_comprometido');
   const aps = await all<{ venta_id: string; importe: number }>(c.env.DB, 'SELECT venta_id, importe FROM cobro_aplicaciones WHERE taller_id = ? AND cobro_id = ?', s.tallerId, id);
+  // Con devoluciones registradas, lo cobrado del comprobante ya fue reasignado: primero se anulan las devoluciones.
+  const conDevoluciones = aps.length
+    ? await first<{ numero: number }>(
+        c.env.DB,
+        `SELECT ve.numero FROM cobro_aplicaciones ca JOIN ventas ve ON ve.taller_id = ca.taller_id AND ve.id = ca.venta_id WHERE ca.taller_id = ? AND ca.cobro_id = ? AND ve.devuelto > 0 LIMIT 1`,
+        s.tallerId, id,
+      )
+    : null;
+  if (conDevoluciones) throw conflict(`El comprobante #${conDevoluciones.numero} tiene devoluciones registradas. Anulá las devoluciones antes de anular este cobro.`, 'tiene_devoluciones');
   await c.env.DB.batch([
     guardCajaObligatoria(c.env.DB, s.tallerId),
+    guard(c.env.DB, 'EXISTS (SELECT 1 FROM cobros WHERE taller_id = ? AND id = ? AND (credito_aplicado > 0 OR devuelto > 0))', s.tallerId, id),
+    guard(c.env.DB, 'EXISTS (SELECT 1 FROM cobro_aplicaciones ca JOIN ventas ve ON ve.taller_id = ca.taller_id AND ve.id = ca.venta_id WHERE ca.taller_id = ? AND ca.cobro_id = ? AND ve.devuelto > 0)', s.tallerId, id),
     guard(c.env.DB, "NOT EXISTS (SELECT 1 FROM cobros WHERE taller_id = ? AND id = ? AND estado = 'registrado')", s.tallerId, id),
     c.env.DB.prepare("UPDATE cobros SET estado = 'anulado', anulado_motivo = ? WHERE taller_id = ? AND id = ?").bind(motivo, s.tallerId, id),
     ...aps.map((a) => c.env.DB.prepare('UPDATE ventas SET cobrado = cobrado - ? WHERE taller_id = ? AND id = ?').bind(a.importe, s.tallerId, a.venta_id)),
@@ -338,58 +381,76 @@ comercial.post('/cobros/:id/anular', requirePerm('cobros.anular'), async (c) => 
   return c.json({ ok: true });
 });
 
-// ───────────── Cuentas corrientes ─────────────
+/// ───────────── Cuentas corrientes ─────────────
 /**
  * Saldos por cliente con antigüedad de la deuda (días desde la fecha del comprobante).
- * estado: con_deuda (por defecto) | vencidas (deuda de más de 30 días) | al_dia (sin deuda, con movimientos) | todos.
+ *  saldo   = deuda pendiente de los comprobantes vigentes (ya descontadas las devoluciones y lo cobrado)
+ *  a_favor = saldo a favor del cliente (anticipos sin aplicar y crédito de devoluciones sin reintegrar ni aplicar)
+ * estado: con_deuda (por defecto) | vencidas (deuda de más de 30 días) | al_dia (sin deuda, con movimientos) | a_favor | todos.
  */
 comercial.get('/cuentas-corrientes', requirePerm('ventas.ver'), async (c) => {
   const s = c.get('sesion');
-  const f = query(c, z.object({ q: z.string().optional(), estado: z.enum(['con_deuda', 'vencidas', 'al_dia', 'todos']).default('con_deuda') }));
-  const cond = ['ve.taller_id = ?', "ve.estado = 'emitida'"];
-  const params: unknown[] = [s.tallerId];
+  const f = query(c, z.object({ q: z.string().optional(), estado: z.enum(['con_deuda', 'vencidas', 'al_dia', 'a_favor', 'todos']).default('con_deuda') }));
+  const cond = ['c.taller_id = ?'];
+  const params: unknown[] = [s.tallerId, s.tallerId];
   if (f.q) (cond.push('(c.nombre LIKE ? OR c.documento LIKE ? OR c.telefono LIKE ?)'), params.push(like(f.q), like(f.q), like(f.q)));
   const dias = "(julianday(date('now', '-3 hours')) - julianday(ve.fecha))";
-  const having =
-    f.estado === 'con_deuda' ? 'HAVING saldo > 0' : f.estado === 'vencidas' ? 'HAVING v_30 + v_60 + v_90 > 0' : f.estado === 'al_dia' ? 'HAVING saldo = 0' : '';
+  const donde =
+    f.estado === 'con_deuda' ? 'x.saldo > 0'
+    : f.estado === 'vencidas' ? 'x.v_30 + x.v_60 + x.v_90 > 0'
+    : f.estado === 'al_dia' ? 'x.saldo = 0 AND x.comprobantes > 0'
+    : f.estado === 'a_favor' ? 'x.a_favor > 0'
+    : '(x.comprobantes > 0 OR x.a_favor > 0)';
   return c.json(
     await all(
       c.env.DB,
-      `SELECT c.id, c.codigo, c.nombre, c.telefono, SUM(ve.total) AS facturado, SUM(ve.cobrado) AS cobrado, SUM(ve.total - ve.cobrado) AS saldo,
-              COUNT(*) AS comprobantes, SUM(ve.cobrado < ve.total) AS pendientes,
-              MIN(CASE WHEN ve.cobrado < ve.total THEN ve.fecha END) AS deuda_desde,
-              SUM(CASE WHEN ${dias} <= 30 THEN ve.total - ve.cobrado ELSE 0 END) AS v_0,
-              SUM(CASE WHEN ${dias} > 30 AND ${dias} <= 60 THEN ve.total - ve.cobrado ELSE 0 END) AS v_30,
-              SUM(CASE WHEN ${dias} > 60 AND ${dias} <= 90 THEN ve.total - ve.cobrado ELSE 0 END) AS v_60,
-              SUM(CASE WHEN ${dias} > 90 THEN ve.total - ve.cobrado ELSE 0 END) AS v_90
-         FROM ventas ve JOIN clientes c ON c.taller_id = ve.taller_id AND c.id = ve.cliente_id
-        WHERE ${cond.join(' AND ')}
-        GROUP BY c.id ${having} ORDER BY saldo DESC, c.nombre`,
-      ...params,
+      `SELECT * FROM (
+         SELECT c.id, c.codigo, c.nombre, c.telefono, COALESCE(v.facturado, 0) AS facturado, COALESCE(v.cobrado, 0) AS cobrado, COALESCE(v.devuelto, 0) AS devuelto, COALESCE(v.saldo, 0) AS saldo,
+                COALESCE(v.comprobantes, 0) AS comprobantes, COALESCE(v.pendientes, 0) AS pendientes, v.deuda_desde,
+                COALESCE(v.v_0, 0) AS v_0, COALESCE(v.v_30, 0) AS v_30, COALESCE(v.v_60, 0) AS v_60, COALESCE(v.v_90, 0) AS v_90,
+                ${credito_cliente_sql('c')} AS a_favor
+           FROM clientes c
+           LEFT JOIN (
+             SELECT ve.cliente_id, SUM(ve.total) AS facturado, SUM(ve.cobrado) AS cobrado, SUM(ve.devuelto) AS devuelto, SUM(ve.total - ve.devuelto - ve.cobrado) AS saldo,
+                    COUNT(*) AS comprobantes, SUM(ve.cobrado + ve.devuelto < ve.total) AS pendientes,
+                    MIN(CASE WHEN ve.cobrado + ve.devuelto < ve.total THEN ve.fecha END) AS deuda_desde,
+                    SUM(CASE WHEN ${dias} <= 30 THEN ve.total - ve.devuelto - ve.cobrado ELSE 0 END) AS v_0,
+                    SUM(CASE WHEN ${dias} > 30 AND ${dias} <= 60 THEN ve.total - ve.devuelto - ve.cobrado ELSE 0 END) AS v_30,
+                    SUM(CASE WHEN ${dias} > 60 AND ${dias} <= 90 THEN ve.total - ve.devuelto - ve.cobrado ELSE 0 END) AS v_60,
+                    SUM(CASE WHEN ${dias} > 90 THEN ve.total - ve.devuelto - ve.cobrado ELSE 0 END) AS v_90
+               FROM ventas ve WHERE ve.taller_id = ? AND ve.estado = 'emitida' GROUP BY ve.cliente_id
+           ) v ON v.cliente_id = c.id
+          WHERE ${cond.join(' AND ')}
+       ) x WHERE ${donde} ORDER BY x.saldo DESC, x.a_favor DESC, x.nombre COLLATE NOCASE LIMIT 500`,
+      params[1], params[0], ...params.slice(2),
     ),
   );
 });
 
 /**
- * Control de consistencia de las cuentas corrientes de clientes: el saldo mostrado (comprobantes vigentes menos lo cobrado) debe coincidir
- * con la suma de los cobros vigentes aplicados, y ningún comprobante puede tener cobrado mayor al total. Devuelve las diferencias (vacío = todo en orden).
+ * Control de consistencia de las cuentas corrientes de clientes. Devuelve las diferencias (vacío = todo en orden):
+ *  * lo cobrado de un comprobante = cobros aplicados + saldo a favor aplicado − lo liberado por devoluciones; lo devuelto = suma de sus devoluciones vigentes;
+ *  * cada cobro cierra contra sus medios y (los cobros comunes) contra lo aplicado;
+ *  * cada anticipo y cada devolución cierran contra sus aplicaciones y reintegros vigentes.
  */
 comercial.get('/cuentas-corrientes/verificar', requirePerm('ventas.ver', 'finanzas.ver'), async (c) => {
   const s = c.get('sesion');
+  const APLICADO_COBROS = `COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca JOIN cobros co ON co.taller_id = ca.taller_id AND co.id = ca.cobro_id
+                       WHERE ca.taller_id = ve.taller_id AND ca.venta_id = ve.id AND co.estado = 'registrado'), 0)`;
+  const APLICADO_CREDITOS = "COALESCE((SELECT SUM(x.importe) FROM credito_aplicaciones x WHERE x.taller_id = ve.taller_id AND x.venta_id = ve.id AND x.estado = 'vigente'), 0)";
+  const LIBERADO = "COALESCE((SELECT SUM(d.liberado) FROM devoluciones d WHERE d.taller_id = ve.taller_id AND d.venta_id = ve.id AND d.estado = 'registrada'), 0)";
+  const DEVUELTO = "COALESCE((SELECT SUM(d.total) FROM devoluciones d WHERE d.taller_id = ve.taller_id AND d.venta_id = ve.id AND d.estado = 'registrada'), 0)";
   const comprobantes = await all(
     c.env.DB,
-    `SELECT ve.id, ve.numero, ve.total, ve.cobrado,
-            COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca JOIN cobros co ON co.taller_id = ca.taller_id AND co.id = ca.cobro_id
-                       WHERE ca.taller_id = ve.taller_id AND ca.venta_id = ve.id AND co.estado = 'registrado'), 0) AS aplicado
+    `SELECT ve.id, ve.numero, ve.total, ve.cobrado, ve.devuelto, ${APLICADO_COBROS} + ${APLICADO_CREDITOS} - ${LIBERADO} AS aplicado, ${DEVUELTO} AS devuelto_real
        FROM ventas ve WHERE ve.taller_id = ? AND ve.estado = 'emitida'
-        AND (ve.cobrado <> COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca JOIN cobros co ON co.taller_id = ca.taller_id AND co.id = ca.cobro_id
-                       WHERE ca.taller_id = ve.taller_id AND ca.venta_id = ve.id AND co.estado = 'registrado'), 0) OR ve.cobrado > ve.total) LIMIT 200`,
+        AND (ve.cobrado <> ${APLICADO_COBROS} + ${APLICADO_CREDITOS} - ${LIBERADO} OR ve.devuelto <> ${DEVUELTO} OR ve.cobrado + ve.devuelto > ve.total) LIMIT 200`,
     s.tallerId,
   );
   const cobros = await all(
     c.env.DB,
     `SELECT co.id, co.numero, co.total, COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca WHERE ca.taller_id = co.taller_id AND ca.cobro_id = co.id), 0) AS aplicado
-       FROM cobros co WHERE co.taller_id = ? AND co.estado = 'registrado'
+       FROM cobros co WHERE co.taller_id = ? AND co.estado = 'registrado' AND co.tipo = 'cobro'
         AND co.total <> COALESCE((SELECT SUM(ca.importe) FROM cobro_aplicaciones ca WHERE ca.taller_id = co.taller_id AND ca.cobro_id = co.id), 0) LIMIT 200`,
     s.tallerId,
   );
@@ -400,7 +461,32 @@ comercial.get('/cuentas-corrientes/verificar', requirePerm('ventas.ver', 'finanz
         AND co.total <> COALESCE((SELECT SUM(cm.importe) FROM cobro_medios cm WHERE cm.taller_id = co.taller_id AND cm.cobro_id = co.id), 0) LIMIT 200`,
     s.tallerId,
   );
-  return c.json({ ok: !comprobantes.length && !cobros.length && !medios.length, comprobantes_con_diferencia: comprobantes, cobros_sin_cuadrar: cobros, cobros_con_medios_distintos: medios });
+  const anticipos = await all(
+    c.env.DB,
+    `SELECT co.id, co.numero, co.total, co.credito_aplicado, co.devuelto,
+            COALESCE((SELECT SUM(x.importe) FROM credito_aplicaciones x WHERE x.taller_id = co.taller_id AND x.origen_tipo = 'anticipo' AND x.origen_id = co.id AND x.estado = 'vigente'), 0) AS aplicado_real,
+            COALESCE((SELECT SUM(r.total) FROM reintegros r WHERE r.taller_id = co.taller_id AND r.origen_tipo = 'anticipo' AND r.origen_id = co.id AND r.estado = 'registrado'), 0) AS devuelto_real
+       FROM cobros co WHERE co.taller_id = ? AND co.tipo = 'anticipo' AND co.estado = 'registrado'
+        AND (co.credito_aplicado <> COALESCE((SELECT SUM(x.importe) FROM credito_aplicaciones x WHERE x.taller_id = co.taller_id AND x.origen_tipo = 'anticipo' AND x.origen_id = co.id AND x.estado = 'vigente'), 0)
+          OR co.devuelto <> COALESCE((SELECT SUM(r.total) FROM reintegros r WHERE r.taller_id = co.taller_id AND r.origen_tipo = 'anticipo' AND r.origen_id = co.id AND r.estado = 'registrado'), 0)) LIMIT 200`,
+    s.tallerId,
+  );
+  const devoluciones = await all(
+    c.env.DB,
+    `SELECT d.id, d.numero, d.total, d.credito_aplicado, d.reintegrado,
+            COALESCE((SELECT SUM(x.importe) FROM credito_aplicaciones x WHERE x.taller_id = d.taller_id AND x.origen_tipo = 'devolucion' AND x.origen_id = d.id AND x.estado = 'vigente'), 0) AS aplicado_real,
+            COALESCE((SELECT SUM(r.total) FROM reintegros r WHERE r.taller_id = d.taller_id AND r.origen_tipo = 'devolucion' AND r.origen_id = d.id AND r.estado = 'registrado'), 0) AS reintegrado_real,
+            COALESCE((SELECT SUM(i.importe) FROM devolucion_items i WHERE i.taller_id = d.taller_id AND i.devolucion_id = d.id), 0) AS items
+       FROM devoluciones d WHERE d.taller_id = ? AND d.estado = 'registrada'
+        AND (d.credito_aplicado <> COALESCE((SELECT SUM(x.importe) FROM credito_aplicaciones x WHERE x.taller_id = d.taller_id AND x.origen_tipo = 'devolucion' AND x.origen_id = d.id AND x.estado = 'vigente'), 0)
+          OR d.reintegrado <> COALESCE((SELECT SUM(r.total) FROM reintegros r WHERE r.taller_id = d.taller_id AND r.origen_tipo = 'devolucion' AND r.origen_id = d.id AND r.estado = 'registrado'), 0)
+          OR d.total <> COALESCE((SELECT SUM(i.importe) FROM devolucion_items i WHERE i.taller_id = d.taller_id AND i.devolucion_id = d.id), 0)) LIMIT 200`,
+    s.tallerId,
+  );
+  return c.json({
+    ok: !comprobantes.length && !cobros.length && !medios.length && !anticipos.length && !devoluciones.length,
+    comprobantes_con_diferencia: comprobantes, cobros_sin_cuadrar: cobros, cobros_con_medios_distintos: medios, anticipos_con_diferencia: anticipos, devoluciones_con_diferencia: devoluciones,
+  });
 });
 
 comercial.get('/cuentas-corrientes/:clienteId', requirePerm('ventas.ver'), async (c) => {
@@ -409,20 +495,26 @@ comercial.get('/cuentas-corrientes/:clienteId', requirePerm('ventas.ver'), async
   const { desde } = query(c, z.object({ desde: zFecha.optional() }));
   const cli = await first(c.env.DB, 'SELECT id, codigo, nombre, telefono, documento, email FROM clientes WHERE taller_id = ? AND id = ?', s.tallerId, clienteId);
   if (!cli) throw notFound('Cliente');
+  // Debe: comprobantes y reintegros de dinero. Haber: cobros (los anticipos incluidos) y devoluciones. Saldo negativo = a favor del cliente.
   const movs = await all<{ fecha: string; debe: number; haber: number }>(
     c.env.DB,
     `SELECT fecha, created_at, 'venta' AS tipo, id, numero, total AS debe, 0 AS haber, NULL AS detalle FROM ventas WHERE taller_id = ? AND cliente_id = ? AND estado = 'emitida'
      UNION ALL
-     SELECT fecha, created_at, 'cobro' AS tipo, id, numero, 0 AS debe, total AS haber, notas AS detalle FROM cobros WHERE taller_id = ? AND cliente_id = ? AND estado = 'registrado'
+     SELECT fecha, created_at, CASE tipo WHEN 'anticipo' THEN 'anticipo' ELSE 'cobro' END AS tipo, id, numero, 0 AS debe, total AS haber, notas AS detalle FROM cobros WHERE taller_id = ? AND cliente_id = ? AND estado = 'registrado'
+     UNION ALL
+     SELECT fecha, created_at, 'devolucion' AS tipo, id, numero, 0 AS debe, total AS haber, motivo AS detalle FROM devoluciones WHERE taller_id = ? AND cliente_id = ? AND estado = 'registrada'
+     UNION ALL
+     SELECT fecha, created_at, 'reintegro' AS tipo, id, numero, total AS debe, 0 AS haber, motivo AS detalle FROM reintegros WHERE taller_id = ? AND cliente_id = ? AND estado = 'registrado'
      ORDER BY fecha, created_at`,
-    s.tallerId, clienteId, s.tallerId, clienteId,
+    s.tallerId, clienteId, s.tallerId, clienteId, s.tallerId, clienteId, s.tallerId, clienteId,
   );
   let saldo = 0;
   const todos = movs.map((m) => ((saldo += m.debe - m.haber), { ...m, saldo }));
   // Con "desde", el estado de cuenta arranca con el saldo anterior (lo que se arrastra de antes de esa fecha).
   const saldoAnterior = desde ? ([...todos].reverse().find((m) => m.fecha < desde)?.saldo ?? 0) : 0;
   const conSaldo = desde ? todos.filter((m) => m.fecha >= desde) : todos;
-  const pendientes = await all(c.env.DB, `${SELECT_VENTA} WHERE ve.taller_id = ? AND ve.cliente_id = ? AND ve.estado = 'emitida' AND ve.cobrado < ve.total ORDER BY ve.fecha`, s.tallerId, clienteId);
+  const pendientes = await all<{ saldo: number }>(c.env.DB, `${SELECT_VENTA} WHERE ve.taller_id = ? AND ve.cliente_id = ? AND ve.estado = 'emitida' AND ve.cobrado + ve.devuelto < ve.total ORDER BY ve.fecha`, s.tallerId, clienteId);
+  const creditos = await creditosDisponibles(c.env.DB, s.tallerId, clienteId);
   // Historial de pagos del cliente, incluidos los anulados (con sus medios).
   const cobros = await all<{ id: string }>(c.env.DB, `${SELECT_COBRO} WHERE co.taller_id = ? AND co.cliente_id = ? ORDER BY co.numero DESC LIMIT 200`, s.tallerId, clienteId);
   const medios = await all<{ cobro_id: string }>(
@@ -431,5 +523,9 @@ comercial.get('/cuentas-corrientes/:clienteId', requirePerm('ventas.ver'), async
       WHERE cm.taller_id = ? AND cm.cobro_id IN (SELECT id FROM cobros WHERE taller_id = ? AND cliente_id = ? ORDER BY numero DESC LIMIT 200)`,
     s.tallerId, s.tallerId, clienteId,
   );
-  return c.json({ cliente: cli, desde: desde ?? null, saldo_anterior: saldoAnterior, movimientos: conSaldo, saldo, pendientes, cobros: cobros.map((co) => ({ ...co, medios: medios.filter((m) => m.cobro_id === co.id) })) });
+  return c.json({
+    cliente: cli, desde: desde ?? null, saldo_anterior: saldoAnterior, movimientos: conSaldo, saldo, pendientes, creditos,
+    deuda: pendientes.reduce((a, v) => a + v.saldo, 0), a_favor: creditos.reduce((a, x) => a + x.disponible, 0),
+    cobros: cobros.map((co) => ({ ...co, medios: medios.filter((m) => m.cobro_id === co.id) })),
+  });
 });

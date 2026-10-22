@@ -26,9 +26,10 @@ export function EstadoTurnoBadge({ estado }: { estado: EstadoTurno }) {
   return <Insignia tono={t[estado]}>{ESTADO_TURNO_LABEL[estado]}</Insignia>;
 }
 
-export function EstadoCobroBadge({ total, cobrado, estado }: { total: number; cobrado: number; estado?: string }) {
+export function EstadoCobroBadge({ total, cobrado, estado, devuelto = 0 }: { total: number; cobrado: number; estado?: string; devuelto?: number }) {
   if (estado === 'anulada') return <Insignia tono="gris">Anulado</Insignia>;
-  if (cobrado >= total) return <Insignia tono="verde">Cobrado</Insignia>;
+  if (devuelto > 0 && devuelto >= total) return <Insignia tono="violeta">Devuelto</Insignia>;
+  if (cobrado + devuelto >= total) return <Insignia tono="verde">Cobrado</Insignia>;
   if (cobrado > 0) return <Insignia tono="ambar">Cobro parcial</Insignia>;
   return <Insignia tono="rojo">Pendiente de cobro</Insignia>;
 }

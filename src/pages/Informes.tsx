@@ -22,6 +22,8 @@ const INFORMES: Def[] = [
   { clave: 'servicios', titulo: 'Servicios más realizados', grupo: 'Ventas', filtros: ['cliente', 'q'] },
   { clave: 'rentabilidad', titulo: 'Rentabilidad por artículo', grupo: 'Ventas', filtros: ['cliente', 'categoria', 'proveedor', 'articulo'], permiso: 'margenes.ver' },
   { clave: 'cobranzas', titulo: 'Cobranzas', grupo: 'Cobranzas', filtros: ['cliente', 'agrupar', 'estado_doc'], agrupar: [['detalle', 'Por recibo'], ['medio', 'Por medio de pago']], estados: [['registrado', 'Vigentes'], ['anulado', 'Anulados']] },
+  { clave: 'anticipos', titulo: 'Anticipos de clientes', grupo: 'Cobranzas', filtros: ['cliente', 'estado_doc'], estados: [['', 'Vigentes'], ['pendientes', 'Pendientes de aplicar'], ['utilizados', 'Utilizados'], ['devueltos', 'Devueltos'], ['anulados', 'Anulados']] },
+  { clave: 'devoluciones', titulo: 'Devoluciones (notas de crédito internas)', grupo: 'Cobranzas', filtros: ['cliente', 'agrupar', 'estado_doc'], agrupar: [['detalle', 'Por devolución'], ['medio', 'Reintegros por medio de pago']], estados: [['registrada', 'Vigentes'], ['anulada', 'Anuladas']] },
   { clave: 'deudores', titulo: 'Deudores', grupo: 'Cobranzas', filtros: ['cliente'], periodo: false },
   { clave: 'compras', titulo: 'Compras', grupo: 'Compras', filtros: ['proveedor', 'articulo', 'agrupar', 'estado_doc'], agrupar: [['detalle', 'Por compra'], ['proveedor', 'Por proveedor']], estados: [['registrada', 'Vigentes'], ['anulada', 'Anuladas']] },
   { clave: 'proveedores', titulo: 'Deuda con proveedores', grupo: 'Compras', filtros: ['proveedor'], periodo: false },
@@ -29,6 +31,8 @@ const INFORMES: Def[] = [
   { clave: 'actividad-financiera', titulo: 'Actividad financiera', grupo: 'Finanzas', filtros: ['agrupar'], agrupar: [['dia', 'Por día'], ['mes', 'Por mes']], permiso: 'finanzas.ver' },
   { clave: 'inventario-valorizado', titulo: 'Inventario valorizado', grupo: 'Inventario', filtros: ['categoria', 'proveedor'], periodo: false, permiso: 'stock.valorizar' },
   { clave: 'mecanicos', titulo: 'Rendimiento de mecánicos', grupo: 'Taller', filtros: ['mecanico'] },
+  { clave: 'rentabilidad-ot', titulo: 'Rentabilidad por orden de trabajo', grupo: 'Taller', filtros: ['cliente', 'mecanico'], permiso: 'margenes.ver' },
+  { clave: 'mano-obra', titulo: 'Costo de mano de obra por mecánico', grupo: 'Taller', filtros: [], permiso: 'margenes.ver' },
   { clave: 'ordenes', titulo: 'Órdenes de trabajo', grupo: 'Taller', filtros: ['estado_ot', 'cliente', 'mecanico'] },
 ];
 

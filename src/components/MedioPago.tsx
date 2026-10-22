@@ -23,8 +23,8 @@ export const extraVacio = (): ExtraMedio => ({ cuenta_id: '', modo: 'propio', ba
 
 export type ContextoMedio = 'cobro' | 'pago_proveedor' | 'gasto';
 
-export function SelectorMedio({ value, onChange, className }: { value: MedioPago; onChange: (m: MedioPago) => void; className?: string }) {
-  const medios = useMediosHabilitados();
+export function SelectorMedio({ value, onChange, className, excluir = [] }: { value: MedioPago; onChange: (m: MedioPago) => void; className?: string; excluir?: readonly MedioPago[] }) {
+  const medios = useMediosHabilitados().filter((m) => !excluir.includes(m));
   // Si el medio actual quedó deshabilitado se sigue mostrando para no perder la selección; el servidor lo rechaza.
   const lista = medios.includes(value) ? medios : [...medios, value];
   return (

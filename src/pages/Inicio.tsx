@@ -119,8 +119,8 @@ export function Inicio() {
             <Tarjeta titulo="Stock bajo" sinPadding acciones={<Link to="/articulos?bajo=1" className="text-sm font-medium text-marca-700">Ver</Link>}>
               <ul className="divide-y divide-borde">
                 {data.stockBajo.map((a: any) => (
-                  <li key={a.id} className="flex items-center justify-between gap-2 px-4 py-2 text-sm">
-                    <span className="flex min-w-0 items-center gap-2"><Package className="size-4 shrink-0 text-tenue" /><span className="truncate">{a.nombre}</span></span>
+                  <li key={`${a.id}-${a.deposito ?? ""}`} className="flex items-center justify-between gap-2 px-4 py-2 text-sm">
+                    <span className="flex min-w-0 items-center gap-2"><Package className="size-4 shrink-0 text-tenue" /><span className="truncate">{a.nombre}{a.deposito ? ` · ${a.deposito}` : ""}</span></span>
                     <span className={a.stock <= 0 ? 'font-semibold text-red-600' : 'font-semibold text-amber-700'}>{a.stock} / {a.stock_minimo}</span>
                   </li>
                 ))}

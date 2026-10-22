@@ -26,10 +26,10 @@ export function useCajaBloqueada() {
   return !!data?.obligatoria && !data.sesion;
 }
 
-interface FormaPagoUI { medio: MedioPago; importe: number; referencia: string; extra: ExtraMedio }
-const formaVacia = (medio: MedioPago, importe: number): FormaPagoUI => ({ medio, importe, referencia: '', extra: extraVacio() });
+export interface FormaPagoUI { medio: MedioPago; importe: number; referencia: string; extra: ExtraMedio }
+export const formaVacia = (medio: MedioPago, importe: number): FormaPagoUI => ({ medio, importe, referencia: '', extra: extraVacio() });
 
-function FormaPago({ x, onChange, onQuitar, soloUna }: { x: FormaPagoUI; onChange: (v: FormaPagoUI) => void; onQuitar: () => void; soloUna: boolean }) {
+export function FormaPago({ x, onChange, onQuitar, soloUna }: { x: FormaPagoUI; onChange: (v: FormaPagoUI) => void; onQuitar: () => void; soloUna: boolean }) {
   return (
     <div className="space-y-2">
     <div className="grid grid-cols-[1fr_140px_auto] gap-2 sm:grid-cols-[180px_1fr_160px_auto]">

@@ -342,7 +342,50 @@ catalogo.get('/articulos/:id', requirePerm('catalogo.ver'), async (c) => {
       WHERE d.taller_id = ? AND (d.activo = 1 OR COALESCE(sd.stock, 0) <> 0) ORDER BY d.es_principal DESC, d.nombre`,
     c.req.param('id'), s.tallerId,
   );
-  return c.json({ ...limpiarArticulo(s, a), depositos, movimientos: movimientos.map((m) => limpiarMovimiento(s, m)) });
+  const minimos_deposito = await all(
+    c.env.DB,
+    `SELECT m.deposito_id, d.nombre AS deposito, m.minimo, m.objetivo FROM stock_minimos_deposito m JOIN depositos d ON d.taller_id = m.taller_id AND d.id = m.deposito_id
+      WHERE m.taller_id = ? AND m.articulo_id = ? ORDER BY d.es_principal DESC, d.nombre`,
+    s.tallerId, c.req.param('id'),
+  );
+  return c.json({ ...limpiarArticulo(s, a), depositos, minimos_deposito, movimientos: movimientos.map((m) => limpiarMovimiento(s, m)) });
+});
+
+/**
+ * Stock mínimo por depósito (y stock ideal opcional). Complementa al mínimo general del artículo, que se conserva. Reemplaza el conjunto completo:
+ * los depósitos que no figuran quedan sin mínimo propio.
+ */
+catalogo.put('/articulos/:id/minimos-deposito', requirePerm('catalogo.editar'), async (c) => {
+  const s = c.get('sesion');
+  const id = c.req.param('id');
+  const d = await body(
+    c,
+    z.object({
+      minimos: z.array(z.object({
+        deposito_id: zId,
+        minimo: z.number().min(0).max(1e9).refine(esCantidadValida, 'admite hasta 3 decimales'),
+        objetivo: z.number().min(0).max(1e9).refine(esCantidadValida, 'admite hasta 3 decimales').nullish(),
+      })).max(100),
+    }),
+  );
+  if (!(await delTaller(c.env.DB, 'articulos', s.tallerId, id, 'id'))) throw notFound('Artículo');
+  const ids = d.minimos.map((m) => m.deposito_id);
+  if (new Set(ids).size !== ids.length) throw badRequest('Hay depósitos repetidos');
+  for (const m of d.minimos) {
+    if (m.objetivo != null && m.objetivo < m.minimo) throw badRequest('El stock ideal no puede ser menor al mínimo');
+    if (!(await first(c.env.DB, 'SELECT 1 FROM depositos WHERE taller_id = ? AND id = ?', s.tallerId, m.deposito_id))) throw badRequest('Depósito inexistente');
+  }
+  await c.env.DB.batch([
+    c.env.DB.prepare(`DELETE FROM stock_minimos_deposito WHERE taller_id = ? AND articulo_id = ?${ids.length ? ` AND deposito_id NOT IN (${ids.map(() => '?').join(',')})` : ''}`).bind(s.tallerId, id, ...ids),
+    ...d.minimos.map((m) =>
+      c.env.DB.prepare(
+        `INSERT INTO stock_minimos_deposito (taller_id, articulo_id, deposito_id, minimo, objetivo) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (taller_id, articulo_id, deposito_id) DO UPDATE SET minimo = excluded.minimo, objetivo = excluded.objetivo, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+      ).bind(s.tallerId, id, m.deposito_id, redondearCantidad(m.minimo), m.objetivo == null ? null : redondearCantidad(m.objetivo)),
+    ),
+    auditar(c.env.DB, s.tallerId, s.usuarioId, 'articulo', id, 'minimos_deposito', { depositos: d.minimos.length }),
+  ]);
+  return c.json({ ok: true });
 });
 
 async function validarRefsArticulo(db: D1Database, tallerId: string, d: { categoria_id?: string | null; proveedor_id?: string | null }) {
