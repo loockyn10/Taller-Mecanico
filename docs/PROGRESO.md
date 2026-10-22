@@ -561,3 +561,8 @@ Partida doble · cobertura (documentos / contabilizados / sin efecto / con error
 - El inventario se valúa al último costo (el sistema no usa costo promedio): las diferencias por cambios de costo se muestran en el control, no se ajustan.
 - La contabilización corre al consultar (no dentro de cada operación): una operación recién cargada aparece en el diario al abrir la contabilidad. No hay presupuestos ni centros de costo.
 - Las exportaciones PDF salen del navegador (impresión), igual que el resto de los informes.
+
+## 52. Despliegue (2026-10-22)
+- Respaldos de la D1 remota: `respaldos/d1-antes-sprint10-20261022.sql` y `respaldos/d1-antes-sprint10-20261022b.sql` (tomado inmediatamente antes de migrar); bookmark Time Travel previo a la migración `00000034-00000000-0000510c-efefdb1f4d1d168d7491a2656b5a8744`.
+- La migración 0010 se ensayó sobre la copia local del respaldo (ver 48) y se aplicó a la D1 remota (única migración pendiente) **antes** de publicar el código. Verificado en remoto: 70 comprobantes (suma 10.691.200,63), 67 cobros, 165 movimientos de caja, 107 bancarios y 80 artículos, idénticos; 0 violaciones de claves foráneas; tablas contables creadas y vacías con sus triggers.
+- Commit `a19a2e0` en `main` (push directo; Workers Builds). Comprobado: la SPA publicada es el mismo bundle que el build local (`index-Cgy4E9gR.js`), `/api/salud` responde y `/api/contabilidad/plan` exige sesión (401). No se hicieron operaciones autenticadas en producción (no se usaron credenciales reales): **el plan de cuentas y los asientos históricos del taller demo se generan la primera vez que el propietario abre Contabilidad** (en el ensayo local: 377 asientos, 0 omitidos).
