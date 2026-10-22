@@ -223,4 +223,93 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(todos('PRAGMA foreign_key_check')).toEqual([]);
     db.close();
   });
+  it('0010 no toca los datos existentes y la base impide asientos desbalanceados, modificar lo registrado y borrar cuentas con movimientos', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    const migraciones = fs.readdirSync(path.join(RAIZ, 'migrations')).sort();
+    for (const m of migraciones.filter((f) => f < '0010')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all() as Array<Record<string, any>>;
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Viejo'), ('t2', 'Otro');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x');
+      INSERT INTO taller_config (taller_id) VALUES ('t1'), ('t2');
+      INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES ('c1', 't1', 1, 'Cliente');
+      INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, total, cobrado) VALUES ('v1', 't1', 1, 'c1', '2026-10-01', 10000, 4000);
+      INSERT INTO venta_items (id, taller_id, venta_id, tipo, descripcion, cantidad, precio_unitario, subtotal) VALUES ('vi1', 't1', 'v1', 'libre', 'Trabajo', 1, 10000, 10000);
+      INSERT INTO cobros (id, taller_id, numero, cliente_id, fecha, total, idem_key) VALUES ('co1', 't1', 1, 'c1', '2026-10-01', 4000, 'k1');
+      INSERT INTO categorias_gasto (id, taller_id, nombre) VALUES ('g1', 't1', 'Alquiler');
+    `);
+    const foto = () => JSON.stringify({ ventas: todos('SELECT * FROM ventas'), items: todos('SELECT * FROM venta_items'), cobros: todos('SELECT * FROM cobros'), cat: todos('SELECT id, nombre FROM categorias_gasto') });
+    const antes = foto();
+    db.exec(leer('migrations', migraciones.find((f) => f.startsWith('0010'))!));
+    // La migración es sólo estructural: ningún dato existente cambia y la categoría de gasto queda sin cuenta contable elegida
+    expect(foto()).toBe(antes);
+    expect(uno('SELECT cuenta_contable_id FROM categorias_gasto').cuenta_contable_id).toBeNull();
+    expect(uno('SELECT COUNT(*) AS n FROM asientos').n).toBe(0);
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+
+    db.exec(`
+      INSERT INTO cuentas_contables (id, taller_id, codigo, nombre, tipo, naturaleza, imputable) VALUES ('rubro', 't1', '1', 'ACTIVO', 'activo', 'deudora', 0);
+      INSERT INTO cuentas_contables (id, taller_id, codigo, nombre, tipo, naturaleza, imputable, rol) VALUES ('caja', 't1', '1.1', 'Caja', 'activo', 'deudora', 1, 'caja_efectivo');
+      INSERT INTO cuentas_contables (id, taller_id, codigo, nombre, tipo, naturaleza, imputable) VALUES ('ventas', 't1', '4.1', 'Ventas', 'ingreso', 'acreedora', 1);
+      INSERT INTO cuentas_contables (id, taller_id, codigo, nombre, tipo, naturaleza, imputable) VALUES ('ajena', 't2', '4.1', 'Ventas ajenas', 'ingreso', 'acreedora', 1);
+    `);
+    const asiento = (id: string, lineas: Array<[string, number, number]>, registrado = false) => {
+      db.exec(`INSERT INTO asientos (id, taller_id, fecha, descripcion, modo, origen_tipo) VALUES ('${id}', 't1', '2026-10-01', 'Prueba', 'manual', 'manual')`);
+      lineas.forEach(([cuenta, d, h], i) => db.exec(`INSERT INTO asiento_lineas (id, taller_id, asiento_id, orden, cuenta_id, debe, haber) VALUES ('${id}-${i}', 't1', '${id}', ${i}, '${cuenta}', ${d}, ${h})`));
+      if (registrado) db.exec(`UPDATE asientos SET estado = 'registrado', numero = (SELECT COALESCE(MAX(numero), 0) + 1 FROM asientos WHERE taller_id = 't1'), total = 1000 WHERE id = '${id}'`);
+    };
+    // Partida doble: no se registra un asiento desbalanceado, con una sola línea ni con un rubro
+    asiento('a1', [['caja', 1000, 0], ['ventas', 0, 900]]);
+    expect(() => db.exec("UPDATE asientos SET estado = 'registrado', numero = 1 WHERE id = 'a1'")).toThrow(/desbalanceado/);
+    asiento('a2', [['caja', 1000, 0]]);
+    expect(() => db.exec("UPDATE asientos SET estado = 'registrado', numero = 1 WHERE id = 'a2'")).toThrow(/al menos dos líneas/);
+    asiento('a3', [['rubro', 1000, 0], ['ventas', 0, 1000]]);
+    expect(() => db.exec("UPDATE asientos SET estado = 'registrado', numero = 1 WHERE id = 'a3'")).toThrow(/imputable/);
+    // Una línea no puede tener importe en el Debe y en el Haber, ni importes negativos
+    expect(() => db.exec("INSERT INTO asiento_lineas (id, taller_id, asiento_id, orden, cuenta_id, debe, haber) VALUES ('x', 't1', 'a1', 9, 'caja', 5, 5)")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO asiento_lineas (id, taller_id, asiento_id, orden, cuenta_id, debe, haber) VALUES ('x', 't1', 'a1', 9, 'caja', -5, 0)")).toThrow(/CHECK/);
+    // Una cuenta de otro taller no puede usarse en un asiento (FK compuesta)
+    expect(() => db.exec("INSERT INTO asiento_lineas (id, taller_id, asiento_id, orden, cuenta_id, debe, haber) VALUES ('x', 't1', 'a1', 9, 'ajena', 5, 0)")).toThrow(/FOREIGN KEY/);
+    // Un borrador balanceado se registra; el número no se repite
+    asiento('a4', [['caja', 1000, 0], ['ventas', 0, 1000]], true);
+    expect({ ...uno("SELECT estado, numero FROM asientos WHERE id = 'a4'") }).toEqual({ estado: 'registrado', numero: 1 });
+    asiento('a5', [['caja', 1000, 0], ['ventas', 0, 1000]], true);
+    expect(uno("SELECT numero FROM asientos WHERE id = 'a5'").numero).toBe(2);
+    // Lo registrado no se modifica ni se borra, ni sus líneas
+    expect(() => db.exec("UPDATE asientos SET descripcion = 'Otra' WHERE id = 'a4'")).toThrow(/no se modifica/);
+    expect(() => db.exec("UPDATE asientos SET fecha = '2026-01-01' WHERE id = 'a4'")).toThrow(/no se modifica/);
+    expect(() => db.exec("DELETE FROM asientos WHERE id = 'a4'")).toThrow(/no se elimina/);
+    expect(() => db.exec("UPDATE asiento_lineas SET debe = 5 WHERE id = 'a4-0'")).toThrow(/líneas/);
+    expect(() => db.exec("DELETE FROM asiento_lineas WHERE id = 'a4-0'")).toThrow(/líneas/);
+    expect(() => db.exec("INSERT INTO asiento_lineas (id, taller_id, asiento_id, orden, cuenta_id, debe, haber) VALUES ('x', 't1', 'a4', 9, 'caja', 5, 0)")).toThrow(/líneas/);
+    // Sólo puede pasar a revertido si existe su contra-asiento (y uno solo)
+    expect(() => db.exec("UPDATE asientos SET estado = 'revertido' WHERE id = 'a4'")).toThrow(/contra-asiento/);
+    db.exec("INSERT INTO asientos (id, taller_id, fecha, descripcion, modo, origen_tipo, revierte_id) VALUES ('r4', 't1', '2026-10-02', 'Reversión', 'reversion', 'manual', 'a4')");
+    db.exec("INSERT INTO asiento_lineas (id, taller_id, asiento_id, orden, cuenta_id, debe, haber) VALUES ('r4-0', 't1', 'r4', 0, 'ventas', 1000, 0), ('r4-1', 't1', 'r4', 1, 'caja', 0, 1000)");
+    db.exec("UPDATE asientos SET estado = 'registrado', numero = 3, total = 1000 WHERE id = 'r4'");
+    db.exec("UPDATE asientos SET estado = 'revertido' WHERE id = 'a4'");
+    expect(uno("SELECT estado FROM asientos WHERE id = 'a4'").estado).toBe('revertido');
+    expect(() => db.exec("INSERT INTO asientos (id, taller_id, fecha, descripcion, modo, origen_tipo, revierte_id) VALUES ('r4b', 't1', '2026-10-02', 'Otra reversión', 'reversion', 'manual', 'a4')")).toThrow(/UNIQUE/);
+    expect(() => db.exec("UPDATE asientos SET estado = 'registrado' WHERE id = 'a4'")).toThrow(/no se modifica/);
+    // Un asiento automático por documento y evento: la base impide el duplicado (idempotencia)
+    db.exec("INSERT INTO asientos (id, taller_id, fecha, descripcion, modo, origen_tipo, origen_id, evento) VALUES ('d1', 't1', '2026-10-01', 'Venta #1', 'automatico', 'venta', 'v1', 'alta')");
+    expect(() => db.exec("INSERT INTO asientos (id, taller_id, fecha, descripcion, modo, origen_tipo, origen_id, evento) VALUES ('d2', 't1', '2026-10-01', 'Venta #1', 'automatico', 'venta', 'v1', 'alta')")).toThrow(/UNIQUE/);
+    db.exec("INSERT INTO asientos (id, taller_id, fecha, descripcion, modo, origen_tipo, origen_id, evento) VALUES ('d3', 't2', '2026-10-01', 'Venta #1 de otro taller', 'automatico', 'venta', 'v1', 'alta')");
+    // Un borrador sí se puede descartar, con sus líneas
+    db.exec("DELETE FROM asientos WHERE id = 'a1'");
+    expect(uno("SELECT COUNT(*) AS n FROM asiento_lineas WHERE asiento_id = 'a1'").n).toBe(0);
+    // Plan de cuentas: no se elimina una cuenta con movimientos ni una del sistema, ni se cambia su naturaleza con movimientos
+    expect(() => db.exec("DELETE FROM cuentas_contables WHERE id = 'ventas'")).toThrow(/movimientos/);
+    expect(() => db.exec("DELETE FROM cuentas_contables WHERE id = 'caja'")).toThrow(/sistema/);
+    expect(() => db.exec("UPDATE cuentas_contables SET naturaleza = 'deudora', tipo = 'gasto' WHERE id = 'ventas'")).toThrow(/movimientos/);
+    expect(() => db.exec("UPDATE cuentas_contables SET activa = 0 WHERE id = 'caja'")).toThrow(/sistema/);
+    db.exec("UPDATE cuentas_contables SET nombre = 'Caja en efectivo (renombrada)', codigo = '1.9' WHERE id = 'caja'");
+    db.exec("INSERT INTO cuentas_contables (id, taller_id, codigo, nombre, tipo, naturaleza, imputable) VALUES ('libre', 't1', '6.9', 'Libre', 'gasto', 'deudora', 1)");
+    db.exec("DELETE FROM cuentas_contables WHERE id = 'libre'");
+    expect(() => db.exec("INSERT INTO cuentas_contables (id, taller_id, codigo, nombre, tipo, naturaleza, imputable) VALUES ('dup', 't1', '1.9', 'Repetida', 'activo', 'deudora', 1)")).toThrow(/UNIQUE/);
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    db.close();
+  });
 });

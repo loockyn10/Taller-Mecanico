@@ -54,7 +54,8 @@ export const PERMISOS = [
   'bancos.ajustar', // ajustes manuales de saldo bancario
   'cheques.gestionar', // cartera de cheques y eCheq
   'tesoreria.ver', // tablero de tesorería
-  'contabilidad.ver', // registros internos, libros de ventas y compras
+  'contabilidad.ver', // contabilidad de gestión: plan de cuentas, asientos, libros, balance, resultados y controles
+  'contabilidad.gestionar', // administrar el plan de cuentas y registrar, revertir y corregir asientos manuales
   // ── Informes
   'reportes.ver', // estadísticas e informes
   'productividad.ver', // indicadores operativos de mecánicos y taller (horas, tareas, carga de trabajo)
@@ -103,6 +104,7 @@ export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
   'compras.gestionar': ['compras.ver'],
   'bancos.gestionar': ['bancos.ver'],
   'bancos.ajustar': ['bancos.gestionar'],
+  'contabilidad.gestionar': ['contabilidad.ver'],
   'permisos.gestionar': ['usuarios.gestionar'],
   'asistencia.corregir': ['asistencia.ver'],
   'reloj.administrar': ['asistencia.ver'],
@@ -282,7 +284,8 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'bancos.ajustar': { etiqueta: 'Ajustar saldos bancarios' },
   'cheques.gestionar': { etiqueta: 'Gestionar cheques y eCheq' },
   'tesoreria.ver': { etiqueta: 'Ver tesorería' },
-  'contabilidad.ver': { etiqueta: 'Ver registros contables internos' },
+  'contabilidad.ver': { etiqueta: 'Ver la contabilidad', ayuda: 'Plan de cuentas, libro diario y mayor, balance, estado de resultados, controles y registros internos. Información de gestión: no son libros fiscales' },
+  'contabilidad.gestionar': { etiqueta: 'Gestionar la contabilidad', ayuda: 'Modificar el plan de cuentas y registrar, revertir y corregir asientos manuales' },
   'reportes.ver': { etiqueta: 'Ver estadísticas e informes' },
   'informes.exportar': { etiqueta: 'Exportar informes' },
   'productividad.ver': { etiqueta: 'Ver productividad', ayuda: 'Horas, tareas y carga de trabajo del taller y de cada mecánico. Los importes requieren además ver presupuestos valorizados' },
@@ -305,7 +308,7 @@ export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Catálogo e inventario', permisos: ['catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'stock.valorizar'] },
   { titulo: 'Ventas y cobranzas', permisos: ['ventas.ver', 'ventas.emitir', 'ventas.anular', 'cobros.registrar', 'cobros.anular'] },
   { titulo: 'Compras', permisos: ['compras.ver', 'compras.gestionar'] },
-  { titulo: 'Caja, bancos y finanzas', permisos: ['caja.operar', 'finanzas.ver', 'gastos.gestionar', 'bancos.ver', 'bancos.gestionar', 'bancos.ajustar', 'cheques.gestionar', 'tesoreria.ver', 'contabilidad.ver'] },
+  { titulo: 'Caja, bancos y finanzas', permisos: ['caja.operar', 'finanzas.ver', 'gastos.gestionar', 'bancos.ver', 'bancos.gestionar', 'bancos.ajustar', 'cheques.gestionar', 'tesoreria.ver', 'contabilidad.ver', 'contabilidad.gestionar'] },
   { titulo: 'Informes', permisos: ['reportes.ver', 'informes.exportar', 'productividad.ver'] },
   { titulo: 'Personal y asistencia', permisos: ['usuarios.gestionar', 'permisos.gestionar', 'asistencia.fichar', 'asistencia.ver', 'asistencia.corregir', 'reloj.administrar'] },
   { titulo: 'Administración', permisos: ['config.editar', 'licencia.ver', 'registros.eliminar', 'fechas.retroactivas'] },

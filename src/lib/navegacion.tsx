@@ -98,7 +98,7 @@ export const GRUPOS: GrupoNav[] = [
       item('estadisticas', 'Estadísticas', '/reportes', BarChart3, 'graficos ventas indicadores mecanicos', 'reportes.ver'),
       item('productividad', 'Productividad', '/productividad', Activity, 'mecanicos horas tareas carga de trabajo rendimiento asistencia tiempos', 'productividad.ver'),
       item('informes', 'Informes', '/informes', FileSpreadsheet, 'reportes exportar excel csv comerciales financieros', 'reportes.ver'),
-      item('contabilidad', 'Registros contables', '/contabilidad', Calculator, 'libro ventas compras iva impuestos', 'contabilidad.ver'),
+      item('contabilidad', 'Contabilidad', '/contabilidad', Calculator, 'asientos plan de cuentas libro diario mayor balance resultados libro ventas compras iva impuestos', 'contabilidad.ver'),
     ],
   },
   {

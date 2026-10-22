@@ -33,6 +33,7 @@ import { depositos } from './modules/depositos';
 import { anticipos } from './modules/anticipos';
 import { devoluciones } from './modules/devoluciones';
 import { costos } from './modules/costos';
+import { contabilidad } from './modules/contabilidad';
 
 const app = new Hono<AppEnv>();
 
@@ -82,6 +83,7 @@ api.route('/tesoreria', tesoreria);
 api.route('/', abastecimiento);
 api.route('/', inventario);
 api.route('/', informes);
+api.route('/contabilidad', contabilidad);
 app.route('/api', api);
 
 app.all('/api/*', (c) => c.json({ error: { code: 'no_encontrado', message: 'Ruta inexistente' } }, 404));
