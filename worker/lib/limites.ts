@@ -28,7 +28,11 @@ export async function registrarFallo(db: D1Database, clave: string, max: number,
     bloquear ? new Date(ahoraMs + bloqueoMin * 60_000).toISOString() : null,
   );
   // Limpieza oportunista de contadores viejos.
-  if (Math.random() < 0.05) await run(db, 'DELETE FROM limites_intentos WHERE desde < ? AND (bloqueado_hasta IS NULL OR bloqueado_hasta < ?)', new Date(ahoraMs - 86400_000).toISOString(), ahora());
+  // (Las marcas de "origen conocido" del inicio de sesión, `login:ok:*`, viven 30 días; el resto de los contadores, un día.)
+  if (Math.random() < 0.05) {
+    await run(db, "DELETE FROM limites_intentos WHERE clave NOT LIKE 'login:ok:%' AND desde < ? AND (bloqueado_hasta IS NULL OR bloqueado_hasta < ?)", new Date(ahoraMs - 86400_000).toISOString(), ahora());
+    await run(db, "DELETE FROM limites_intentos WHERE clave LIKE 'login:ok:%' AND desde < ?", new Date(ahoraMs - 31 * 86400_000).toISOString());
+  }
   return bloquear ? 0 : max - intentos;
 }
 

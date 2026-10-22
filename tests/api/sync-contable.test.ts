@@ -145,7 +145,7 @@ describe('activada: las consultas no escriben y las operaciones mantienen la con
   it('muchas operaciones simultáneas no duplican ni pierden asientos', async () => {
     const antes = await n('asientos');
     const rs = await Promise.all(Array.from({ length: 6 }, (_, i) => api.post('/api/ventas', { cliente_id: d.cliente.id, condicion: 'cuenta_corriente', idem_key: idem(), items: [{ tipo: 'libre', descripcion: `T${i}`, cantidad: 1, precio_unitario: 1000 * (i + 1) }] })));
-    expect(rs.every((r) => r.status === 201)).toBe(true);
+    expect(rs.map((r) => r.status), JSON.stringify(rs.filter((r) => r.status !== 201).map((r) => r.body))).toEqual(Array(6).fill(201));
     expect(await n('asientos')).toBe(antes + 6);
     const dup = await consultaLocal<{ n: number }>(`SELECT COUNT(*) AS n FROM (SELECT origen_tipo, origen_id, evento FROM asientos WHERE taller_id = '${T.tallerId}' GROUP BY 1,2,3 HAVING COUNT(*) > 1)`);
     expect(dup[0].n).toBe(0);

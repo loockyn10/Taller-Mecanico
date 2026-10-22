@@ -7,6 +7,9 @@ import { ApiError, body, notFound, zTextoOpt } from '../lib/http';
 import { ahora, all, first, uid } from '../lib/db';
 import { hashPassword, igualSeguro, sha256Hex, tokenAleatorio } from '../lib/crypto';
 import { exigirNoBloqueado, limpiarFallos, registrarFallo } from '../lib/limites';
+import { ejecutarMantenimiento, informeSalud } from '../lib/observabilidad';
+import { mantenimientoContable } from '../lib/contab/sync';
+import { huellaCorta, registrarEvento } from '../lib/seguridad';
 import { sentenciasAltaTaller } from './provision';
 
 export const platform = new Hono<AppEnv>();
@@ -18,12 +21,19 @@ platform.use('*', async (c, next) => {
   const esperado = c.env.PLATFORM_ADMIN_TOKEN;
   const recibido = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
   if (!esperado || esperado.length < 16 || !igualSeguro(recibido, esperado)) {
-    await registrarFallo(c.env.DB, clave, 10, 15, 30);
+    const restantes = await registrarFallo(c.env.DB, clave, 10, 15, 30);
+    await registrarEvento(c.env.DB, { tipo: 'plataforma_token_invalido', origen: await huellaCorta(c.req.header('cf-connecting-ip') ?? 'local'), detalle: restantes === 0 ? { bloqueo: true } : undefined });
     throw new ApiError(401, 'no_autorizado', 'Token de plataforma inválido');
   }
   await limpiarFallos(c.env.DB, clave);
   await next();
 });
+
+/** Informe de salud para el operador: mantenimiento, cola contable, seguridad, errores y respaldos. Solo lectura. */
+platform.get('/salud', async (c) => c.json(await informeSalud(c.env.DB)));
+
+/** Ejecuta ahora el mantenimiento periódico (el mismo que corre el Cron Trigger cada 5 minutos). Idempotente. */
+platform.post('/mantenimiento', async (c) => c.json(await ejecutarMantenimiento(c.env, mantenimientoContable)));
 
 platform.get('/talleres', async (c) => {
   const rows = await all(

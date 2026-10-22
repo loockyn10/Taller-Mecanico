@@ -10,3 +10,6 @@ scripts/demo/estado/
 scripts/demo/salida/
 respaldos/
 .env.demo-remoto
+
+# Resultados crudos de las pruebas de capacidad
+scripts/carga/resultados/

@@ -151,8 +151,9 @@ describe('autenticación', () => {
 
   it('bloquea temporalmente tras 5 intentos fallidos', async () => {
     const t = await nuevoTaller('Taller Bloqueo');
-    for (let i = 0; i < 5; i++) await new Api().post('/api/auth/login', { email: t.email, password: 'incorrecta' });
-    const r = await new Api().post('/api/auth/login', { email: t.email, password: 'clave-segura-1' });
+    const atacante = new Api(); // mismo origen y misma cuenta
+    for (let i = 0; i < 5; i++) await atacante.post('/api/auth/login', { email: t.email, password: 'incorrecta' });
+    const r = await atacante.post('/api/auth/login', { email: t.email, password: 'clave-segura-1' });
     expect(r.status).toBe(429);
   });
 

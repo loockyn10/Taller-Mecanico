@@ -10,13 +10,18 @@ export interface Resp<T = any> {
   body: T;
 }
 
+// Cada cliente de prueba se presenta con su propio origen (cf-connecting-ip), como llegaría cada navegador por Cloudflare: así los límites de intentos por origen
+// del inicio de sesión no se acumulan entre pruebas que no tienen nada que ver.
+let ipN = 0;
+
 export class Api {
   cookie = '';
+  ip = `10.${Math.floor(++ipN / 65025) % 250}.${Math.floor(ipN / 255) % 255}.${(ipN % 255) + 1}`;
 
   async req<T = any>(method: string, path: string, data?: unknown, headers: Record<string, string> = {}): Promise<Resp<T>> {
     const r = await fetch(BASE + path, {
       method,
-      headers: { 'content-type': 'application/json', ...(this.cookie ? { cookie: this.cookie } : {}), ...headers },
+      headers: { 'content-type': 'application/json', 'cf-connecting-ip': this.ip, ...(this.cookie ? { cookie: this.cookie } : {}), ...headers },
       body: data === undefined ? undefined : JSON.stringify(data),
     });
     const sc = r.headers.get('set-cookie');

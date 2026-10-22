@@ -54,33 +54,60 @@ function periodo(c: Context<AppEnv>) {
 
 // ═════════════════════════ Estado y proceso de contabilización ═════════════════════════
 /** Estado de la contabilidad (SOLO LECTURA): si está activada, si está al día y qué falta contabilizar. */
-contabilidad.get('/estado', ver, async (c) => c.json(await estadoContabilidad(c.env.DB, c.get('sesion').tallerId)));
+// `?detalle=1` agrega la cobertura por tipo de operación (recorre el historial); sin él la respuesta sale de la cola y de contadores. Si la contabilidad
+// todavía no está activada se incluye siempre (es la vista previa de la activación).
+contabilidad.get('/estado', ver, async (c) => {
+  const q = c.req.query('detalle');
+  return c.json(await estadoContabilidad(c.env.DB, c.get('sesion').tallerId, { detalle: q === undefined ? undefined : q === '1' || q === 'true' }));
+});
 
 /**
  * Activa la contabilidad del taller: crea el plan de cuentas y contabiliza, una sola vez y de forma idempotente, lo ya operado (los asientos
- * quedan marcados como históricos y con la fecha original de cada operación). Vuelve a llamarse hasta que `hay_mas` sea falso si son muchas.
+ * quedan marcados como históricos y con la fecha original de cada operación). Es una RECONCILIACIÓN POR LOTES: cada llamada procesa hasta un tope de
+ * asientos y deja el progreso en la base (`reconciliar_pendiente`); se vuelve a llamar (o lo continúa solo el mantenimiento periódico) hasta que
+ * `reconciliando` sea falso. Las operaciones nuevas que lleguen mientras tanto entran por la cola y no esperan a que termine lo histórico.
  */
 contabilidad.post('/activar', ver, gestionar, async (c) => {
   const s = c.get('sesion');
   await body(c, z.object({}).passthrough());
   await inicializarPlan(c.env.DB, s.tallerId);
   const nueva = (await c.env.DB.prepare('UPDATE contab_config SET activada_por = ? WHERE taller_id = ? AND activada_por IS NULL').bind(s.usuarioId, s.tallerId).run()).meta?.changes ?? 0;
-  const r = await sincronizarControlado(c.env.DB, s.tallerId, { usuarioId: s.usuarioId, disparador: 'inicial' });
+  // Lo anterior a la activación no está en la cola: se genera con la reconciliación (marcada antes de empezar, así un corte no la pierde).
+  if (nueva) await c.env.DB.prepare('UPDATE contab_config SET reconciliar_pendiente = 1 WHERE taller_id = ?').bind(s.tallerId).run();
+  const pendiente = !!(await first<{ r: number }>(c.env.DB, 'SELECT reconciliar_pendiente AS r FROM contab_config WHERE taller_id = ?', s.tallerId))?.r;
+  const r = await sincronizarControlado(c.env.DB, s.tallerId, { usuarioId: s.usuarioId, disparador: 'inicial', modo: pendiente ? 'reconciliar' : 'cola' });
   if (r.estado === 'ocupada') throw conflict('Ya hay una actualización contable en curso. Esperá unos segundos y volvé a consultar el estado.', 'sincronizacion_en_curso');
   if (nueva) await auditar(c.env.DB, s.tallerId, s.usuarioId, 'contabilidad', null, 'activar', r.estado === 'ejecutada' ? { creados: r.resultado.creados, historicos: r.resultado.historicos, omitidos: r.resultado.omitidos } : undefined).run();
-  return c.json({ activada: true, ya_estaba_activada: nueva === 0, ...(r.estado === 'ejecutada' ? r.resultado : {}) });
+  return c.json({ activada: true, ya_estaba_activada: nueva === 0, reconciliando: r.estado === 'ejecutada' && r.reconciliacionPendiente, ...(r.estado === 'ejecutada' ? r.resultado : {}) });
 });
 
-/** Contabiliza lo pendiente a pedido (por ejemplo después de corregir una operación que tenía error). Idempotente. */
+/**
+ * Contabiliza lo pendiente a pedido (por ejemplo después de corregir una operación que tenía error). Idempotente. Atiende la cola; si hay una
+ * reconciliación en curso (activación o verificación) avanza una pasada; con `completa` pide una verificación completa del taller.
+ */
 contabilidad.post('/sincronizar', ver, gestionar, async (c) => {
   const s = c.get('sesion');
-  const d = await body(c, z.object({ reintentar: z.boolean().default(false) }));
+  const d = await body(c, z.object({ reintentar: z.boolean().default(false), completa: z.boolean().default(false) }));
   await exigirActivada(c);
-  const r = await sincronizarControlado(c.env.DB, s.tallerId, { usuarioId: s.usuarioId, disparador: 'manual', reintentar: d.reintentar });
+  if (d.completa) await c.env.DB.prepare('UPDATE contab_config SET reconciliar_pendiente = 1 WHERE taller_id = ?').bind(s.tallerId).run();
+  const pendiente = !!(await first<{ r: number }>(c.env.DB, 'SELECT reconciliar_pendiente AS r FROM contab_config WHERE taller_id = ?', s.tallerId))?.r;
+  const r = await sincronizarControlado(c.env.DB, s.tallerId, { usuarioId: s.usuarioId, disparador: pendiente ? 'reconciliacion' : 'manual', reintentar: d.reintentar, modo: pendiente ? 'reconciliar' : 'cola' });
   if (r.estado === 'ocupada') throw conflict('Ya hay una actualización contable en curso. Esperá unos segundos y volvé a consultar el estado.', 'sincronizacion_en_curso');
   if (r.estado === 'no_activada') throw conflict('La contabilidad todavía no está activada en este taller.', 'contabilidad_no_activada');
   await auditar(c.env.DB, s.tallerId, s.usuarioId, 'contabilidad', null, 'sincronizar', { creados: r.resultado.creados, omitidos: r.resultado.omitidos }).run();
-  return c.json(r.resultado);
+  return c.json({ ...r.resultado, reconciliando: r.reconciliacionPendiente });
+});
+
+/** Operaciones que esperan su asiento (con el motivo del último intento): las que agotaron los reintentos se destraban con `reintentar`. */
+contabilidad.get('/cola', ver, async (c) => {
+  const s = c.get('sesion');
+  return c.json(
+    await all(
+      c.env.DB,
+      'SELECT origen_tipo, origen_id, evento, estado, intentos, ultimo_error, proximo_intento_at, creada_at FROM contab_cola WHERE taller_id = ? ORDER BY estado DESC, creada_at LIMIT 200',
+      s.tallerId,
+    ),
+  );
 });
 
 contabilidad.get('/corridas', ver, async (c) => {

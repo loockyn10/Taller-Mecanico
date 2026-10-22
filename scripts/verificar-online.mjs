@@ -18,6 +18,29 @@
 //   * No imprime contraseñas, cookies ni tokens, ni siquiera en un error.
 import crypto from 'node:crypto';
 
+// Opciones (todas opcionales): --url=https://... · --env-file=ruta (carga FIERRO_* desde un archivo local ignorado por git, p. ej. .env.demo-remoto: así las contraseñas
+// no se escriben en la línea de comandos ni en el historial). Con el archivo del generador de demostración, si no hay FIERRO_EMAIL/FIERRO_PASSWORD se usan
+// demo@fierro.local (FIERRO_DEMO_PASSWORD) como taller A y pruebas@fierro.local (FIERRO_PRUEBAS_PASSWORD) como taller B, para la prueba de aislamiento.
+const opt = (n) => process.argv.find((a) => a.startsWith(`--${n}=`))?.slice(n.length + 3);
+const archivoEnv = opt('env-file') ?? process.env.FIERRO_ENV_FILE;
+if (archivoEnv) {
+  try {
+    process.loadEnvFile(archivoEnv);
+  } catch (e) {
+    console.error(`No se pudo leer el archivo de entorno «${archivoEnv}» (${e.code ?? 'error'}).`);
+    process.exit(2);
+  }
+  if (!process.env.FIERRO_EMAIL && process.env.FIERRO_DEMO_PASSWORD) {
+    process.env.FIERRO_EMAIL = 'demo@fierro.local';
+    process.env.FIERRO_PASSWORD = process.env.FIERRO_DEMO_PASSWORD;
+    if (process.env.FIERRO_PRUEBAS_PASSWORD && !process.env.FIERRO_EMAIL_B) {
+      process.env.FIERRO_EMAIL_B = 'pruebas@fierro.local';
+      process.env.FIERRO_PASSWORD_B = process.env.FIERRO_PRUEBAS_PASSWORD;
+    }
+  }
+}
+if (opt('url')) process.env.FIERRO_URL = opt('url');
+
 const BASE = (process.env.FIERRO_URL ?? '').replace(/\/$/, '');
 const EMAIL = process.env.FIERRO_EMAIL;
 const PASS = process.env.FIERRO_PASSWORD;
@@ -98,7 +121,7 @@ const tiene = (permisos, p) => permisos?.includes(p);
 const HOY = new Date().toISOString().slice(0, 10);
 const LECTURA = [
   ['clientes.ver', '/api/clientes?limite=5'], ['vehiculos.ver', '/api/vehiculos'], ['catalogo.ver', '/api/articulos?limite=5'], ['catalogo.ver', '/api/servicios'],
-  ['stock.ver', '/api/depositos'], ['ventas.ver', '/api/ventas'], ['compras.ver', '/api/proveedores'], ['presupuestos.ver', '/api/presupuestos'], [['ordenes.ver', 'ordenes.asignadas'], '/api/ordenes?limite=5'],
+  ['stock.ver', '/api/depositos'], ['ventas.ver', '/api/ventas'], [['compras.ver', 'catalogo.ver'], '/api/proveedores'], ['presupuestos.ver', '/api/presupuestos'], [['ordenes.ver', 'ordenes.asignadas'], '/api/ordenes?limite=5'],
   ['turnos.ver', `/api/turnos?desde=${HOY}&hasta=${HOY}`], ['caja.operar', '/api/caja/estado'], ['bancos.ver', '/api/bancos/cuentas'], ['compras.ver', '/api/deuda-proveedores'],
   ['contabilidad.ver', '/api/contabilidad/estado'], ['aperturas.gestionar', '/api/aperturas/estado'], ['datos.importar', '/api/importaciones'],
 ];
@@ -177,6 +200,7 @@ if (tiene(me?.permisos, 'licencia.ver')) chk('Configuración', 'Acceso a la lice
 if (tiene(me?.permisos, 'contabilidad.ver')) {
   const e0 = (await A.get('/api/contabilidad/estado')).body;
   chk('Contabilidad', 'El estado de la contabilidad responde (solo lectura)', typeof e0?.activada === 'boolean', 'respuesta inesperada');
+  chk('Contabilidad', 'El estado informa la cola de contabilización y la reconciliación (Sprint 13)', typeof e0?.cola?.pendientes === 'number' && typeof e0?.cola?.fallidas === 'number' && typeof e0?.reconciliando === 'boolean', 'faltan campos: ¿el Worker publicado es anterior al Sprint 13?');
   if (!e0?.activada) {
     nota('La contabilidad de este taller todavía no está activada: se comprueba que las pantallas lo informan sin generar nada.');
     for (const ruta of ['/api/contabilidad/plan', '/api/contabilidad/controles', '/api/contabilidad/resumen-contable?desde=2026-01-01&hasta=2026-12-31']) {
@@ -189,6 +213,9 @@ if (tiene(me?.permisos, 'contabilidad.ver')) {
     const hoy = new Date().toISOString().slice(0, 10);
     const desde = new Date(Date.now() - 400 * 86400_000).toISOString().slice(0, 10);
     const plan = await A.get('/api/contabilidad/plan');
+    const cola = await A.get('/api/contabilidad/cola');
+    chk('Contabilidad', 'La cola de contabilización se puede consultar (solo lectura)', cola.status === 200 && Array.isArray(cola.body), `HTTP ${cola.status}`);
+    chk('Contabilidad', 'Ninguna operación agotó sus reintentos de contabilización', (e0.cola?.fallidas ?? 0) === 0, `${e0.cola?.fallidas} fallida(s)`);
     chk('Contabilidad', 'Plan de cuentas', plan.status === 200 && Array.isArray(plan.body) && plan.body.length > 0, `HTTP ${plan.status}`);
     const ctl = await A.get('/api/contabilidad/controles');
     chk('Contabilidad', 'Controles de consistencia', ctl.status === 200 && Array.isArray(ctl.body?.controles), `HTTP ${ctl.status}`);

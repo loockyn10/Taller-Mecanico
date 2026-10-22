@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import type { AppEnv } from './env';
-import { ApiError, traducirErrorDb } from './lib/http';
+import type { AppEnv, Env } from './env';
+import { ApiError, body, traducirErrorDb } from './lib/http';
 import { requireAuth, requireJson } from './lib/auth';
 import { auth } from './modules/auth';
 import { platform } from './modules/platform';
@@ -38,7 +38,11 @@ import { activacion } from './modules/activacion';
 import { puesta } from './modules/puesta';
 import { importaciones } from './modules/importaciones';
 import { aperturas } from './modules/aperturas';
-import { sincronizarTrasOperacion } from './lib/contab/sync';
+import { mantenimientoContable, sincronizarTrasOperacion } from './lib/contab/sync';
+import { ejecutarMantenimiento, latido, limpiarMensaje, medirD1, registrarErrorWorker, type Medicion } from './lib/observabilidad';
+import { exigirNoBloqueado, limpiarFallos, registrarFallo } from './lib/limites';
+import { igualSeguro } from './lib/crypto';
+import { z } from 'zod';
 
 const app = new Hono<AppEnv>();
 
@@ -49,11 +53,53 @@ app.use('/api/*', async (c, next) => {
 });
 app.use('/api/*', requireJson);
 
+// Medición de D1 por solicitud (sólo con MEDIR_D1=1, en una base aislada de pruebas de capacidad): consultas, sentencias, filas y tiempo en D1.
+app.use('/api/*', async (c, next) => {
+  if (c.env.MEDIR_D1 !== '1') return next();
+  const m: Medicion = { consultas: 0, sentencias: 0, filasLeidas: 0, filasEscritas: 0, msD1: 0, top: [] };
+  c.env = { ...c.env, DB: medirD1(c.env.DB, m) };
+  const t0 = performance.now();
+  await next();
+  c.header('X-D1-Consultas', String(m.consultas));
+  c.header('X-D1-Sentencias', String(m.sentencias));
+  c.header('X-D1-Filas-Leidas', String(m.filasLeidas));
+  c.header('X-D1-Filas-Escritas', String(m.filasEscritas));
+  c.header('X-D1-Ms', m.msD1.toFixed(1));
+  if (m.top.length) c.header('X-D1-Top', encodeURIComponent(m.top.map((t) => `${t.filas}:${t.sql}`).join(' || ')));
+  c.header('X-Worker-Ms', (performance.now() - t0).toFixed(1));
+});
+
 app.get('/api/salud', (c) => c.json({ ok: true, version: '0.1.0' }));
 app.route('/api/auth', auth);
 app.route('/api/platform', platform);
 // Canje de una invitación de activación: público (se autentica con el enlace de un solo uso).
 app.route('/api/activacion', activacion);
+// Aviso del respaldo externo (lo envía el procedimiento programado de GitHub Actions al terminar). Token propio, con un único permiso.
+const zLatidoRespaldo = z.object({
+  ok: z.boolean(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  bytes: z.number().int().nonnegative().optional(),
+  tablas: z.number().int().nonnegative().optional(),
+  filas: z.number().int().nonnegative().optional(),
+  talleres: z.number().int().nonnegative().optional(),
+  etiqueta: z.string().max(80).optional(),
+  error: z.string().max(200).optional(),
+});
+app.post('/api/plataforma/respaldo-latido', async (c) => {
+  const clave = `respaldo-latido:${c.req.header('cf-connecting-ip') ?? 'local'}`;
+  await exigirNoBloqueado(c.env.DB, clave);
+  const esperado = c.env.BACKUP_REPORT_TOKEN;
+  const recibido = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  if (!esperado || esperado.length < 16 || !igualSeguro(recibido, esperado)) {
+    await registrarFallo(c.env.DB, clave, 10, 15, 30);
+    throw new ApiError(401, 'no_autorizado', 'Token inválido');
+  }
+  await limpiarFallos(c.env.DB, clave);
+  const d = await body(c, zLatidoRespaldo);
+  await latido(c.env.DB, 'respaldo_externo', d.ok, { ...d, error: d.error ? limpiarMensaje(d.error) : undefined });
+  return c.json({ ok: true });
+});
+
 // Pantalla del reloj compartido: se autentica con el token del dispositivo, no con una sesión de usuario.
 app.route('/api/reloj', relojPublico);
 
@@ -114,11 +160,25 @@ app.all('/api/*', (c) => c.json({ error: { code: 'no_encontrado', message: 'Ruta
 app.onError((err, c) => {
   const e = err instanceof ApiError ? err : traducirErrorDb(err);
   if (e) return c.json({ error: { code: e.code, message: e.message, details: e.details } }, e.status as 400);
-  console.error('Error no controlado', err);
+  // Se registra sin datos del usuario: método, ruta normalizada y mensaje depurado (ver lib/observabilidad.ts). Los logs del Worker no llevan el cuerpo ni las cabeceras.
+  const ruta = new URL(c.req.url).pathname;
+  console.error('Error no controlado', c.req.method, ruta.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, ':id'), err instanceof Error ? err.name : typeof err, limpiarMensaje(err instanceof Error ? err.message : String(err)));
+  const tarea = registrarErrorWorker(c.env.DB, c.req.method, ruta, err, c.get('sesion')?.tallerId ?? null);
+  try {
+    c.executionCtx.waitUntil(tarea);
+  } catch {
+    /* sin ExecutionContext (pruebas): se deja correr */
+  }
   return c.json({ error: { code: 'error_interno', message: 'Ocurrió un error inesperado' } }, 500);
 });
 
 // Fuera de /api, servir la SPA (en desarrollo la sirve Vite).
 app.all('*', async (c) => (c.env.ASSETS ? c.env.ASSETS.fetch(c.req.raw) : c.text('Fierro API', 200)));
 
-export default app;
+export default {
+  fetch: app.fetch,
+  // Cron Trigger (wrangler.jsonc › triggers.crons): drena las colas de contabilización pendientes, avanza reconciliaciones y deja un latido.
+  async scheduled(_evento: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(ejecutarMantenimiento(env, mantenimientoContable));
+  },
+} satisfies ExportedHandler<Env>;

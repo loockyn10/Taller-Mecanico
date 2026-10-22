@@ -5,35 +5,36 @@ import { ApiError, body } from '../lib/http';
 import { ahora, first, run } from '../lib/db';
 import { hashPassword, verificarPassword } from '../lib/crypto';
 import { cerrarSesion, crearSesion, requireAuth } from '../lib/auth';
-
-const MAX_INTENTOS = 5;
-const BLOQUEO_MIN = 15;
+import { bloqueoVigente, clavesLogin, hashDeRelleno, registrarExitoLogin, registrarFalloLogin } from '../lib/seguridad';
 
 export const auth = new Hono<AppEnv>();
 
+const MENSAJE_BLOQUEO = 'Demasiados intentos fallidos. Probá de nuevo en unos minutos';
+
 auth.post('/login', async (c) => {
   const { email, password } = await body(c, z.object({ email: z.string().trim().email(), password: z.string().min(1).max(200) }));
-  const u = await first<{ id: string; taller_id: string; password_hash: string; activo: number; acceso_erp: number; intentos_fallidos: number; bloqueado_hasta: string | null; taller_activo: number }>(
+  const claves = await clavesLogin(c, email);
+  // 1) Bloqueo temporal: se decide sólo con lo que mandó quien intenta (origen y correo), exista o no la cuenta.
+  const bloqueo = await bloqueoVigente(c.env.DB, claves);
+  if (bloqueo) throw new ApiError(429, 'bloqueado', MENSAJE_BLOQUEO); // el evento se registró una sola vez, al aplicar el bloqueo
+  const u = await first<{ id: string; taller_id: string; password_hash: string; activo: number; acceso_erp: number; taller_activo: number }>(
     c.env.DB,
-    `SELECT u.id, u.taller_id, u.password_hash, u.activo, u.acceso_erp, u.intentos_fallidos, u.bloqueado_hasta, t.activo AS taller_activo
+    `SELECT u.id, u.taller_id, u.password_hash, u.activo, u.acceso_erp, t.activo AS taller_activo
        FROM usuarios u JOIN talleres t ON t.id = u.taller_id WHERE u.email = ?`,
     email,
   );
-  const error = new ApiError(401, 'credenciales_invalidas', 'Email o contraseña incorrectos');
-  // Las personas sin acceso al sistema (solo fichan con PIN) no tienen credenciales para ingresar.
-  if (!u || !u.acceso_erp) throw error;
-  if (u.bloqueado_hasta && u.bloqueado_hasta > ahora()) {
-    throw new ApiError(429, 'bloqueado', `Demasiados intentos fallidos. Probá de nuevo en ${BLOQUEO_MIN} minutos`);
-  }
-  const ok = await verificarPassword(password, u.password_hash);
+  // 2) Siempre se verifica una contraseña (contra un hash de relleno si la cuenta no existe o no tiene acceso): mismo costo, mismo tiempo, misma respuesta.
+  const tieneAcceso = !!u && !!u.acceso_erp;
+  const hash = tieneAcceso ? u.password_hash : await hashDeRelleno(Number(c.env.PBKDF2_ITERATIONS ?? 100000));
+  const ok = (await verificarPassword(password, hash)) && tieneAcceso;
   if (!ok) {
-    const intentos = u.intentos_fallidos + 1;
-    const bloqueo = intentos >= MAX_INTENTOS ? new Date(Date.now() + BLOQUEO_MIN * 60_000).toISOString() : null;
-    await run(c.env.DB, 'UPDATE usuarios SET intentos_fallidos = ?, bloqueado_hasta = ? WHERE id = ?', bloqueo ? 0 : intentos, bloqueo, u.id);
-    throw error;
+    await registrarFalloLogin(c.env.DB, claves, 'credenciales');
+    throw new ApiError(401, 'credenciales_invalidas', 'Email o contraseña incorrectos');
   }
+  // La contraseña es correcta: recién ahora se informa que el usuario o el taller están deshabilitados.
   if (!u.activo || !u.taller_activo) throw new ApiError(403, 'usuario_inactivo', 'El usuario o el taller están deshabilitados');
-  await run(c.env.DB, 'UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL, ultimo_login = ? WHERE id = ?', ahora(), u.id);
+  await registrarExitoLogin(c.env.DB, claves);
+  await run(c.env.DB, 'UPDATE usuarios SET ultimo_login = ? WHERE id = ?', ahora(), u.id);
   // Limpieza oportunista de sesiones vencidas del usuario.
   await run(c.env.DB, 'DELETE FROM sesiones WHERE usuario_id = ? AND expires_at < ?', u.id, ahora());
   await crearSesion(c, u.id, u.taller_id);

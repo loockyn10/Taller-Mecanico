@@ -27,6 +27,10 @@ export const TABLAS_EXCLUIDAS = new Map([
   ['limites_intentos', 'contadores internos de bloqueo'],
   ['d1_migrations', 'control de migraciones de la plataforma'],
   ['tx_guard', 'tabla técnica de control de transacciones'],
+  ['plataforma_latidos', 'latidos de procesos de la plataforma'],
+  ['eventos_seguridad', 'eventos de seguridad de la plataforma'],
+  ['errores_worker', 'errores técnicos de la plataforma'],
+  ['contab_cola', 'cola interna de contabilización (se regenera con la reconciliación)'],
 ]);
 
 /** Columnas que se quitan de las tablas que sí salen (credenciales). */
@@ -231,4 +235,37 @@ export function ensayarMigraciones(db, pendientes) {
     filasComparadas: Object.values(antes).reduce((a, h) => a + h.filas, 0),
     tablasComparadas: Object.keys(antes).length,
   };
+}
+
+// ───────────────────────── Controles contables sobre un respaldo ─────────────────────────
+/**
+ * Comprueba que la contabilidad de un respaldo sigue cerrando: partida doble de cada asiento, numeración correlativa sin saltos por taller, ningún
+ * asiento registrado sin líneas, ningún documento con dos asientos del mismo evento y cada asiento revertido con su contra-asiento. Sólo lee.
+ * Devuelve `{ ok, controles, porTaller }`; en un respaldo anterior a la contabilidad (sin la tabla) devuelve `{ aplica: false }`.
+ */
+export function controlesContables(db) {
+  const tablas = new Set(tablasDe(db));
+  if (!tablas.has('asientos') || !tablas.has('asiento_lineas')) return { aplica: false, ok: true, controles: [], porTaller: [] };
+  const n = (sql) => db.prepare(sql).get().n;
+  const controles = [
+    { clave: 'partida_doble', nombre: 'Asientos registrados que no balancean (Debe ≠ Haber)', valor: n("SELECT COUNT(*) AS n FROM (SELECT a.id FROM asientos a JOIN asiento_lineas l ON l.taller_id = a.taller_id AND l.asiento_id = a.id WHERE a.estado <> 'borrador' GROUP BY a.id HAVING SUM(l.debe) <> SUM(l.haber))") },
+    { clave: 'sin_lineas', nombre: 'Asientos registrados sin líneas', valor: n("SELECT COUNT(*) AS n FROM asientos a WHERE a.estado <> 'borrador' AND NOT EXISTS (SELECT 1 FROM asiento_lineas l WHERE l.taller_id = a.taller_id AND l.asiento_id = a.id)") },
+    { clave: 'numeracion', nombre: 'Talleres con numeración de asientos con saltos o repetidos', valor: n("SELECT COUNT(*) AS n FROM (SELECT taller_id FROM asientos WHERE numero IS NOT NULL GROUP BY taller_id HAVING MIN(numero) <> 1 OR MAX(numero) <> COUNT(*))") },
+    { clave: 'duplicados', nombre: 'Documentos con más de un asiento del mismo evento', valor: n('SELECT COUNT(*) AS n FROM (SELECT 1 FROM asientos WHERE origen_id IS NOT NULL GROUP BY taller_id, origen_tipo, origen_id, evento HAVING COUNT(*) > 1)') },
+    { clave: 'reversiones', nombre: 'Asientos revertidos sin contra-asiento', valor: n("SELECT COUNT(*) AS n FROM asientos a WHERE a.estado = 'revertido' AND NOT EXISTS (SELECT 1 FROM asientos r WHERE r.taller_id = a.taller_id AND r.revierte_id = a.id)") },
+    { clave: 'lineas_huerfanas', nombre: 'Líneas de asiento sin su asiento', valor: n('SELECT COUNT(*) AS n FROM asiento_lineas l WHERE NOT EXISTS (SELECT 1 FROM asientos a WHERE a.taller_id = l.taller_id AND a.id = l.asiento_id)') },
+  ].map((c) => ({ ...c, ok: c.valor === 0 }));
+  const porTaller = db
+    .prepare(
+      `SELECT t.id, t.nombre,
+              (SELECT COUNT(*) FROM asientos a WHERE a.taller_id = t.id) AS asientos,
+              (SELECT COUNT(*) FROM asiento_lineas l WHERE l.taller_id = t.id) AS lineas,
+              (SELECT COALESCE(SUM(debe), 0) FROM asiento_lineas l WHERE l.taller_id = t.id) AS debe,
+              (SELECT COALESCE(SUM(haber), 0) FROM asiento_lineas l WHERE l.taller_id = t.id) AS haber
+         FROM talleres t ORDER BY t.nombre`,
+    )
+    .all()
+    .map((r) => ({ ...r }));
+  const cola = tablas.has('contab_cola') ? db.prepare("SELECT COALESCE(SUM(estado = 'pendiente'), 0) AS pendientes, COALESCE(SUM(estado = 'fallida'), 0) AS fallidas FROM contab_cola").get() : { pendientes: 0, fallidas: 0 };
+  return { aplica: true, ok: controles.every((c) => c.ok) && porTaller.every((t) => t.debe === t.haber), controles, porTaller, cola: { ...cola } };
 }

@@ -98,7 +98,7 @@ export function sentenciaRegistrar(db: D1Database, tallerId: string, asientoId: 
     .prepare(
       `UPDATE asientos
           SET estado = 'registrado',
-              numero = (SELECT COALESCE(MAX(numero), 0) + 1 FROM asientos WHERE taller_id = ?),
+              numero = (SELECT COALESCE(MAX(numero), 0) + 1 FROM asientos WHERE taller_id = ? AND numero IS NOT NULL), -- IS NOT NULL: usa el índice parcial (búsqueda, no recorrido del libro)
               total = (SELECT COALESCE(SUM(debe), 0) FROM asiento_lineas WHERE taller_id = ? AND asiento_id = ?),
               registrado_por = ?, registrado_at = ?
         WHERE taller_id = ? AND id = ? AND estado = 'borrador'`,

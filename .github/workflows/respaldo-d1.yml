@@ -1,0 +1,80 @@
+# Respaldo programado de la D1 de Fierro (ver docs/RESPALDOS.md).
+#
+# Exporta TODA la base, la verifica (integridad, claves foráneas, migraciones, controles contables), la comprime y la CIFRA con una clave pública RSA, comprueba que
+# el cifrado se puede deshacer y la guarda como artefacto de GitHub Actions: una copia FUERA de la cuenta de Cloudflare, sin costo.
+#
+# IMPORTANTE (el repositorio es PÚBLICO): los artefactos de un repositorio público los puede descargar cualquier persona con sesión de GitHub. Por eso NUNCA se sube
+# el SQL en claro: sólo el archivo .fbk cifrado (la clave privada que lo abre no está en GitHub). Los registros de esta ejecución también son públicos: el script
+# imprime sólo cantidades, nunca nombres ni datos de talleres, ni credenciales.
+#
+# Configuración única (la hace el propietario, una vez; el paso a paso está en docs/RESPALDOS.md §7). Hasta que estén cargados, la ejecución FALLA a propósito y
+# avisa qué falta; no hay respaldo automático hasta que una ejecución real termine bien.
+#   Secrets  : CLOUDFLARE_API_TOKEN (permiso de cuenta «D1: Edit», sólo para esta cuenta), CLOUDFLARE_ACCOUNT_ID
+#   Variables: FIERRO_RESPALDO_CLAVE_PUBLICA (contenido del .pem público; no es secreto), FIERRO_URL (opcional, para el aviso a la plataforma)
+#   Secret opcional: BACKUP_REPORT_TOKEN (el mismo valor que el secreto BACKUP_REPORT_TOKEN del Worker: permite que la plataforma avise si el respaldo falla o deja de llegar)
+name: Respaldo D1
+
+on:
+  schedule:
+    - cron: '17 6 * * *' # 06:17 UTC = 03:17 en Argentina (poco uso: la exportación bloquea la base unos segundos)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: respaldo-d1
+  cancel-in-progress: false
+
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24' # node:sqlite (verificación del respaldo) no necesita opciones desde Node 22.13
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --no-audit --no-fund
+
+      - name: Comprobar configuración
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FIERRO_RESPALDO_CLAVE_PUBLICA: ${{ vars.FIERRO_RESPALDO_CLAVE_PUBLICA }}
+        run: |
+          faltan=""
+          [ -z "$CLOUDFLARE_API_TOKEN" ] && faltan="$faltan secret:CLOUDFLARE_API_TOKEN"
+          [ -z "$CLOUDFLARE_ACCOUNT_ID" ] && faltan="$faltan secret:CLOUDFLARE_ACCOUNT_ID"
+          [ -z "$FIERRO_RESPALDO_CLAVE_PUBLICA" ] && faltan="$faltan variable:FIERRO_RESPALDO_CLAVE_PUBLICA"
+          if [ -n "$faltan" ]; then
+            echo "::error::Falta configurar:$faltan (ver docs/RESPALDOS.md §7). El respaldo NO se hizo."
+            exit 1
+          fi
+
+      - name: Respaldo cifrado
+        id: respaldo
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FIERRO_RESPALDO_CLAVE_PUBLICA: ${{ vars.FIERRO_RESPALDO_CLAVE_PUBLICA }}
+          FIERRO_URL: ${{ vars.FIERRO_URL }}
+          BACKUP_REPORT_TOKEN: ${{ secrets.BACKUP_REPORT_TOKEN }}
+        run: |
+          node scripts/respaldo.mjs programado --salida "$RUNNER_TEMP/respaldo" --avisar
+          # Conservación: diarios 14 días; los domingos 90 días (el máximo que admite GitHub).
+          if [ "$(date -u +%u)" = "7" ]; then echo "retencion=90" >> "$GITHUB_OUTPUT"; else echo "retencion=14" >> "$GITHUB_OUTPUT"; fi
+          echo "fecha=$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+
+      - name: Guardar el respaldo cifrado (artefacto)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fierro-d1-${{ steps.respaldo.outputs.fecha }}
+          path: ${{ runner.temp }}/respaldo/*
+          retention-days: ${{ steps.respaldo.outputs.retencion }}
+          if-no-files-found: error
+          compression-level: 0 # ya está comprimido y cifrado

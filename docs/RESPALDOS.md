@@ -1,10 +1,10 @@
 # Respaldos, exportación y recuperación de Fierro
 
-Estado al **22/10/2026 (Sprint 12)**. Este documento separa cuatro cosas que no deben mezclarse y dice, para cada una, qué existe hoy, qué se verificó y qué falta.
+Estado al **22/10/2026 (Sprint 13)**. Este documento separa cuatro cosas que no deben mezclarse y dice, para cada una, qué existe hoy, qué se verificó y qué falta.
 
 | # | Necesidad | Quién la hace | Qué existe hoy | Estado |
 |---|---|---|---|---|
-| 1 | **Respaldo de toda la plataforma** | Operador de Fierro | `wrangler d1 export` + Time Travel; `npm run respaldo -- plataforma` lo automatiza y lo verifica | **Disponible (manual)**. Sin respaldos programados |
+| 1 | **Respaldo de toda la plataforma** | Operador de Fierro | `wrangler d1 export` + Time Travel; `npm run respaldo -- plataforma` (manual) y `programado` (GitHub Actions, cifrado) lo automatizan y lo verifican | **Disponible**. Respaldo programado y cifrado **preparado** (§7); **aún sin una ejecución real en GitHub Actions** |
 | 2 | **Exportación de los datos de UN taller** | Operador (por pedido del propietario) | `npm run respaldo -- exportar-taller` (JSON + CSV, sin credenciales ni datos ajenos) | **Disponible para el operador**. El propietario **no** puede exportar solo: P1 |
 | 3 | **Restauración ante un incidente** | Operador | Time Travel de Cloudflare (todo o nada, toda la base) o el `.sql` sobre una base nueva | **Disponible, con límites claros** (ver 3). Restaurar UN taller: **no existe** y no se improvisa |
 | 4 | **Migración hacia otra instalación** | Operador | El `.sql` completo en una base vacía con las migraciones al día; o la exportación del punto 2 para llevar un taller | **Disponible a nivel de plataforma**; por taller solo como datos (no restaurable) |
@@ -38,7 +38,7 @@ npm run respaldo -- verificar respaldos/d1-antes-sprint11-20261022.sql
 Resultado real sobre el respaldo del Sprint 11 (copia de producción, 22/10/2026): integridad **ok**, **0** claves foráneas rotas, **86** tablas, **3.740** filas, dos talleres, 10 migraciones aplicadas (las 0011 y 0012 figuran como pendientes respecto del proyecto, que es lo esperado en un respaldo previo a esas migraciones).
 
 **Límites que conviene conocer**
-- **No hay respaldos programados.** Si nadie ejecuta el comando, el único resguardo es Time Travel (30 días según la [documentación de Cloudflare](https://developers.cloudflare.com/d1/reference/time-travel/); esa página no confirma si la ventana difiere entre el plan gratuito y el pago: verificarlo en la cuenta). Propuesta: R2.
+- **Respaldos programados:** preparados en el Sprint 13 (ver §7) pero **todavía sin una ejecución real en GitHub Actions** (faltan las credenciales y la clave que solo puede cargar el propietario). Hasta entonces el único resguardo automático es Time Travel (30 días según la [documentación de Cloudflare](https://developers.cloudflare.com/d1/reference/time-travel/); esa página no confirma si la ventana difiere entre el plan gratuito y el pago: verificarlo en la cuenta).
 - Time Travel y los `.sql` viven en la misma cuenta de Cloudflare: **no protegen contra la pérdida de la cuenta**. Guardar copias cifradas fuera de Cloudflare es una decisión operativa pendiente (no se contrató ni se configuró ningún servicio externo).
 - `wrangler d1 export` puede dejar la base momentáneamente no disponible mientras exporta. Con el tamaño actual (≈ 1,6 MB) es imperceptible; hay que reevaluarlo cuando crezca.
 
@@ -97,8 +97,52 @@ Para llevar **un solo taller** a otra instalación hoy solo se puede como datos 
 
 | Prioridad | Qué | Por qué |
 |---|---|---|
-| P0 operativo | Definir **dónde** viven copias cifradas fuera de Cloudflare y con qué frecuencia | Hoy un incidente de cuenta no es recuperable. Requiere decisión (y, si es R2 u otro, autorización) |
+| P0 operativo | **Cargar la configuración de §7 y lograr una primera ejecución real del workflow** (más una prueba de apertura del artefacto) | Hasta entonces un incidente de cuenta no es recuperable. Preparado; falta el paso del propietario |
 | P1 | Exportación por el propietario desde la app (`datos.exportar`) | Cumplir con pedidos de portabilidad sin depender del operador |
-| P1 | Respaldos programados (Cron Trigger + R2) con verificación automática | Dejar de depender de que alguien se acuerde |
+| P1 | Si el respaldo crece (> ~15 MB cifrado), mover las copias a R2/otro destino | El cupo gratuito de artefactos (500 MB) se agotaría. Requiere decisión de costos |
 | P2 | Restauración de un taller a un taller nuevo con controles | Ver 3 |
 | P3 | Exportación a `.xlsx` y a formatos de otros sistemas | Comodidad de migración |
+
+## 7. Respaldo programado y copia fuera de Cloudflare (Sprint 13)
+
+**Qué se preparó:** `.github/workflows/respaldo-d1.yml` (GitHub Actions, gratuito) ejecuta todos los días a las 03:17 (hora de Argentina) `npm run respaldo -- programado`, que reutiliza la herramienta de siempre: exporta la D1 completa (`wrangler d1 export`), la **verifica** (integridad, claves foráneas, migraciones, controles contables: partida doble, numeración, duplicados, reversiones), la **comprime y cifra** (AES-256-GCM, con la clave de datos envuelta con una **clave pública RSA-4096**), comprueba que el archivo cifrado se puede deshacer, y lo guarda como **artefacto** de la ejecución (`fierro-d1-<fecha>.sql.fbk` + un manifiesto sin datos comerciales). Si algo falla, el paso termina con error: GitHub marca la ejecución en rojo y envía un correo, y (si está configurado el aviso) la salud de la plataforma muestra el fallo.
+
+**Por qué cifrado:** el repositorio es **público** y los artefactos de un repositorio público pueden descargarlos otras personas con cuenta de GitHub. El respaldo contiene todos los talleres y los hashes de las contraseñas. Sin la **clave privada**, el artefacto es ilegible. La clave pública (que sí está en GitHub) no permite abrirlo.
+
+**Conservación:** artefactos diarios 14 días; los domingos 90 días (el máximo de GitHub). Eso deja del orden de 14 respaldos diarios + 13 semanales. Tamaño hoy: **0,23 MB por respaldo** (1,58 MB de SQL comprimido y cifrado) → unos 6 MB en total. El cupo de artefactos del plan gratuito es de **500 MB**: *tamaño del respaldo × ~27 versiones* debe quedar por debajo. Con un respaldo de 15 MB ya se rozaría el cupo: llegado ese punto hay que acortar la retención diaria o mover las copias a R2/otro destino (decisión y costo de ustedes; no se hizo).
+
+**Estado real:** ✅ el procedimiento (`programado`, cifrado, descifrado, restauración) se **ejecutó de verdad contra la D1 de producción desde esta computadora** con claves descartables (ver §8). ❌ **El workflow de GitHub Actions todavía NO se ejecutó**: necesita datos de la cuenta que esta sesión no puede ni debe crear. Hasta que una ejecución real termine en verde y se haya probado abrir su artefacto, **no hay copia automática fuera de Cloudflare**.
+
+### Configuración única (la hace el propietario; ~15 minutos)
+1. **Generar el par de claves** en una carpeta **fuera del repositorio**:
+   ```bash
+   npm run respaldo -- generar-claves --salida C:\Users\TU_USUARIO\Documents\fierro-claves
+   ```
+   Guardar `fierro-respaldo-PRIVADA.pem` en **dos lugares** que no sean GitHub ni Cloudflare (por ejemplo un gestor de contraseñas y un pendrive). **Sin ella, los respaldos cifrados no se pueden abrir.** Nunca la subas ni la pegues en un chat.
+2. **GitHub › Settings › Secrets and variables › Actions › Variables › New repository variable**: `FIERRO_RESPALDO_CLAVE_PUBLICA` = el contenido completo de `fierro-respaldo-publica.pem` (empieza con `-----BEGIN PUBLIC KEY-----`; no es secreto).
+3. **Token de Cloudflare** (dash.cloudflare.com › My Profile › API Tokens › Create Token › Custom token): permiso **Account › D1 › Edit**, limitado a tu cuenta, sin ningún otro permiso. Cargarlo en **GitHub › Secrets › New repository secret** como `CLOUDFLARE_API_TOKEN`; y `CLOUDFLARE_ACCOUNT_ID` (el id de la cuenta, visible en `npx wrangler whoami`).
+4. *(Opcional, recomendado)* **Aviso a la plataforma** para detectar respaldos que dejan de llegar: inventar un valor aleatorio de 32+ caracteres, cargarlo en el Worker (`npx wrangler secret put BACKUP_REPORT_TOKEN --name taller-mecanico`) y en GitHub como secreto `BACKUP_REPORT_TOKEN`; además la variable `FIERRO_URL` = `https://taller-mecanico.estrubia455.workers.dev`. Es un token distinto del de plataforma y solo sirve para avisar.
+5. **Primera ejecución real:** GitHub › Actions › *Respaldo D1* › *Run workflow*. Debe terminar en verde. Descargar el artefacto, y **probar abrirlo**:
+   ```bash
+   npm run respaldo -- restaurar-aislado C:\ruta\fierro-d1-XXXX.sql.fbk --clave-privada C:\ruta\fierro-respaldo-PRIVADA.pem --migrar --servir
+   ```
+   Recién con esa prueba exitosa la copia externa se considera operativa. Repetir esta prueba **cada trimestre**: un respaldo que nunca se restauró no es un respaldo.
+
+**Límites a conocer:** (a) GitHub **desactiva los workflows programados de un repositorio público tras 60 días sin actividad**: si pasa, Actions › *Respaldo D1* › *Enable workflow*; la salud de plataforma avisa cuando pasan 36 h sin un aviso correcto. (b) El horario del cron de GitHub puede atrasarse en horas de mucha carga. (c) `wrangler d1 export` deja la base **no disponible unos segundos**: hoy es imperceptible (1,6 MB, ~4 s); hay que reevaluarlo cuando crezca (por eso corre de madrugada). (d) La clave de datos viaja envuelta en el propio archivo: perder la privada = perder todos los respaldos cifrados con esa clave pública (para rotar la clave se genera un par nuevo y se cambia la variable; los respaldos viejos siguen necesitando la privada vieja).
+
+## 8. Restauración sobre una instancia aislada (verificada)
+
+```bash
+npm run respaldo -- restaurar-aislado <archivo.sql | archivo.sql.fbk> [--clave-privada PRIVADA.pem] [--migrar] [--servir]
+```
+Crea una carpeta temporal, restaura el respaldo en un **D1 local de Miniflare** (`wrangler d1 execute --local`; **nunca** toca la base de producción ni acepta `--remote`), lo compara tabla por tabla con el archivo, corre integridad, claves foráneas y los controles contables de arriba, con `--migrar` lleva la copia al esquema actual (el camino real: restaurar y actualizar), y con `--servir` levanta el Worker sobre lo restaurado y consulta la API de plataforma. Borra todo al terminar (con `--conservar` deja la carpeta; contiene datos reales si el respaldo era de producción).
+
+**Resultados reales (22/10/2026):**
+
+| Caso | Resultado |
+|---|---|
+| Respaldo **cifrado** (`.fbk`) de la D1 de **producción**, generado con `programado` | Descifrado con la clave privada; **94 tablas y 3.750 filas** restauradas idénticas; integridad ok; 0 claves foráneas rotas; 2 talleres; con `--migrar` (+4 tablas de la 0013) el Worker arrancó y la API de plataforma listó los 2 talleres. El SHA-256 del contenido descifrado coincidió con el del respaldo manual hecho aparte. *Los talleres de producción todavía no tienen la contabilidad activada, por lo que esta prueba no incluye asientos reales.* |
+| Base de ensayo con **contabilidad** (4 talleres ficticios, 2.048 asientos, 7.480 líneas, generada por la prueba de capacidad) | Restauradas **todas las tablas, índices y triggers**; 0 asientos descuadrados, 0 sin líneas, 0 duplicados, numeración correlativa sin saltos en cada taller, 0 reversiones sin contra-asiento, **Debe = Haber en cada taller**, cola de contabilización vacía; el Worker arrancó sobre lo restaurado y la API de plataforma listó los 4 talleres. |
+| Archivo cifrado alterado, truncado, con otra clave o con la cabecera modificada | Se rechaza y no queda ningún archivo a medias (`tests/unit/respaldo-cifrado.test.ts`, 9 pruebas). |
+
+**No se implementó la restauración de un solo taller** (sigue sin poder garantizarse la integridad; ver §3). Restaurar siempre es de toda la plataforma, y siempre primero en una instancia aislada.

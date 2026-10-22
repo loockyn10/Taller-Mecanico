@@ -19,6 +19,11 @@ export interface Ctx {
   rol(r: RolCuenta): string;
   banco(cuentaBancariaId: string | null | undefined): string | null;
   esValida(cuentaId: string): boolean;
+  /**
+   * Modo incremental: sólo se consideran estos documentos (los pedidos de la cola contable). Sin esto la fuente recorre todos los documentos del taller
+   * que no tienen asiento (reconciliación). En modo incremental no se aplica el descarte por intentos de contab_omitidos: la cola lleva sus propios reintentos.
+   */
+  ids?: readonly string[];
 }
 
 export interface Propuesta {
@@ -77,9 +82,20 @@ export const fechaAR = (iso: string): string => new Date(Date.parse(iso) - 3 * 3
 
 const num = (n: number | string | null | undefined) => (n == null ? '' : String(n));
 
-/** Condición SQL: el documento `alias` todavía no tiene su asiento ni fue descartado de forma definitiva. (El alias del documento NO puede ser `a` ni `o`: son los de las subconsultas.) */
-function sinAsiento(alias: string, tipo: string, evento: 'alta' | 'anulacion'): string {
-  return `NOT EXISTS (SELECT 1 FROM asientos a WHERE a.taller_id = ${alias}.taller_id AND a.origen_tipo = '${tipo}' AND a.origen_id = ${alias}.id AND a.evento = '${evento}')
+/** Ids aceptables en el filtro incremental: los de nuestras propias tablas (uuid o "taller:banco:cuenta"). Cualquier otro se descarta antes de armar el SQL. */
+const ID_SEGURO = /^[A-Za-z0-9_:.-]{1,200}$/;
+
+/**
+ * Condición SQL: el documento `alias` todavía no tiene su asiento y (en modo normal) no fue descartado de forma definitiva; en modo incremental además
+ * se limita a los ids pedidos (así el costo es proporcional a lo nuevo y no al historial). (El alias del documento NO puede ser `a` ni `o`: son los de las subconsultas.)
+ */
+function sinAsiento(ctx: Ctx, alias: string, tipo: string, evento: 'alta' | 'anulacion'): string {
+  const sinAsientoSql = `NOT EXISTS (SELECT 1 FROM asientos a WHERE a.taller_id = ${alias}.taller_id AND a.origen_tipo = '${tipo}' AND a.origen_id = ${alias}.id AND a.evento = '${evento}')`;
+  if (ctx.ids) {
+    const ids = ctx.ids.filter((i) => ID_SEGURO.test(i));
+    return `${alias}.id IN (${ids.length ? ids.map((i) => `'${i}'`).join(',') : "''"}) AND ${sinAsientoSql}`;
+  }
+  return `${sinAsientoSql}
     AND NOT EXISTS (SELECT 1 FROM contab_omitidos o WHERE o.taller_id = ${alias}.taller_id AND o.origen_tipo = '${tipo}' AND o.origen_id = ${alias}.id AND o.evento = '${evento}' AND (o.tipo = 'sin_efecto' OR o.intentos >= 3))`;
 }
 
@@ -162,7 +178,7 @@ const venta: FuenteDef = {
       ctx.db,
       `SELECT v.id, v.numero, v.fecha, v.created_at, v.created_by AS usuario_id, v.total, v.iva, c.nombre AS cliente
          FROM ventas v JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
-        WHERE v.taller_id = ? AND ${sinAsiento('v', 'venta', 'alta')} ORDER BY v.fecha, v.created_at LIMIT ?`,
+        WHERE v.taller_id = ? AND ${sinAsiento(ctx, 'v', 'venta', 'alta')} ORDER BY v.fecha, v.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     const items = await porLotes(ventas.map((v) => v.id), (l) =>
@@ -216,7 +232,7 @@ const cobro: FuenteDef = {
       ctx.db,
       `SELECT co.id, co.numero, co.fecha, co.created_at, co.usuario_id, co.total, co.tipo, c.nombre AS cliente
          FROM cobros co JOIN clientes c ON c.taller_id = co.taller_id AND c.id = co.cliente_id
-        WHERE co.taller_id = ? AND ${sinAsiento('co', 'cobro', 'alta')} ORDER BY co.fecha, co.created_at LIMIT ?`,
+        WHERE co.taller_id = ? AND ${sinAsiento(ctx, 'co', 'cobro', 'alta')} ORDER BY co.fecha, co.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     const ids = cobros.map((c) => c.id);
@@ -251,7 +267,7 @@ const creditoAplicacion: FuenteDef = {
          FROM credito_aplicaciones ca
          JOIN ventas ve ON ve.taller_id = ca.taller_id AND ve.id = ca.venta_id
          JOIN clientes c ON c.taller_id = ve.taller_id AND c.id = ve.cliente_id
-        WHERE ca.taller_id = ? AND ${sinAsiento('ca', 'credito_aplicacion', 'alta')} ORDER BY ca.fecha, ca.created_at LIMIT ?`,
+        WHERE ca.taller_id = ? AND ${sinAsiento(ctx, 'ca', 'credito_aplicacion', 'alta')} ORDER BY ca.fecha, ca.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return filas.map((f) =>
@@ -264,11 +280,18 @@ const creditoAplicacion: FuenteDef = {
   async anulados(ctx, limite) {
     const filas = await all<{ id: string; created_at: string }>(
       ctx.db,
-      `SELECT t.id, t.created_at FROM credito_aplicaciones t WHERE t.taller_id = ? AND t.estado = 'anulada' AND ${sinAsiento('t', 'credito_aplicacion', 'anulacion')} ORDER BY t.created_at LIMIT ?`,
+      `SELECT t.id, t.created_at FROM credito_aplicaciones t WHERE t.taller_id = ? AND t.estado = 'anulada' AND ${sinAsiento(ctx, 't', 'credito_aplicacion', 'anulacion')} ORDER BY t.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     if (!filas.length) return [];
-    const aud = await all<{ detalle: string | null; created_at: string; usuario_id: string | null }>(ctx.db, "SELECT detalle, created_at, usuario_id FROM auditoria WHERE taller_id = ? AND accion = 'anular_aplicacion_credito'", ctx.tallerId);
+    // Sólo la auditoría de estas aplicaciones (no toda la del taller): el detalle guarda el id de la aplicación anulada.
+    const aud = await porLotes(filas.map((f) => f.id), (l) =>
+      all<{ detalle: string | null; created_at: string; usuario_id: string | null }>(
+        ctx.db,
+        `SELECT detalle, created_at, usuario_id FROM auditoria WHERE taller_id = ? AND accion = 'anular_aplicacion_credito' AND (${l.map(() => 'detalle LIKE ?').join(' OR ')})`,
+        ctx.tallerId, ...l.map((id) => `%"aplicacion_id":"${id}"%`),
+      ),
+    );
     return filas.map((f) => {
       const a = aud.find((x) => x.detalle?.includes(`"aplicacion_id":"${f.id}"`));
       return { origenId: f.id, fecha: a ? fechaAR(a.created_at) : null, usuarioId: a?.usuario_id ?? null, orden: a?.created_at ?? f.created_at };
@@ -285,7 +308,7 @@ const devolucion: FuenteDef = {
       ctx.db,
       `SELECT d.id, d.numero, d.fecha, d.created_at, d.usuario_id, d.total, d.iva, d.a_deuda, d.liberado, ve.numero AS venta_numero, c.nombre AS cliente
          FROM devoluciones d JOIN ventas ve ON ve.taller_id = d.taller_id AND ve.id = d.venta_id JOIN clientes c ON c.taller_id = d.taller_id AND c.id = d.cliente_id
-        WHERE d.taller_id = ? AND ${sinAsiento('d', 'devolucion', 'alta')} ORDER BY d.fecha, d.created_at LIMIT ?`,
+        WHERE d.taller_id = ? AND ${sinAsiento(ctx, 'd', 'devolucion', 'alta')} ORDER BY d.fecha, d.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     const items = await porLotes(ds.map((d) => d.id), (l) =>
@@ -326,7 +349,7 @@ const devolucion: FuenteDef = {
   async anulados(ctx, limite) {
     const filas = await all<{ id: string; anulada_at: string | null; anulada_por: string | null; created_at: string }>(
       ctx.db,
-      `SELECT t.id, t.anulada_at, t.anulada_por, t.created_at FROM devoluciones t WHERE t.taller_id = ? AND t.estado = 'anulada' AND ${sinAsiento('t', 'devolucion', 'anulacion')} ORDER BY t.created_at LIMIT ?`,
+      `SELECT t.id, t.anulada_at, t.anulada_por, t.created_at FROM devoluciones t WHERE t.taller_id = ? AND t.estado = 'anulada' AND ${sinAsiento(ctx, 't', 'devolucion', 'anulacion')} ORDER BY t.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return filas.map((f) => ({ origenId: f.id, fecha: f.anulada_at ? fechaAR(f.anulada_at) : null, usuarioId: f.anulada_por, orden: f.anulada_at ?? f.created_at }));
@@ -342,7 +365,7 @@ const reintegro: FuenteDef = {
       ctx.db,
       `SELECT r.id, r.numero, r.fecha, r.created_at, r.usuario_id, r.total, r.origen_tipo, c.nombre AS cliente
          FROM reintegros r JOIN clientes c ON c.taller_id = r.taller_id AND c.id = r.cliente_id
-        WHERE r.taller_id = ? AND ${sinAsiento('r', 'reintegro', 'alta')} ORDER BY r.fecha, r.created_at LIMIT ?`,
+        WHERE r.taller_id = ? AND ${sinAsiento(ctx, 'r', 'reintegro', 'alta')} ORDER BY r.fecha, r.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     const medios = await porLotes(rs.map((r) => r.id), (l) =>
@@ -368,7 +391,7 @@ const compra: FuenteDef = {
       ctx.db,
       `SELECT co.id, co.numero, co.fecha, co.created_at, co.created_by AS usuario_id, co.neto, co.iva, co.otros, co.total, p.nombre AS proveedor
          FROM compras co JOIN proveedores p ON p.taller_id = co.taller_id AND p.id = co.proveedor_id
-        WHERE co.taller_id = ? AND ${sinAsiento('co', 'compra', 'alta')} ORDER BY co.fecha, co.created_at LIMIT ?`,
+        WHERE co.taller_id = ? AND ${sinAsiento(ctx, 'co', 'compra', 'alta')} ORDER BY co.fecha, co.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return cs.map((c) =>
@@ -389,7 +412,7 @@ const recepcion: FuenteDef = {
       ctx.db,
       `SELECT r.id, r.numero, r.fecha, r.created_at, r.usuario_id, p.nombre AS proveedor
          FROM recepciones r JOIN proveedores p ON p.taller_id = r.taller_id AND p.id = r.proveedor_id
-        WHERE r.taller_id = ? AND ${sinAsiento('r', 'recepcion', 'alta')} ORDER BY r.fecha, r.created_at LIMIT ?`,
+        WHERE r.taller_id = ? AND ${sinAsiento(ctx, 'r', 'recepcion', 'alta')} ORDER BY r.fecha, r.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     const items = await porLotes(rs.map((r) => r.id), (l) =>
@@ -418,7 +441,7 @@ const facturaProveedor: FuenteDef = {
       ctx.db,
       `SELECT f.id, f.numero, f.tipo, f.nro_comprobante, f.fecha, f.created_at, f.created_by AS usuario_id, f.neto_gravado, f.no_gravado, f.iva_21, f.iva_10_5, f.iva_27, f.otros_tributos, f.total, f.orden_compra_id, p.nombre AS proveedor
          FROM facturas_proveedor f JOIN proveedores p ON p.taller_id = f.taller_id AND p.id = f.proveedor_id
-        WHERE f.taller_id = ? AND (f.compra_id IS NULL OR f.tipo LIKE 'nota_credito%') AND ${sinAsiento('f', 'factura_proveedor', 'alta')} ORDER BY f.fecha, f.created_at LIMIT ?`,
+        WHERE f.taller_id = ? AND (f.compra_id IS NULL OR f.tipo LIKE 'nota_credito%') AND ${sinAsiento(ctx, 'f', 'factura_proveedor', 'alta')} ORDER BY f.fecha, f.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return fs.map((f) => {
@@ -451,7 +474,7 @@ const pagoProveedor: FuenteDef = {
               (SELECT ch.direccion FROM cheques ch WHERE ch.taller_id = pp.taller_id AND ch.origen_tipo = 'pago_proveedor' AND ch.origen_id = pp.id LIMIT 1) AS cheque_dir,
               (SELECT ch.origen_tipo FROM cheques ch WHERE ch.taller_id = pp.taller_id AND ch.entrega_pago_id = pp.id LIMIT 1) AS endosado
          FROM pagos_proveedor pp JOIN proveedores p ON p.taller_id = pp.taller_id AND p.id = pp.proveedor_id
-        WHERE pp.taller_id = ? AND ${sinAsiento('pp', 'pago_proveedor', 'alta')} ORDER BY pp.fecha, pp.created_at LIMIT ?`,
+        WHERE pp.taller_id = ? AND ${sinAsiento(ctx, 'pp', 'pago_proveedor', 'alta')} ORDER BY pp.fecha, pp.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return ps.map((p) =>
@@ -476,7 +499,7 @@ const gasto: FuenteDef = {
       ctx.db,
       `SELECT g.id, g.numero, g.fecha, g.created_at, g.usuario_id, g.importe, g.medio, COALESCE((SELECT m.cuenta_id FROM banco_movimientos m WHERE m.taller_id = g.taller_id AND m.origen_tipo = 'gasto' AND m.origen_id = g.id), g.cuenta_id) AS cuenta_id, g.concepto, cg.nombre AS cat, cg.tipo AS cat_tipo, cg.cuenta_contable_id
          FROM gastos g JOIN categorias_gasto cg ON cg.taller_id = g.taller_id AND cg.id = g.categoria_id
-        WHERE g.taller_id = ? AND ${sinAsiento('g', 'gasto', 'alta')} ORDER BY g.fecha, g.created_at LIMIT ?`,
+        WHERE g.taller_id = ? AND ${sinAsiento(ctx, 'g', 'gasto', 'alta')} ORDER BY g.fecha, g.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return gs.map((g) => {
@@ -499,7 +522,7 @@ const cajaManual: FuenteDef = {
     const ms = await all<{ id: string; fecha: string; created_at: string; usuario_id: string | null; tipo: string; medio: string; importe: number; concepto: string }>(
       ctx.db,
       `SELECT m.id, m.fecha, m.created_at, m.usuario_id, m.tipo, m.medio, m.importe, m.concepto FROM caja_movimientos m
-        WHERE m.taller_id = ? AND m.origen_tipo = 'manual' AND ${sinAsiento('m', 'caja_manual', 'alta')} ORDER BY m.fecha, m.created_at LIMIT ?`,
+        WHERE m.taller_id = ? AND m.origen_tipo = 'manual' AND ${sinAsiento(ctx, 'm', 'caja_manual', 'alta')} ORDER BY m.fecha, m.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return ms.map((m) => {
@@ -524,7 +547,7 @@ const bancoMov: FuenteDef = {
       ctx.db,
       `SELECT m.id, m.fecha, m.created_at, m.usuario_id, m.cuenta_id, m.tipo, m.importe, m.concepto, m.origen_tipo, m.afecta_resultado
          FROM banco_movimientos m JOIN cuentas_bancarias cb ON cb.taller_id = m.taller_id AND cb.id = m.cuenta_id AND cb.moneda = 'ARS'
-        WHERE m.taller_id = ? AND m.origen_tipo IN (${ORIGENES_BANCO}) AND ${sinAsiento('m', 'banco_mov', 'alta')} ORDER BY m.fecha, m.created_at LIMIT ?`,
+        WHERE m.taller_id = ? AND m.origen_tipo IN (${ORIGENES_BANCO}) AND ${sinAsiento(ctx, 'm', 'banco_mov', 'alta')} ORDER BY m.fecha, m.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return ms.map((m) => {
@@ -558,7 +581,7 @@ const stockAjuste: FuenteDef = {
       ctx.db,
       `SELECT sm.id, sm.created_at, sm.usuario_id, sm.tipo, sm.cantidad, sm.costo_unitario, sm.motivo, sm.origen_tipo, a.nombre AS articulo
          FROM stock_movimientos sm JOIN articulos a ON a.taller_id = sm.taller_id AND a.id = sm.articulo_id
-        WHERE sm.taller_id = ? AND ${COND_STOCK_AJUSTE} AND ${sinAsiento('sm', 'stock_ajuste', 'alta')} ORDER BY sm.created_at LIMIT ?`,
+        WHERE sm.taller_id = ? AND ${COND_STOCK_AJUSTE} AND ${sinAsiento(ctx, 'sm', 'stock_ajuste', 'alta')} ORDER BY sm.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return ms.map((m) => {
@@ -584,7 +607,7 @@ const aperturaBanco: FuenteDef = {
     const cs = await all<{ id: string; nombre: string; saldo_inicial: number; fecha: string | null; created_at: string }>(
       ctx.db,
       `SELECT cb.id, cb.nombre, cb.saldo_inicial, cb.fecha_saldo_inicial AS fecha, cb.created_at FROM cuentas_bancarias cb
-        WHERE cb.taller_id = ? AND cb.moneda = 'ARS' AND cb.saldo_inicial <> 0 AND ${sinAsiento('cb', 'apertura_banco', 'alta')} LIMIT ?`,
+        WHERE cb.taller_id = ? AND cb.moneda = 'ARS' AND cb.saldo_inicial <> 0 AND ${sinAsiento(ctx, 'cb', 'apertura_banco', 'alta')} LIMIT ?`,
       ctx.tallerId, limite,
     );
     return cs.map((c) => {
@@ -606,7 +629,7 @@ const aperturaCaja: FuenteDef = {
     const cs = await all<{ id: string; numero: number; fecha: string; saldo_inicial: number; abierta_at: string; abierta_por: string | null }>(
       ctx.db,
       `SELECT cs.id, cs.numero, cs.fecha, cs.saldo_inicial, cs.abierta_at, cs.abierta_por FROM caja_sesiones cs
-        WHERE cs.taller_id = ? AND cs.saldo_inicial > 0 AND cs.numero = (SELECT MIN(numero) FROM caja_sesiones WHERE taller_id = cs.taller_id) AND ${sinAsiento('cs', 'apertura_caja', 'alta')} LIMIT ?`,
+        WHERE cs.taller_id = ? AND cs.saldo_inicial > 0 AND cs.numero = (SELECT MIN(numero) FROM caja_sesiones WHERE taller_id = cs.taller_id) AND ${sinAsiento(ctx, 'cs', 'apertura_caja', 'alta')} LIMIT ?`,
       ctx.tallerId, limite,
     );
     return cs.map((c) =>
@@ -625,7 +648,7 @@ const aperturaProveedores: FuenteDef = {
     const as = await all<{ id: string; numero: number; fecha_corte: string; created_at: string; usuario_id: string | null; total: number; origen: string }>(
       ctx.db,
       `SELECT ap.id, ap.numero, ap.fecha_corte, ap.created_at, ap.usuario_id, ap.total, ap.origen FROM aperturas_saldos ap
-        WHERE ap.taller_id = ? AND ap.tipo = 'proveedores' AND ${sinAsiento('ap', 'apertura_proveedores', 'alta')} ORDER BY ap.fecha_corte, ap.created_at LIMIT ?`,
+        WHERE ap.taller_id = ? AND ap.tipo = 'proveedores' AND ${sinAsiento(ctx, 'ap', 'apertura_proveedores', 'alta')} ORDER BY ap.fecha_corte, ap.created_at LIMIT ?`,
       ctx.tallerId, limite,
     );
     return as.map((a) => {
@@ -645,7 +668,7 @@ const aperturaProveedores: FuenteDef = {
 async function anuladosPorAuditoria(ctx: Ctx, tipo: string, tabla: string, condicion: string, entidad: string, limite: number): Promise<Anulacion[]> {
   const filas = await all<{ id: string; created_at: string }>(
     ctx.db,
-    `SELECT t.id, t.created_at FROM ${tabla} t WHERE t.taller_id = ? AND ${condicion} AND ${sinAsiento('t', tipo, 'anulacion')} ORDER BY t.created_at LIMIT ?`,
+    `SELECT t.id, t.created_at FROM ${tabla} t WHERE t.taller_id = ? AND ${condicion} AND ${sinAsiento(ctx, 't', tipo, 'anulacion')} ORDER BY t.created_at LIMIT ?`,
     ctx.tallerId, limite,
   );
   if (!filas.length) return [];
@@ -668,7 +691,7 @@ async function anuladosPorReverso(ctx: Ctx, tipo: string, tabla: string, condici
     ctx.db,
     `SELECT t.id, r.fecha, r.usuario_id, r.created_at FROM ${tabla} t
        JOIN ${tabla} r ON r.taller_id = t.taller_id AND r.origen_tipo = 'reverso' AND r.origen_id = t.id
-      WHERE t.taller_id = ? AND ${condicion} AND ${sinAsiento('t', tipo, 'anulacion')} ORDER BY r.created_at LIMIT ?`,
+      WHERE t.taller_id = ? AND ${condicion} AND ${sinAsiento(ctx, 't', tipo, 'anulacion')} ORDER BY r.created_at LIMIT ?`,
     ctx.tallerId, limite,
   );
   return filas.map((f) => ({ origenId: f.id, fecha: f.fecha, usuarioId: f.usuario_id, orden: f.created_at }));

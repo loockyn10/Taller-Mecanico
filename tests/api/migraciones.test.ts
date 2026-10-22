@@ -432,4 +432,56 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(todos('PRAGMA foreign_key_check')).toEqual([]);
     db.close();
   });
+
+  it('0013 no toca los datos, marca para reconciliar los talleres ya activados y encola cada operación en SU transacción (si se revierte, no queda pedido)', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    const migraciones = fs.readdirSync(path.join(RAIZ, 'migrations')).sort();
+    for (const m of migraciones.filter((f) => f < '0013')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all() as Array<Record<string, any>>;
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Activado'), ('t2', 'Taller Sin Activar');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x'), ('u2', 't2', 'b@b.com', 'Otro', 'propietario', 'propietario', 'x');
+      INSERT INTO taller_config (taller_id) VALUES ('t1'), ('t2');
+      INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES ('c1', 't1', 1, 'Cliente Uno'), ('c2', 't2', 1, 'Cliente Dos');
+      INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, total, neto, idem_key) VALUES ('v0', 't1', 1, 'c1', '2026-10-01', 1000, 1000, 'k0');
+      INSERT INTO contab_config (taller_id, inicializado_at, ultima_corrida_at) VALUES ('t1', '2026-10-01T00:00:00Z', '2026-10-02T00:00:00Z');
+    `);
+    const foto = () => JSON.stringify({ v: todos('SELECT id, total, estado FROM ventas ORDER BY id'), c: todos('SELECT taller_id, inicializado_at, plan_version, ultima_corrida_at FROM contab_config'), u: todos('SELECT id FROM usuarios ORDER BY id') });
+    const antes = foto();
+    db.exec(leer('migrations', migraciones.find((f) => f.startsWith('0013'))!));
+    expect(foto()).toBe(antes);
+    // El taller que ya tenía la contabilidad pasa una vez por la reconciliación (no tenía cola); la cola arranca vacía
+    expect(uno("SELECT reconciliar_pendiente, reconciliada_at FROM contab_config WHERE taller_id = 't1'")).toMatchObject({ reconciliar_pendiente: 1, reconciliada_at: null });
+    expect(uno('SELECT COUNT(*) AS n FROM contab_cola').n).toBe(0);
+    // Taller activado: una venta deja su pedido en la misma operación; anularla deja el pedido de anulación; insertar dos veces no duplica
+    db.exec("INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, total, neto, idem_key) VALUES ('v1', 't1', 2, 'c1', '2026-10-02', 500, 500, 'k1')");
+    expect(todos('SELECT origen_tipo, origen_id, evento, estado, intentos FROM contab_cola').map((r) => ({ ...r }))).toEqual([{ origen_tipo: 'venta', origen_id: 'v1', evento: 'alta', estado: 'pendiente', intentos: 0 }]);
+    db.exec("UPDATE ventas SET estado = 'anulada' WHERE id = 'v1'");
+    db.exec("UPDATE ventas SET observaciones = 'x' WHERE id = 'v1'");
+    expect(todos('SELECT evento FROM contab_cola ORDER BY evento').map((r) => r.evento)).toEqual(['alta', 'anulacion']);
+    // Taller sin la contabilidad activada: nada se encola (la activación sigue siendo explícita)
+    db.exec("INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, total, neto, idem_key) VALUES ('v2', 't2', 1, 'c2', '2026-10-02', 700, 700, 'k2')");
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE taller_id = 't2'").n).toBe(0);
+    // Atomicidad: si la operación se revierte (rollback del batch), el pedido también se revierte
+    db.exec('BEGIN');
+    db.exec("INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, total, neto, idem_key) VALUES ('v3', 't1', 3, 'c1', '2026-10-03', 900, 900, 'k3')");
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE origen_id = 'v3'").n).toBe(1);
+    db.exec('ROLLBACK');
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE origen_id = 'v3'").n).toBe(0);
+    expect(uno("SELECT COUNT(*) AS n FROM ventas WHERE id = 'v3'").n).toBe(0);
+    // Una operación que viola una restricción (idem_key repetida) no deja pedido huérfano
+    expect(() => db.exec("INSERT INTO ventas (id, taller_id, numero, cliente_id, fecha, total, neto, idem_key) VALUES ('v4', 't1', 4, 'c1', '2026-10-03', 900, 900, 'k1')")).toThrow(/UNIQUE/);
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE origen_id = 'v4'").n).toBe(0);
+    // Estados y claves válidos
+    expect(() => db.exec("INSERT INTO contab_cola (taller_id, origen_tipo, origen_id, evento, estado) VALUES ('t1', 'venta', 'zz', 'alta', 'rara')")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO contab_cola (taller_id, origen_tipo, origen_id, evento) VALUES ('t1', 'venta', 'v1', 'alta')")).toThrow(/UNIQUE|PRIMARY/);
+    // Índices nuevos para los hallazgos de capacidad
+    for (const i of ['idx_cobro_medios_cobro', 'idx_cobro_aplicaciones_cobro', 'idx_compra_items_compra', 'idx_recepcion_items_recepcion', 'idx_ventas_por_cobrar']) {
+      expect(uno(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'index' AND name = '${i}'`).n, i).toBe(1);
+    }
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    db.close();
+  });
 });

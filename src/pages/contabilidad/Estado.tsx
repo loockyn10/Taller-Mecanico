@@ -21,6 +21,10 @@ export interface EstadoContab {
   errores: number;
   sin_efecto: number;
   al_dia: boolean;
+  /** Operaciones confirmadas que esperan su asiento (se reintentan solas) y las que agotaron los reintentos. */
+  cola: { pendientes: number; fallidas: number; mas_antigua: string | null };
+  /** Se está completando el recorrido de lo anterior a la activación (o una verificación completa). */
+  reconciliando: boolean;
   por_origen: Array<{ tipo: string; etiqueta: string; documentos: number; contabilizados: number; sin_efecto: number; errores: number; pendientes: number }>;
 }
 
@@ -38,9 +42,9 @@ export function useActualizarContabilidad() {
   const toast = useToast();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post('/contabilidad/sincronizar', {}),
+    mutationFn: (reintentar?: boolean) => api.post('/contabilidad/sincronizar', { reintentar: !!reintentar }),
     onSuccess: (x: any) => {
-      toast.ok(x.creados ? `Se contabilizaron ${x.creados} operación(es)${x.hayMas ? '. Quedan más: volvé a actualizar.' : ''}` : 'La contabilidad ya estaba al día');
+      toast.ok(x.creados ? `Se contabilizaron ${x.creados} operación(es)${x.hayMas || x.reconciliando ? '. Quedan más: volvé a actualizar.' : ''}` : x.reconciliando ? 'Se avanzó con las operaciones anteriores: volvé a actualizar para continuar' : 'La contabilidad ya estaba al día');
       qc.invalidateQueries({ queryKey: ['contab'] });
     },
     onError: (e) => toast.error(e),
@@ -53,22 +57,27 @@ export function AvisoSincronizacion({ estado }: { estado: EstadoContab }) {
   const actualizar = useActualizarContabilidad();
   if (!estado.activada || estado.al_dia) return null;
   const falta = estado.pendientes + estado.anulaciones_pendientes;
+  const agotadas = estado.cola?.fallidas ?? 0;
   return (
     <Aviso tono={estado.errores || estado.ultimo_error ? 'rojo' : 'ambar'} className="no-print mb-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span>
           {estado.sincronizando
             ? 'Se están contabilizando operaciones nuevas…'
-            : falta > 0
-              ? `${falta} operación(es) todavía no se contabilizaron. Los totales de abajo no las incluyen hasta que se actualice la contabilidad.`
-              : estado.errores > 0
-                ? `${estado.errores} operación(es) no se pudieron contabilizar porque sus importes no cierran (ver Controles).`
-                : 'La contabilidad se está actualizando.'}
+            : agotadas > 0
+              ? `${agotadas} operación(es) no se pudieron contabilizar después de varios intentos. La operación comercial está registrada; usá «Reintentar» cuando se corrija la causa (ver Controles).`
+              : estado.reconciliando
+                ? 'Se está completando la contabilidad de las operaciones anteriores. Podés seguir trabajando; los totales se completan a medida que avanza.'
+                : falta > 0
+                  ? `${falta} operación(es) todavía no se contabilizaron. Los totales de abajo no las incluyen hasta que se actualice la contabilidad.`
+                  : estado.errores > 0
+                    ? `${estado.errores} operación(es) no se pudieron contabilizar porque sus importes no cierran (ver Controles).`
+                    : 'La contabilidad se está actualizando.'}
           {estado.ultimo_error && <> Último error: {estado.ultimo_error.mensaje}.</>}
         </span>
         {puede('contabilidad.gestionar') && (
-          <Boton tam="sm" icono={<RefreshCw className="size-4" />} cargando={actualizar.isPending} onClick={() => actualizar.mutate()}>
-            Actualizar ahora
+          <Boton tam="sm" icono={<RefreshCw className="size-4" />} cargando={actualizar.isPending} onClick={() => actualizar.mutate(agotadas > 0)}>
+            {agotadas > 0 ? 'Reintentar' : estado.reconciliando ? 'Continuar' : 'Actualizar ahora'}
           </Boton>
         )}
       </div>
@@ -85,7 +94,7 @@ export function ActivarContabilidad({ estado }: { estado: EstadoContab }) {
     mutationFn: async () => {
       let r = await api.post('/contabilidad/activar', {});
       // Si hay muchas operaciones se sigue en tandas hasta terminar.
-      for (let i = 0; i < 20 && r.hayMas; i++) r = await api.post('/contabilidad/sincronizar', {});
+      for (let i = 0; i < 25 && (r.hayMas || r.reconciliando); i++) r = await api.post('/contabilidad/sincronizar', {});
       return r;
     },
     onSuccess: (r: any) => {

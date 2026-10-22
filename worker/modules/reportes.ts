@@ -64,10 +64,10 @@ reportes.get('/dashboard', async (c) => {
     finanzas = await first(
       db,
       `SELECT
-         (SELECT COALESCE(SUM(total),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND substr(fecha,1,7) = ?) AS ventas_mes,
+         (SELECT COALESCE(SUM(total),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND fecha BETWEEN ? AND ?) AS ventas_mes,
          (SELECT COALESCE(SUM(total),0) FROM cobros WHERE taller_id = ? AND estado = 'registrado' AND fecha = ?) AS cobrado_hoy,
-         (SELECT COALESCE(SUM(total - devuelto - cobrado),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida') AS por_cobrar`,
-      s.tallerId, mes, s.tallerId, f, s.tallerId,
+         (SELECT COALESCE(SUM(total - devuelto - cobrado),0) FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND total <> devuelto + cobrado) AS por_cobrar`,
+      s.tallerId, `${mes}-01`, `${mes}-31`, s.tallerId, f, s.tallerId,
     );
   }
   return c.json({ porEstado, turnosHoy, stockBajo, presupuestos, ordenesRecientes, finanzas });

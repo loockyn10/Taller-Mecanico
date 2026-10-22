@@ -17,6 +17,8 @@
     "migrations_dir": "migrations"
   }
 ],
+  // Mantenimiento periódico (gratis, incluido en el plan): drena la cola de contabilización, avanza reconciliaciones y deja un latido que la salud de plataforma vigila.
+  "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "PBKDF2_ITERATIONS": "100000",
     "SESSION_DAYS": "14"

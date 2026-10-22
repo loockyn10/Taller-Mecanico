@@ -10,19 +10,26 @@
 //                                                                Exporta los datos de UN taller (por id o nombre exacto): JSON + CSV sin credenciales ni
 //                                                                datos de otros talleres. Es lo único que puede recibir un propietario.
 //
-// NO restaura nada. La restauración ante un incidente se hace con Time Travel (`wrangler d1 time-travel restore`) o aplicando el .sql a una base nueva:
+//   npm run respaldo -- programado [--salida carpeta] [--avisar]  Respaldo PROGRAMADO (GitHub Actions): exporta, verifica, cifra con la clave pública y deja el .fbk.
+//   npm run respaldo -- generar-claves --salida carpeta           Par de claves RSA para cifrar los respaldos (la privada se guarda fuera de GitHub y de Cloudflare).
+//   npm run respaldo -- descifrar <archivo.fbk> --clave-privada pem
+//   npm run respaldo -- restaurar-aislado <archivo> [--clave-privada pem] [--migrar] [--servir]   Restaura sobre una instancia LOCAL aislada y verifica.
+//
+// NO restaura nada en producción. La restauración ante un incidente se hace con Time Travel (`wrangler d1 time-travel restore`) o aplicando el .sql a una base nueva:
 // ver docs/RESPALDOS.md. El respaldo de plataforma contiene TODOS los talleres y los hashes de las contraseñas: se guarda en respaldos/ (fuera de git) y no se entrega.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { ROOT, wrangler } from './lib.mjs';
-import { cargarRespaldo, ensayarMigraciones, escribirExportacion, exportarTaller, haySqlite, sha256Archivo, verificarRespaldo } from './respaldo-lib.mjs';
+import { ROOT, esperarServidor, wrangler } from './lib.mjs';
+import { cargarRespaldo, controlesContables, ensayarMigraciones, escribirExportacion, exportarTaller, haySqlite, sha256Archivo, verificarRespaldo } from './respaldo-lib.mjs';
+import { cifrarArchivo, descifrarArchivo, generarClaves, huellaClavePublica } from './respaldo-cifrado.mjs';
 
 const [, , comando, ...resto] = process.argv;
 
 function opciones(args) {
   const o = { _: [] };
   for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith('--')) o[args[i].slice(2)] = args[++i];
+    if (args[i].startsWith('--')) o[args[i].slice(2)] = args[i + 1] === undefined || args[i + 1].startsWith('--') ? '' : args[++i];
     else o._.push(args[i]);
   }
   return o;
@@ -141,6 +148,206 @@ function exportar(o) {
   console.log(`Tablas omitidas (secretos o de la plataforma): ${exp.omitidas.map((x) => x.tabla).join(', ')}`);
 }
 
+
+// ───────────────────────── Sprint 13: respaldo programado, cifrado y restauración aislada ─────────────────────────
+const sinSecretos = (m) => String(m).split('\n')[0].replace(/(token|bearer|secret|clave)[^\s]*/gi, '$1…').slice(0, 200);
+const sello = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+const mb = (b) => `${(b / 1024 / 1024).toFixed(2)} MB`;
+
+/** Aviso al Worker (si hay token): lo recibe /api/plataforma/respaldo-latido y lo muestra la salud de plataforma. Nunca hace fallar el respaldo. */
+async function avisar(cuerpo) {
+  const url = process.env.FIERRO_URL;
+  const token = process.env.BACKUP_REPORT_TOKEN;
+  if (!url || !token) {
+    console.log('  Aviso a la plataforma: omitido (faltan FIERRO_URL y/o BACKUP_REPORT_TOKEN)');
+    return;
+  }
+  try {
+    const r = await fetch(`${url.replace(/\/$/, '')}/api/plataforma/respaldo-latido`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(cuerpo), signal: AbortSignal.timeout(20000) });
+    console.log(`  Aviso a la plataforma: HTTP ${r.status}`);
+  } catch (e) {
+    console.log(`  Aviso a la plataforma: no se pudo enviar (${sinSecretos(e.message)})`);
+  }
+}
+
+/**
+ * Respaldo PROGRAMADO (lo ejecuta GitHub Actions, ver .github/workflows/respaldo-d1.yml; también sirve a mano): exporta la D1 completa, la verifica
+ * (integridad, claves foráneas, migraciones, controles contables), la comprime y la CIFRA con la clave pública, comprueba que el cifrado se puede
+ * deshacer y deja el archivo .fbk + un manifiesto SIN datos comerciales en la carpeta de salida. El SQL sin cifrar vive sólo en una carpeta temporal que se
+ * borra siempre. Termina con error ante cualquier falla. No imprime credenciales ni nombres de talleres.
+ */
+async function programado(o) {
+  const salidaDir = path.resolve(o.salida || path.join(os.tmpdir(), 'fierro-respaldo-salida'));
+  const pem = process.env.FIERRO_RESPALDO_CLAVE_PUBLICA || (o['clave-publica'] ? fs.readFileSync(o['clave-publica'], 'utf8') : null);
+  if (!pem) throw new Error('Falta la clave pública: variable FIERRO_RESPALDO_CLAVE_PUBLICA (o --clave-publica archivo.pem). Se genera con «generar-claves».');
+  if (!haySqlite()) throw new Error('Este Node no incluye node:sqlite (usá Node 22.13 o superior)');
+  const etiqueta = sello();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fierro-bak-'));
+  const t0 = Date.now();
+  let manifiesto = null;
+  try {
+    const sql = path.join(tmp, 'export.sql');
+    console.log(`Respaldo programado ${etiqueta}: exportando la D1 remota…`);
+    try {
+      await salida(wrangler(['d1', 'export', 'DB', '--remote', '--output', sql], { stdio: 'pipe' }));
+    } catch (e) {
+      throw new Error(`La exportación de la D1 falló (${sinSecretos(e.message)}). Revisá CLOUDFLARE_API_TOKEN (permiso D1: Edit) y CLOUDFLARE_ACCOUNT_ID.`);
+    }
+    const bytes = fs.statSync(sql).size;
+    if (bytes < 20_000) throw new Error(`El respaldo exportado pesa ${bytes} bytes: es demasiado chico para ser una base de Fierro`);
+    const db = cargarRespaldo(sql);
+    const v = verificarRespaldo(db, { migracionesDelProyecto: migracionesDelProyecto() });
+    const cc = controlesContables(db);
+    db.close();
+    const problemas = [];
+    if (!v.integridadOk) problemas.push('la integridad de la base falla');
+    if (v.violacionesClaves) problemas.push(`${v.violacionesClaves} claves foráneas rotas`);
+    if (!v.talleres.length) problemas.push('no hay talleres en el respaldo');
+    if (v.migracionesPendientes.length > 2) problemas.push(`faltan ${v.migracionesPendientes.length} migraciones aplicadas`);
+    if (cc.aplica && !cc.ok) problemas.push(`controles contables con diferencias (${cc.controles.filter((c) => !c.ok).map((c) => c.clave).join(', ') || 'debe≠haber'})`);
+    console.log(`  Verificación: integridad ${v.integridadOk ? 'ok' : 'FALLA'} · claves foráneas rotas ${v.violacionesClaves} · ${v.tablas.length} tablas · ${v.totalFilas} filas · ${v.talleres.length} talleres · migraciones ${v.migracionesAplicadas.length}`);
+    if (cc.aplica) console.log(`  Contabilidad: ${cc.ok ? 'ok' : 'CON DIFERENCIAS'} (${cc.controles.map((c) => `${c.clave}=${c.valor}`).join(' · ')}) · cola: ${cc.cola.pendientes} pendientes, ${cc.cola.fallidas} fallidas`);
+    fs.mkdirSync(salidaDir, { recursive: true });
+    const nombre = `fierro-d1-${etiqueta}.sql.fbk`;
+    const destino = path.join(salidaDir, nombre);
+    const c = await cifrarArchivo(sql, destino, pem);
+    // Prueba del cifrado: se vuelve a descifrar con la clave de datos y debe dar exactamente el mismo contenido.
+    const comprobado = path.join(tmp, 'comprobacion.sql');
+    const d = await descifrarArchivo(destino, comprobado, { claveDatos: c.claveDatos });
+    if (d.sha256 !== c.sha256Original) throw new Error('El archivo cifrado no reproduce el original: se descarta el respaldo');
+    fs.rmSync(comprobado, { force: true });
+    manifiesto = {
+      generado: new Date().toISOString(), archivo: nombre, formato: 'FIERRO-BAK1 (gzip + AES-256-GCM, clave de datos envuelta con RSA-4096)', huellaClavePublica: huellaClavePublica(pem),
+      sha256Original: c.sha256Original, bytesOriginal: c.bytesOriginal, bytesCifrado: c.bytesCifrado, duracionSeg: Math.round((Date.now() - t0) / 1000),
+      tablas: v.tablas.length, filas: v.totalFilas, talleres: v.talleres.length, migraciones: v.migracionesAplicadas.length, integridad: v.integridadOk, violacionesClaves: v.violacionesClaves,
+      contabilidad: cc.aplica ? { ok: cc.ok, controles: Object.fromEntries(cc.controles.map((x) => [x.clave, x.valor])), asientos: cc.porTaller.reduce((a, t) => a + t.asientos, 0), cola: cc.cola } : null,
+      problemas,
+    };
+    fs.writeFileSync(path.join(salidaDir, `${nombre}.manifiesto.json`), JSON.stringify(manifiesto, null, 2));
+    console.log(`  Archivo cifrado: ${nombre} (${mb(c.bytesCifrado)}; el SQL original pesaba ${mb(c.bytesOriginal)}) · SHA-256 del original ${c.sha256Original.slice(0, 16)}… · comprobado: descifra igual`);
+    if (problemas.length) throw new Error(`El respaldo se generó pero NO pasó las verificaciones: ${problemas.join('; ')}`);
+    console.log(`Respaldo programado terminado en ${manifiesto.duracionSeg} s.`);
+    if (o.avisar !== undefined) await avisar({ ok: true, sha256: c.sha256Original, bytes: c.bytesCifrado, tablas: v.tablas.length, filas: v.totalFilas, talleres: v.talleres.length, etiqueta });
+  } catch (e) {
+    console.error(`Respaldo programado FALLÓ: ${sinSecretos(e.message)}`);
+    if (o.avisar !== undefined) await avisar({ ok: false, error: sinSecretos(e.message), etiqueta });
+    process.exitCode = 1;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function generarClavesCmd(o) {
+  if (!o.salida) throw new Error('Indicá una carpeta NUEVA y FUERA del repositorio: --salida C:\\ruta\\segura');
+  const carpeta = path.resolve(o.salida);
+  if (carpeta.startsWith(ROOT)) throw new Error('La carpeta de claves no puede estar dentro del repositorio');
+  const r = generarClaves(carpeta);
+  console.log(`Claves generadas en ${carpeta}`);
+  console.log(`  Pública : ${r.publica}   (va en la variable del repositorio FIERRO_RESPALDO_CLAVE_PUBLICA; huella ${r.huella})`);
+  console.log(`  PRIVADA : ${r.privada}   (guardala FUERA de GitHub y de Cloudflare, con al menos dos copias; sin ella los respaldos no se pueden abrir)`);
+}
+
+async function descifrarCmd(o) {
+  const [entrada] = o._;
+  if (!entrada || !o['clave-privada']) throw new Error('Uso: descifrar <archivo.sql.fbk> --clave-privada <PRIVADA.pem> [--salida archivo.sql]');
+  const destino = path.resolve(o.salida || entrada.replace(/\.fbk$/, ''));
+  const r = await descifrarArchivo(entrada, destino, { clavePrivadaPem: fs.readFileSync(o['clave-privada'], 'utf8'), frase: process.env.FIERRO_RESPALDO_FRASE });
+  console.log(`Descifrado en ${destino} (${mb(r.bytes)}, SHA-256 ${r.sha256.slice(0, 16)}…). Es la base completa con TODOS los talleres: guardala con el mismo cuidado.`);
+}
+
+function archivoSqliteLocal(estado) {
+  const dir = path.join(estado, 'v3', 'd1', 'miniflare-D1DatabaseObject');
+  const f = fs.readdirSync(dir).find((x) => x.endsWith('.sqlite'));
+  if (!f) throw new Error('No se encontró la base restaurada');
+  return path.join(dir, f);
+}
+
+/**
+ * Restauración sobre una instancia AISLADA (D1 local de Miniflare en una carpeta temporal; jamás la base de producción): carga el respaldo, lo compara tabla por
+ * tabla con el archivo original, corre integridad, claves foráneas y los controles contables, y con `--servir` levanta el Worker sobre lo restaurado y
+ * consulta la API de plataforma. `--migrar` aplica además las migraciones del proyecto que falten (el camino real: restaurar y llevar al día).
+ */
+async function restaurarAislado(o) {
+  let [entrada] = o._;
+  if (!entrada) throw new Error('Uso: restaurar-aislado <archivo.sql | archivo.sql.fbk> [--clave-privada PRIVADA.pem] [--migrar] [--servir] [--conservar]');
+  if (!haySqlite()) throw new Error('Este Node no incluye node:sqlite (usá Node 22.13 o superior)');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fierro-restauracion-'));
+  let servidor = null;
+  try {
+    if (entrada.endsWith('.fbk')) {
+      if (!o['clave-privada']) throw new Error('El archivo está cifrado: indicá --clave-privada');
+      const claro = path.join(tmp, 'respaldo.sql');
+      await descifrarArchivo(entrada, claro, { clavePrivadaPem: fs.readFileSync(o['clave-privada'], 'utf8'), frase: process.env.FIERRO_RESPALDO_FRASE });
+      entrada = claro;
+      console.log('Respaldo descifrado en una carpeta temporal (se borra al terminar).');
+    }
+    // 1) Lo que dice el archivo, leído en memoria
+    const fuente = cargarRespaldo(entrada);
+    const vFuente = verificarRespaldo(fuente, { migracionesDelProyecto: migracionesDelProyecto() });
+    fuente.close();
+    // 2) Restauración real sobre un D1 local vacío
+    const estado = path.join(tmp, 'estado');
+    console.log('Restaurando sobre una instancia local aislada (wrangler d1 execute --local)…');
+    await salida(wrangler(['d1', 'execute', 'DB', '--local', '--persist-to', estado, '--file', entrada], { stdio: 'pipe' }));
+    if (o.migrar !== undefined) {
+      console.log('Aplicando las migraciones del proyecto que falten (sobre la copia restaurada)…');
+      await salida(wrangler(['d1', 'migrations', 'apply', 'DB', '--local', '--persist-to', estado], { stdio: 'pipe' }));
+    }
+    const { DatabaseSync } = await import('node:sqlite');
+    const restaurada = new DatabaseSync(archivoSqliteLocal(estado), { readOnly: true });
+    const vRest = verificarRespaldo(restaurada, { migracionesDelProyecto: migracionesDelProyecto() });
+    const cc = controlesContables(restaurada);
+    // 3) Comparación tabla por tabla (si se migró, sólo las tablas que ya existían en el respaldo)
+    const origen = new Map(vFuente.tablas.map((t) => [t.tabla, t.filas]));
+    const destino = new Map(vRest.tablas.map((t) => [t.tabla, t.filas]));
+    const faltan = [...origen.keys()].filter((t) => !destino.has(t));
+    const distintas = [...origen.entries()].filter(([t, n]) => destino.has(t) && destino.get(t) !== n && t !== 'd1_migrations').map(([t, n]) => `${t}: ${n} → ${destino.get(t)}`);
+    console.log(`  Integridad: ${vRest.integridadOk ? 'ok' : 'FALLA'} · claves foráneas rotas: ${vRest.violacionesClaves} · tablas: ${vRest.tablas.length} (respaldo: ${vFuente.tablas.length}) · filas: ${vRest.totalFilas} (respaldo: ${vFuente.totalFilas})`);
+    console.log(`  Tablas del respaldo que faltan en la restauración: ${faltan.length ? faltan.join(', ') : 'ninguna'} · con filas distintas: ${distintas.length ? distintas.join('; ') : 'ninguna'}`);
+    console.log(`  Talleres restaurados: ${vRest.talleres.length}`);
+    if (cc.aplica) {
+      console.log(`  Contabilidad restaurada: ${cc.ok ? 'ok' : 'CON DIFERENCIAS'}`);
+      for (const c of cc.controles) console.log(`    ${c.ok ? '✓' : '✗'} ${c.nombre}: ${c.valor}`);
+      for (const t of cc.porTaller.filter((x) => x.asientos)) console.log(`    · ${t.nombre}: ${t.asientos} asientos, ${t.lineas} líneas, Debe ${t.debe / 100} = Haber ${t.haber / 100}${t.debe === t.haber ? '' : '  ✗ NO CUADRA'}`);
+      console.log(`    · cola de contabilización: ${cc.cola.pendientes} pendientes, ${cc.cola.fallidas} fallidas`);
+    }
+    restaurada.close();
+    let ok = vRest.integridadOk && vRest.violacionesClaves === 0 && !faltan.length && !distintas.length && cc.ok;
+    // 4) La aplicación sobre lo restaurado
+    if (o.servir !== undefined) {
+      const puerto = Number(o.puerto || 8793);
+      const token = `restauracion-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+      servidor = wrangler(['dev', '--port', String(puerto), '--persist-to', estado, '--var', `PLATFORM_ADMIN_TOKEN:${token}`, '--show-interactive-dev-session=false'], { stdio: 'pipe' });
+      servidor.stdout?.on('data', () => {});
+      servidor.stderr?.on('data', () => {});
+      await esperarServidor(`http://127.0.0.1:${puerto}/api/salud`, 120_000);
+      const get = async (ruta) => {
+        const r = await fetch(`http://127.0.0.1:${puerto}${ruta}`, { headers: { authorization: `Bearer ${token}` } });
+        return { status: r.status, body: await r.json().catch(() => null) };
+      };
+      const talleres = await get('/api/platform/talleres');
+      const salud = await get('/api/platform/salud');
+      const coincide = talleres.status === 200 && talleres.body.length === vRest.talleres.length;
+      console.log(`  La aplicación sobre lo restaurado: /api/salud ok · plataforma lista ${talleres.body?.length ?? '?'} talleres (${coincide ? 'coincide' : 'NO coincide'}) · salud de plataforma HTTP ${salud.status}`);
+      ok = ok && coincide && salud.status === 200;
+    }
+    console.log(ok ? 'RESTAURACIÓN VERIFICADA: tablas, relaciones y registros contables recuperados en la instancia aislada.' : 'RESTAURACIÓN CON PROBLEMAS: revisá el detalle de arriba.');
+    if (!ok) process.exitCode = 1;
+  } finally {
+    if (servidor) {
+      if (process.platform === 'win32') {
+        try {
+          const { execSync } = await import('node:child_process');
+          execSync(`taskkill /pid ${servidor.pid} /T /F`, { stdio: 'ignore' });
+        } catch { /* ya terminó */ }
+      } else servidor.kill();
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    if (o.conservar === undefined) fs.rmSync(tmp, { recursive: true, force: true });
+    else console.log(`Carpeta conservada (contiene datos reales de clientes si el respaldo era de producción): ${tmp}`);
+  }
+}
+
 try {
   const o = opciones(resto);
   if (comando === 'plataforma') await plataforma(o);
@@ -148,8 +355,13 @@ try {
   else if (comando === 'talleres') talleres(o);
   else if (comando === 'ensayar-migraciones') ensayar(o);
   else if (comando === 'exportar-taller') exportar(o);
+  else if (comando === 'programado') await programado(o);
+  else if (comando === 'generar-claves') generarClavesCmd(o);
+  else if (comando === 'descifrar') await descifrarCmd(o);
+  else if (comando === 'restaurar-aislado') await restaurarAislado(o);
   else {
     console.log('Uso: npm run respaldo -- plataforma [--etiqueta x] | verificar <archivo.sql> | ensayar-migraciones <archivo.sql> | talleres <archivo.sql> | exportar-taller <archivo.sql> <taller> [--salida carpeta]');
+    console.log('     programado [--salida carpeta] [--clave-publica pem] [--avisar] | generar-claves --salida carpeta | descifrar <archivo.fbk> --clave-privada pem | restaurar-aislado <archivo> [--clave-privada pem] [--migrar] [--servir]');
     process.exit(comando ? 2 : 0);
   }
 } catch (e) {

@@ -8,6 +8,10 @@ export interface Env {
   SESSION_DAYS?: string;
   /** 'esperar': la contabilización posterior a cada operación se espera antes de responder (pruebas). Por defecto corre en segundo plano. */
   CONTAB_SYNC?: string;
+  /** '1': cuenta consultas/filas de D1 por solicitud y las informa en cabeceras X-D1-* (SOLO pruebas de capacidad en una base aislada). */
+  MEDIR_D1?: string;
+  /** Secreto del aviso de respaldo externo (GitHub Actions → /api/plataforma/respaldo-latido). Distinto del token de plataforma, que puede mucho más. */
+  BACKUP_REPORT_TOKEN?: string;
 }
 
 export interface Sesion {
