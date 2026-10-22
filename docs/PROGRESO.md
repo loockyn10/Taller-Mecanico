@@ -489,3 +489,8 @@ Trabajo directo sobre `main` (sin ramas, PR ni `gh`). Sin ARCA, sin cambios en l
 - Las transferencias siguen siendo inmediatas (sin estado "en tránsito"); no hay comisiones ni liquidación de sueldos.
 - Una venta de mostrador no imputa saldo a favor al emitirse: se aplica después desde el comprobante (la OT sí lo hace en el mismo paso).
 - Sin pruebas de interfaz automatizadas; la verificación visual fue mínima.
+
+## 44. Despliegue (2026-10-22)
+- Respaldo de la D1 remota: `respaldos/d1-antes-sprint09-20261022.sql`; bookmark Time Travel `00000032-00000002-0000510c-8b43b3bf85c16397bf0a958435fd1679`.
+- La migración 0009 se ensayó sobre ese respaldo (datos reales: 70 comprobantes, 67 cobros, 165 movimientos de caja, 107 bancarios): mismas filas y mismas sumas, 0 violaciones de claves foráneas, `integrity_check` ok. Luego se aplicó a la D1 remota (única migración pendiente) **antes** de publicar el código; los conteos remotos quedaron idénticos.
+- Commit `e037f27` en `main` (push directo; Workers Builds desplegó a las 04:56 UTC). Comprobado: la SPA publicada tiene el mismo bundle que el build local y `/api/salud` responde. No se hicieron operaciones autenticadas en producción (no se usaron credenciales reales).
