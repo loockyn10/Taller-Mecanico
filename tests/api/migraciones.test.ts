@@ -375,4 +375,61 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(todos('PRAGMA foreign_key_check')).toEqual([]);
     db.close();
   });
+
+  it('0012 conserva la contabilidad ya generada y las deudas con proveedores, y la base protege las aperturas de saldos', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    const migraciones = fs.readdirSync(path.join(RAIZ, 'migrations')).sort();
+    for (const m of migraciones.filter((f) => f < '0012')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all() as Array<Record<string, any>>;
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Viejo'), ('t2', 'Otro');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x'), ('u2', 't2', 'b@b.com', 'Otro', 'propietario', 'propietario', 'x');
+      INSERT INTO taller_config (taller_id) VALUES ('t1'), ('t2');
+      INSERT INTO proveedores (id, taller_id, nombre) VALUES ('p1', 't1', 'Proveedor'), ('p2', 't1', 'Otro proveedor'), ('p9', 't2', 'Ajeno');
+      INSERT INTO contab_config (taller_id, inicializado_at, ultima_corrida_at) VALUES ('t1', '2026-10-01T00:00:00Z', '2026-10-02T00:00:00Z');
+    `);
+    const foto = () => JSON.stringify({ p: todos('SELECT id, nombre FROM proveedores ORDER BY id'), c: todos('SELECT taller_id, inicializado_at, plan_version, ultima_corrida_at FROM contab_config'), u: todos('SELECT id FROM usuarios ORDER BY id') });
+    const antes = foto();
+    db.exec(leer('migrations', migraciones.find((f) => f.startsWith('0012'))!));
+    expect(foto()).toBe(antes);
+    // Un taller que ya tenía la contabilidad generada sigue activado, sin turno tomado ni errores
+    expect(uno("SELECT sync_bloqueo_hasta, sync_solicitada, ultimo_error, activada_por FROM contab_config WHERE taller_id = 't1'")).toMatchObject({ sync_bloqueo_hasta: null, sync_solicitada: 0, ultimo_error: null, activada_por: null });
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    const apertura = (id: string, taller: string, usuario: string, numero: number) =>
+      db.exec(`INSERT INTO aperturas_saldos (id, taller_id, numero, tipo, fecha_corte, origen, total, cantidad, idem_key, usuario_id) VALUES ('${id}', '${taller}', ${numero}, 'proveedores', '2026-09-30', 'Planilla del sistema anterior', 1500, 2, 'k-${id}', '${usuario}')`);
+    const item = (id: string, taller: string, ap: string, prov: string, importe: number) =>
+      db.exec(`INSERT INTO aperturas_saldos_items (id, taller_id, apertura_id, proveedor_id, importe) VALUES ('${id}', '${taller}', '${ap}', '${prov}', ${importe})`);
+    apertura('ap1', 't1', 'u1', 1);
+    expect(() => apertura('ap2', 't1', 'u2', 2)).toThrow(/FOREIGN KEY/); // el responsable es de otro taller
+    expect(() => apertura('ap3', 't1', 'u1', 1)).toThrow(/UNIQUE/); // número correlativo único por taller
+    expect(() => db.exec("INSERT INTO aperturas_saldos (id, taller_id, numero, tipo, fecha_corte, origen, total, cantidad, idem_key, usuario_id) VALUES ('ap4', 't1', 4, 'bancos', '2026-09-30', 'Planilla', 1, 1, 'k4', 'u1')")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO aperturas_saldos (id, taller_id, numero, tipo, fecha_corte, origen, total, cantidad, idem_key, usuario_id) VALUES ('ap5', 't1', 5, 'proveedores', '30/09/2026', 'Planilla', 1, 1, 'k5', 'u1')")).toThrow(/CHECK/);
+    item('i1', 't1', 'ap1', 'p1', 1000);
+    item('i2', 't1', 'ap1', 'p2', 500);
+    expect(() => item('i3', 't1', 'ap1', 'p9', 5)).toThrow(/FOREIGN KEY/); // proveedor de otro taller
+    expect(() => item('i4', 't2', 'ap1', 'p9', 5)).toThrow(); // apertura de otro taller
+    expect(() => item('i5', 't1', 'ap1', 'p1', 0)).toThrow(/CHECK/); // saldo cero
+    // Un proveedor, un solo saldo de apertura vigente: aunque se cargue otra apertura
+    apertura('ap6', 't1', 'u1', 6);
+    expect(() => item('i6', 't1', 'ap6', 'p1', 70)).toThrow(/UNIQUE/);
+    // Inmutables: ni se editan, ni se borran, ni se desactiva un renglón por separado
+    expect(() => db.exec("UPDATE aperturas_saldos SET total = 1 WHERE id = 'ap1'")).toThrow(/no se modifica/);
+    expect(() => db.exec("DELETE FROM aperturas_saldos WHERE id = 'ap1'")).toThrow(/no se elimina/);
+    expect(() => db.exec("UPDATE aperturas_saldos_items SET importe = 1 WHERE id = 'i1'")).toThrow(/no se modifican/);
+    expect(() => db.exec("DELETE FROM aperturas_saldos_items WHERE id = 'i1'")).toThrow(/no se eliminan/);
+    expect(() => db.exec("UPDATE aperturas_saldos_items SET activo = 0 WHERE id = 'i1'")).toThrow();
+    // Anular: la cabecera pasa a anulada y recién entonces los renglones quedan inactivos; después ya nada se toca y el proveedor puede volver a cargarse
+    expect(() => db.exec("UPDATE aperturas_saldos SET estado = 'anulada' WHERE id = 'ap1'")).toThrow(/CHECK/); // anulada exige fecha de anulación
+    db.exec("UPDATE aperturas_saldos SET estado = 'anulada', anulada_at = '2026-10-22T00:00:00Z', anulada_por = 'u1', motivo_anulacion = 'Error' WHERE id = 'ap1'");
+    db.exec("UPDATE aperturas_saldos_items SET activo = 0 WHERE apertura_id = 'ap1'");
+    expect(() => db.exec("UPDATE aperturas_saldos SET motivo_anulacion = 'otro' WHERE id = 'ap1'")).toThrow(/no se modifica/);
+    expect(() => db.exec("UPDATE aperturas_saldos_items SET activo = 1 WHERE id = 'i1'")).toThrow(/no se modifican/);
+    expect(() => item('i7', 't1', 'ap1', 'p2', 9)).toThrow(/no admite/);
+    item('i8', 't1', 'ap6', 'p1', 1000);
+    expect(uno("SELECT COUNT(*) AS n FROM aperturas_saldos_items WHERE proveedor_id = 'p1' AND activo = 1").n).toBe(1);
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    db.close();
+  });
 });

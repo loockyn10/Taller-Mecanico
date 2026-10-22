@@ -1,6 +1,6 @@
 # Progreso del desarrollo · Fierro v0.1.0
 
-Última actualización: 2026-10-22 (ver la sección 39 en adelante: Sprint 09, devoluciones, anticipos y rentabilidad). Documento para retomar el trabajo en nuevas sesiones.
+Última actualización: 2026-10-22 (ver las secciones 63 a 71: Sprint 12, comparativa con Caldén, sincronización contable controlada, saldos de apertura y respaldos). Documento para retomar el trabajo en nuevas sesiones.
 
 ## 1. Arquitectura implementada
 - **Un único Worker** (`worker/index.ts`, Hono) sirve la API en `/api/*` y la SPA compilada (assets estáticos). En desarrollo, Vite sirve la SPA y redirige `/api` a `wrangler dev`.
@@ -633,3 +633,58 @@ Trabajo directo sobre `main` (sin ramas, PR ni `gh`). Sin ARCA, sin pasarelas de
 - El alta por invitación es solo por línea de comandos (a propósito: el token de plataforma no sale del equipo del operador); no hay panel web de plataforma.
 - No hay recuperación de contraseña por correo (no hay envío de mails): sigue siendo "pedile al propietario".
 - Sin pruebas de interfaz automatizadas; la verificación visual fue mínima (activación, un paso del asistente y una importación de clientes en un viewport angosto).
+
+---
+
+# Sprint 12 — Comparación con Caldén y cierre de brechas críticas
+
+Trabajo directo sobre `main` (sin ramas, PR ni `gh`). Sin ARCA, sin servicios externos, sin cambios de precios ni de licencias. Documentos nuevos: `docs/COMPARATIVA_CALDEN.md` (comparativa y plan) y `docs/RESPALDOS.md` (respaldos y recuperación).
+
+## 63. Comparativa (Fases 1 a 3)
+- Inventario de **77 funcionalidades** de Fierro verificadas en el código (no en los informes anteriores): 48 completas, 16 implementadas con limitaciones, 4 parciales y 9 no implementadas, cada una con su ruta, módulo o prueba (`docs/COMPARATIVA_CALDEN.md` §2).
+- Caldén se compara con tres niveles de evidencia que no se mezclan: **W** (lo anuncia la página pública, leída el 22/10/2026), **O** (lo observó la auditoría de solo lectura del 19/10 en `docs/auditoria/`) y **M** (páginas de módulos generales, que no dicen si forman parte del producto Taller). No se supone nada del funcionamiento interno de Caldén.
+- La matriz separa **faltantes**, **errores o inconsistencias de Fierro**, **mejoras de experiencia** e **integraciones externas**, con evidencia de Caldén, estado real, brecha, importancia comercial, complejidad y prioridad (P0–P3). Plan de sprints 13 a 17 en §7 del documento.
+- Conclusión explícita: **no hay evidencia suficiente para afirmar que Fierro está listo para 100 talleres** (capacidad no medida, sin copias programadas, sin comprobantes fiscales, sin pruebas de interfaz).
+
+## 64. A — Sincronización contable controlada (P0 resuelto)
+- **Antes:** consultar Contabilidad ejecutaba `sincronizar` (un `GET` que escribía asientos).
+- **Ahora:** ningún `GET` contable escribe. Sin activación responden `409 contabilidad_no_activada`. `POST /contabilidad/activar` (permiso `contabilidad.gestionar`) crea el plan y contabiliza **una sola vez** lo ya operado como *histórico* (idempotente, reanudable); `POST /contabilidad/sincronizar` queda como acción explícita; `GET /contabilidad/estado` informa si está activada, al día, pendientes por origen, anulaciones pendientes, errores, proceso en curso y último error.
+- **Mantenimiento automático** (`worker/index.ts`): después de una operación comercial exitosa (ventas, cobros, anticipos, devoluciones, compras, pagos, gastos, caja, bancos, cheques, stock, órdenes, depósitos, aperturas, importaciones) se contabiliza lo nuevo en segundo plano (`waitUntil`; en las pruebas la variable `CONTAB_SYNC=esperar` lo hace determinista), solo en talleres activados y sin alterar nunca la respuesta de la operación.
+- **Coordinación** (`sincronizarControlado`): un turno con vencimiento (90 s) por taller en `contab_config`; si llega una operación con otro proceso corriendo se deja un pedido y el proceso en curso repite; un proceso caído no bloquea para siempre.
+- **Interfaz:** Contabilidad › Activación (con vista previa por origen), aviso «N operaciones todavía no se contabilizaron» con «Actualizar ahora» y refresco automático mientras haya pendientes.
+- **Integridad:** índice único `(taller, origen, id, evento)` (sin duplicados), numeración correlativa, comprobantes originales intactos. Probado en `tests/api/sync-contable.test.ts` (14 pruebas): sin activar no se escribe nada (se compara la base antes y después), activar crea lo histórico una vez, activar de nuevo es inocuo, ningún `GET` crea asientos, venta y cobro se contabilizan solos, anulación genera el contra-asiento, 6 operaciones simultáneas = 6 asientos correlativos sin duplicados, estado pendiente visible con otro proceso en curso, turno vencido, aislamiento entre talleres.
+- **Hallazgo propio corregido:** al sumar la fuente de aperturas, un alias SQL (`a`) coincidía con el de la subconsulta `sinAsiento` y la fuente volvía a proponer su alta en cada pasada (inocuo por la idempotencia, pero impedía el contra-asiento de la anulación). La prueba de anulación lo detectó; ahora la fuente usa otro alias y el código lo advierte.
+- **Límite:** el costo de cada pasada crece con la cantidad de documentos del taller (se relee cada fuente). Correcto y acotado; la contabilización incremental queda como P1 (§7 de la comparativa).
+
+## 65. B — Saldos de apertura
+- **Ya existían:** caja (efectivo inicial de la primera caja), bancos (saldo y fecha al crear la cuenta) e inventario (stock inicial valorizado), todos contra patrimonio.
+- **Nuevo — proveedores** (`worker/modules/aperturas.ts`, `src/pages/config/AperturaSaldos.tsx`, migración 0012): saldos con fecha de corte, sistema de origen, usuario y fecha; tipeados o leídos de Excel/CSV con **revisión previa sin escritura**; proveedor por id, CUIT, código anterior o nombre único; una sola apertura vigente por proveedor (índice único: reintentos y cargas repetidas no duplican); aviso y confirmación expresa si el proveedor ya tiene compras o pagos anteriores al corte; saldos a favor admitidos; entra a la cuenta corriente, a los vencimientos y a la deuda total (`lib/proveedores.ts`); se paga con los pagos de siempre; **no crea compras, stock ni ventas**; en contabilidad Debe *Saldos iniciales y ajustes de apertura* (patrimonio) / Haber *Proveedores*, así que **no toca el estado de resultados**; inmutable en la base (triggers), se anula —solo si no tiene pagos aplicados— con contra-asiento. Permiso nuevo `aperturas.gestionar` (propietario y administrador). `tests/api/aperturas.test.ts` (18 pruebas) y la prueba de migración 0012.
+- **Abierto — clientes:** requiere un documento de apertura que se pueda **cobrar** sin pasar por `ventas`; hay 61 consultas sobre `ventas` en 15 archivos, 10 sobre `cobro_aplicaciones` y 16 sobre `credito_aplicaciones`. No se publicó nada a medias; el diseño está en `docs/COMPARATIVA_CALDEN.md` §6.B (dependencia: hacerlo antes de ARCA).
+- Cuando el origen es incompleto la pantalla informa fila por fila (error o aviso con el motivo) y no guarda hasta corregir o confirmar.
+
+## 66. C — Verificación online
+- `scripts/verificar-online.mjs` reescrito: solo lectura **forzada por el propio script** (bloquea todo pedido que no sea `GET` salvo iniciar/cerrar sesión, la validación previa de importaciones y una consulta de activación con un enlace inventado); no activa ni sincroniza la contabilidad; si está activada comprueba que consultarla no cambia nada; cubre login, permisos y navegación (incluido un usuario limitado opcional, `FIERRO_EMAIL_C`), clientes, vehículos, OT, inventario (stock por depósito, negativos, valorizado), cuentas corrientes, contabilidad y aislamiento multiempresa (`FIERRO_EMAIL_B`). Credenciales solo por variables de entorno; no imprime contraseñas ni cookies.
+- Ensayado contra una instancia local aislada con dos talleres y tres usuarios: **88/88** con la contabilidad sin activar y **91/91** activada (corregí en el camino tres expectativas del propio script).
+
+## 67. Respaldos y recuperación (Fase 5)
+- `scripts/respaldo.mjs` + `scripts/respaldo-lib.mjs` (`npm run respaldo`): `plataforma` (export remoto + bookmark de Time Travel + ensayo de restauración en memoria + manifiesto con SHA-256), `verificar`, `ensayar-migraciones` (aplica las pendientes a una copia en memoria y demuestra que los datos previos quedan idénticos), `talleres` y `exportar-taller` (JSON + CSV de **un** taller, sin credenciales ni tablas de la plataforma, abortando ante cualquier fila ajena y omitiendo tablas sin `taller_id`). `tests/unit/respaldo.test.ts` (7 pruebas) y ejecución real sobre el respaldo de producción.
+- **Evaluación** (`docs/RESPALDOS.md`): respaldo de plataforma disponible pero manual y sin copia fuera de la cuenta; exportación por taller disponible solo para el operador; restauración ante incidente por Time Travel (toda la base) o `.sql` en una base nueva; **no existe restaurar un solo taller y no se improvisó** (claves compuestas, secuencias, stock y contabilidad inmutable); propuesta segura en cuatro pasos (restaurar siempre a un taller nuevo con remapeo de ids y controles) priorizada como P2; exportación por el propietario como P1; copias programadas y externas como P0 operativo abierto.
+
+## 68. Migración 0012 (aditiva)
+`migrations/0012_sincronizacion_contable_aperturas.sql`: columnas de `contab_config` (`sync_bloqueo_hasta`, `sync_solicitada`, `ultimo_error`, `ultimo_error_at`, `activada_por`); tablas `aperturas_saldos` y `aperturas_saldos_items` con claves compuestas, índice único de un solo saldo vigente por proveedor y triggers de inmutabilidad. No modifica ni elimina datos. La prueba de migraciones (`tests/api/migraciones.test.ts`) comprueba datos intactos, que un taller con la contabilidad ya generada sigue activado, y todas las restricciones nuevas.
+
+## 69. Pruebas
+`npm run typecheck` y `npm run build` OK. **96 unitarias y 344 de integración (21 archivos), todas OK** en una única corrida completa. Nuevas: `tests/api/sync-contable.test.ts` (14), `tests/api/aperturas.test.ts` (18), la prueba de la migración 0012 en `tests/api/migraciones.test.ts` y `tests/unit/respaldo.test.ts` (7). Las suites de contabilidad e importación se adaptaron a la activación explícita (se activa en la preparación de la prueba). `tests/api/global-setup.ts` levanta el Worker con `CONTAB_SYNC=esperar` para que la contabilización posterior a cada operación sea determinista. Verificación en el navegador sobre una instancia local aislada (no se tocó la instancia del usuario en 5173/8787): panel de activación y activación (24 operaciones históricas), pantalla de Apertura de saldos con revisión previa y aviso por operaciones previas del proveedor.
+
+## 70. Despliegue (2026-10-22)
+- **Respaldo** previo a la migración con `npm run respaldo -- plataforma --etiqueta antes-sprint12`: `respaldos/d1-antes-sprint12-20261022-1908.sql` (SHA-256 `8aba0de92f446456a73382e6359847ce49628ff6ff2e488faf8ef91fb8bd181e`), verificado en memoria (integridad ok, 0 claves foráneas rotas, 92 tablas, 3.749 filas, 2 talleres, 11 migraciones aplicadas); bookmark de Time Travel `0000003a-00000004-0000510c-f200400936d58420cda5d3c711a63316`.
+- **Ensayo** de la migración 0012 sobre la copia en memoria de ese respaldo (`npm run respaldo -- ensayar-migraciones`): 92 tablas y 3.749 filas **idénticas** (mismo contenido en las columnas previas), 2 tablas nuevas, 5 columnas nuevas en `contab_config`, integridad ok y 0 claves foráneas rotas.
+- **Aplicada** a la D1 remota (única migración pendiente) **antes** de publicar el código, que es compatible con la base anterior y con la nueva. Comprobado en remoto después de migrar: 90 tablas de negocio con **3.738 filas, 0 diferencias** frente al respaldo (excluidas `d1_migrations` y `tx_guard`), `PRAGMA foreign_key_check` vacío, 12 migraciones registradas, ventas por 10.691.200,63 y 67 cobros, igual que antes; `aperturas_saldos` y `aperturas_saldos_items` vacías; `contab_config` vacía (ningún taller tiene la contabilidad activada: se activa desde Contabilidad › Activación, ya no al consultar). No se borró ningún dato comercial.
+- **Publicación:** pendiente de commit en `main` (se completa al verificar el despliegue).
+
+## 71. Pendiente / fuera de este sprint
+- **Saldos de apertura de clientes** (P0 abierto, diseño en la comparativa §6.B).
+- **Copias programadas y fuera de la cuenta de Cloudflare** (P0 operativo, requiere decisión) y **medición de capacidad** (CPU del login, filas leídas/escritas, proyección a 100 talleres).
+- **Contabilización incremental** (P1) para que el costo por operación no crezca con el historial.
+- Plan ordenado de sprints 13 a 17 (P1 y P2) en `docs/COMPARATIVA_CALDEN.md` §7.
+- Quien tenga su instancia local abierta (`npm run dev`) debe aplicar la migración 0012 (`npm run db:migrate`) y reiniciarla: el código nuevo usa columnas y tablas nuevas.

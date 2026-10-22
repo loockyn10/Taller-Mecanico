@@ -19,7 +19,7 @@ export async function setup() {
   // Las pruebas que necesitan alterar el reloj de los datos (vencimientos) abren esta base local de ensayo; nunca una remota.
   process.env.FIERRO_TEST_ESTADO = estado;
   proc = wrangler(
-    ['dev', '--port', String(PUERTO), '--persist-to', estado, '--var', `PLATFORM_ADMIN_TOKEN:${PLATFORM_TOKEN}`, '--var', 'PBKDF2_ITERATIONS:20000', '--show-interactive-dev-session=false'],
+    ['dev', '--port', String(PUERTO), '--persist-to', estado, '--var', `PLATFORM_ADMIN_TOKEN:${PLATFORM_TOKEN}`, '--var', 'PBKDF2_ITERATIONS:20000', '--var', 'CONTAB_SYNC:esperar', '--show-interactive-dev-session=false'],
     { stdio: 'pipe' },
   );
   let log = '';

@@ -334,8 +334,12 @@ compras.get('/proveedores/:id/cuenta', async (c) => {
             CASE WHEN tipo LIKE 'nota_credito%' THEN total ELSE 0 END AS debe,
             CASE WHEN tipo LIKE 'nota_credito%' OR compra_id IS NOT NULL THEN 0 ELSE total END AS haber, (estado = 'anulada') AS anulado
        FROM facturas_proveedor WHERE taller_id = ? AND proveedor_id = ?
+     UNION ALL
+     SELECT a.fecha_corte AS fecha, a.created_at, 'apertura' AS tipo, i.id, a.numero, COALESCE(i.referencia, 'Saldo de apertura') AS detalle,
+            CASE WHEN i.importe < 0 THEN -i.importe ELSE 0 END AS debe, CASE WHEN i.importe > 0 THEN i.importe ELSE 0 END AS haber, (a.estado = 'anulada') AS anulado
+       FROM aperturas_saldos_items i JOIN aperturas_saldos a ON a.taller_id = i.taller_id AND a.id = i.apertura_id WHERE i.taller_id = ? AND i.proveedor_id = ?
      ORDER BY fecha, created_at`,
-    s.tallerId, id, s.tallerId, id, s.tallerId, id,
+    s.tallerId, id, s.tallerId, id, s.tallerId, id, s.tallerId, id,
   );
   const [deuda] = await deudaProveedores(c.env.DB, s.tallerId, id);
   let saldo = 0;

@@ -63,7 +63,7 @@ export const PLAN_INICIAL: readonly CuentaBase[] = [
   { codigo: '3', nombre: 'PATRIMONIO', tipo: 'patrimonio', imputable: false },
   { codigo: '3.1', nombre: 'Capital y saldos iniciales', tipo: 'patrimonio', imputable: false, padre: '3' },
   { codigo: '3.1.01', nombre: 'Capital y aportes', tipo: 'patrimonio', imputable: true, padre: '3.1', rol: 'capital' },
-  { codigo: '3.1.02', nombre: 'Saldos iniciales y ajustes de apertura', tipo: 'patrimonio', imputable: true, padre: '3.1', rol: 'apertura', notas: 'Contrapartida de los saldos iniciales de caja y bancos. Los demás saldos iniciales se cargan con un asiento manual.' },
+  { codigo: '3.1.02', nombre: 'Saldos iniciales y ajustes de apertura', tipo: 'patrimonio', imputable: true, padre: '3.1', rol: 'apertura', notas: 'Contrapartida de los saldos iniciales de caja, bancos y deudas con proveedores (apertura de saldos). Los saldos de clientes todavía no tienen documento de apertura.' },
   { codigo: '3.1.03', nombre: 'Entradas de mercadería sin compra registrada (a clasificar)', tipo: 'patrimonio', imputable: true, padre: '3.1', rol: 'entradas_stock_sin_compra' },
   { codigo: '3.2', nombre: 'Resultados', tipo: 'patrimonio', imputable: false, padre: '3' },
   { codigo: '3.2.01', nombre: 'Resultados acumulados', tipo: 'patrimonio', imputable: true, padre: '3.2', rol: 'resultados_acumulados' },
@@ -139,6 +139,7 @@ export const ORIGEN_LABEL: Record<string, string> = {
   stock_ajuste: 'Ajuste de inventario',
   apertura_banco: 'Saldo inicial de cuenta bancaria',
   apertura_caja: 'Saldo inicial de caja',
+  apertura_proveedores: 'Saldos de apertura de proveedores',
 };
 
 export const ESTADO_ASIENTO_LABEL: Record<string, string> = { borrador: 'Borrador', registrado: 'Registrado', revertido: 'Revertido' };

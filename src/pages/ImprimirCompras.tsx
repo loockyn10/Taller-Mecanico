@@ -145,7 +145,7 @@ export function ImprimirCompras() {
               {d.movimientos.map((m: any) => (
                 <tr key={`${m.tipo}-${m.id}`} className={`border-b border-slate-200 ${m.anulado ? 'text-slate-400 line-through' : ''}`}>
                   <td className="py-1.5">{fecha(m.fecha)}</td>
-                  <td className="py-1.5">{m.tipo === 'compra' ? `Compra #${numero(m.numero)}` : m.tipo === 'factura' ? `${m.haber || m.debe ? (m.debe ? 'Nota de crédito' : 'Factura') : 'Factura (asociada a una compra)'} ${m.detalle ?? ''}` : `Pago #${numero(m.numero)}`}{m.tipo === 'compra' && m.detalle ? ` (${m.detalle})` : ''}{m.anulado ? ' — anulado' : ''}</td>
+                  <td className="py-1.5">{m.tipo === 'compra' ? `Compra #${numero(m.numero)}` : m.tipo === 'factura' ? `${m.haber || m.debe ? (m.debe ? 'Nota de crédito' : 'Factura') : 'Factura (asociada a una compra)'} ${m.detalle ?? ''}` : m.tipo === 'apertura' ? `Saldo de apertura N° ${numero(m.numero)} ${m.detalle ?? ''}` : `Pago #${numero(m.numero)}`}{m.tipo === 'compra' && m.detalle ? ` (${m.detalle})` : ''}{m.anulado ? ' — anulado' : ''}</td>
                   <td className="py-1.5 text-right">{m.debe ? money(m.debe) : ''}</td>
                   <td className="py-1.5 text-right">{m.haber ? money(m.haber) : ''}</td>
                   <td className="py-1.5 text-right">{money(m.saldo)}</td>

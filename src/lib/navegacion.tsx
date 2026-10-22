@@ -116,6 +116,7 @@ export const GRUPOS: GrupoNav[] = [
       item('config', 'Configuración', '/configuracion', Settings, 'taller datos parametros preferencias documentos medios de pago', undefined, 'taller'),
       item('puesta', 'Puesta en marcha', '/puesta-en-marcha', Rocket, 'configuracion inicial asistente pasos primeros pasos empezar progreso', 'config.editar'),
       item('importar', 'Importar datos', '/importar', Upload, 'excel csv planilla importacion migrar clientes vehiculos articulos proveedores sistema anterior', 'datos.importar'),
+      item('apertura', 'Apertura de saldos', '/apertura-saldos', Scale, 'saldos iniciales apertura deudas proveedores migrar sistema anterior corte', 'aperturas.gestionar'),
       item('catalogos', 'Marcas y categorías', '/configuracion?tab=catalogos', Tags, 'catalogos marcas modelos categorias', 'catalogo.editar'),
       item('licencia', 'Licencia', '/configuracion?tab=licencia', ShieldCheck, 'plan suscripcion usuarios', 'licencia.ver'),
       item('actividad', 'Actividad', '/configuracion?tab=auditoria', History, 'auditoria registro cambios', 'config.editar'),

@@ -41,6 +41,9 @@ beforeAll(async () => {
   d.banco = (await api.post('/api/bancos/cuentas', { nombre: 'Banco Test', banco: 'Banco Test', saldo_inicial: 500000 })).body;
   d.banco2 = (await api.post('/api/bancos/cuentas', { nombre: 'Billetera', banco: 'Billetera', saldo_inicial: 0 })).body;
   await api.post('/api/caja/abrir', { saldo_inicial: 100000 });
+  // La contabilidad se activa de forma explícita: genera lo ya operado como histórico y desde ahí se mantiene sola.
+  expect((await api.post('/api/contabilidad/activar', {})).status).toBe(200);
+  expect((await OTRO.api.post('/api/contabilidad/activar', {})).status).toBe(200);
 });
 
 describe('plan de cuentas', () => {

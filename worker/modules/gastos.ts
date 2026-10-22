@@ -309,7 +309,7 @@ finanzas.get('/resumen', requirePerm('finanzas.ver'), async (c) => {
          (SELECT COALESCE(SUM(co.total - co.credito_aplicado - co.devuelto),0) FROM cobros co WHERE co.taller_id = ? AND co.tipo = 'anticipo' AND co.estado = 'registrado') AS anticipos_sin_aplicar,
          (SELECT COALESCE(SUM(d.liberado - d.reintegrado - d.credito_aplicado),0) FROM devoluciones d WHERE d.taller_id = ? AND d.estado = 'registrada') AS credito_devoluciones,
          ${DEUDA_TOTAL_SQL} AS por_pagar`,
-      ...p, ...p, ...p, s.tallerId, ...p, ...p, s.tallerId, s.tallerId, s.tallerId, s.tallerId, s.tallerId,
+      ...p, ...p, ...p, s.tallerId, ...p, ...p, s.tallerId, s.tallerId, s.tallerId, s.tallerId, s.tallerId, s.tallerId,
     ),
   ]);
   const neto = (r: string) => rubros.find((x) => x.rubro === r)?.neto ?? 0;

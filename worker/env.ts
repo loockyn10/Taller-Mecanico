@@ -6,6 +6,8 @@ export interface Env {
   PLATFORM_ADMIN_TOKEN?: string;
   PBKDF2_ITERATIONS?: string;
   SESSION_DAYS?: string;
+  /** 'esperar': la contabilización posterior a cada operación se espera antes de responder (pruebas). Por defecto corre en segundo plano. */
+  CONTAB_SYNC?: string;
 }
 
 export interface Sesion {

@@ -37,6 +37,8 @@ import { contabilidad } from './modules/contabilidad';
 import { activacion } from './modules/activacion';
 import { puesta } from './modules/puesta';
 import { importaciones } from './modules/importaciones';
+import { aperturas } from './modules/aperturas';
+import { sincronizarTrasOperacion } from './lib/contab/sync';
 
 const app = new Hono<AppEnv>();
 
@@ -58,6 +60,19 @@ app.route('/api/reloj', relojPublico);
 // Todo lo siguiente requiere sesión: el taller se toma SIEMPRE de la sesión.
 const api = new Hono<AppEnv>();
 api.use('*', requireAuth);
+
+// Contabilidad al día: después de una operación que mueve plata, stock o deudas (y salió bien) se contabiliza lo nuevo. Sólo en talleres que ya activaron la
+// contabilidad (la activación y la generación histórica son explícitas); nunca altera la respuesta de la operación y los GET no escriben nada.
+const OPERACIONES_CONTABLES = /^\/api\/(ventas|cobros|anticipos|credito-aplicaciones|devoluciones|reintegros|compras|pagos-proveedor|facturas-proveedor|recepciones|ordenes-compra|gastos|gastos-recurrentes|caja|bancos|cheques|stock|inventario|articulos|ordenes|depositos|transferencias|aperturas|importaciones)(\/|$)/;
+api.use('*', async (c, next) => {
+  await next();
+  if (c.req.method === 'GET' || c.res.status >= 400 || !OPERACIONES_CONTABLES.test(c.req.path)) return;
+  const s = c.get('sesion');
+  if (!s?.licenciaActiva) return;
+  const tarea = sincronizarTrasOperacion(c.env.DB, s.tallerId, s.usuarioId);
+  if (c.env.CONTAB_SYNC === 'esperar') await tarea;
+  else c.executionCtx.waitUntil(tarea);
+});
 api.route('/taller', taller);
 api.route('/taller', personal);
 api.route('/asistencia', asistencia);
@@ -91,6 +106,7 @@ api.route('/', informes);
 api.route('/contabilidad', contabilidad);
 api.route('/puesta-en-marcha', puesta);
 api.route('/importaciones', importaciones);
+api.route('/aperturas', aperturas);
 app.route('/api', api);
 
 app.all('/api/*', (c) => c.json({ error: { code: 'no_encontrado', message: 'Ruta inexistente' } }, 404));

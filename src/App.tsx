@@ -43,6 +43,7 @@ const OrdenCompraForm = lazy(() => import('./pages/compras/OrdenesCompra').then(
 const OrdenCompraDetalle = lazy(() => import('./pages/compras/OrdenesCompra').then((m) => ({ default: m.OrdenCompraDetalle })));
 const FacturasProveedor = lazy(() => import('./pages/compras/FacturasProveedor').then((m) => ({ default: m.FacturasProveedor })));
 const Depositos = lazy(() => import('./pages/stock/Depositos').then((m) => ({ default: m.Depositos })));
+const AperturaSaldos = lazy(() => import('./pages/config/AperturaSaldos').then((m) => ({ default: m.AperturaSaldos })));
 const Inventario = lazy(() => import('./pages/stock/Inventario').then((m) => ({ default: m.Inventario })));
 const Equipo = lazy(() => import('./pages/personal/Equipo').then((m) => ({ default: m.Equipo })));
 const PanelAsistencia = lazy(() => import('./pages/personal/PanelAsistencia').then((m) => ({ default: m.PanelAsistencia })));
@@ -147,6 +148,7 @@ export function App() {
         <Route path="configuracion" element={<Configuracion />} />
         <Route path="puesta-en-marcha" element={<Requiere permiso="config.editar"><PuestaEnMarcha /></Requiere>} />
         <Route path="importar" element={<Requiere permiso="datos.importar"><Importar /></Requiere>} />
+        <Route path="apertura-saldos" element={<Requiere permiso="aperturas.gestionar"><AperturaSaldos /></Requiere>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

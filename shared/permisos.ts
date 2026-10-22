@@ -70,6 +70,7 @@ export const PERMISOS = [
   // ── Administración del taller
   'config.editar',
   'datos.importar', // importar clientes, vehículos, artículos y proveedores desde Excel o CSV (además del permiso de crear/editar de cada tipo)
+  'aperturas.gestionar', // cargar y anular los saldos de apertura (deudas con proveedores) de un taller que migra de otro sistema
   'licencia.ver',
   'registros.eliminar',
   'fechas.retroactivas', // cargar comprobantes con fecha pasada
@@ -106,6 +107,7 @@ export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
   'bancos.gestionar': ['bancos.ver'],
   'bancos.ajustar': ['bancos.gestionar'],
   'contabilidad.gestionar': ['contabilidad.ver'],
+  'aperturas.gestionar': ['compras.ver'],
   'permisos.gestionar': ['usuarios.gestionar'],
   'asistencia.corregir': ['asistencia.ver'],
   'reloj.administrar': ['asistencia.ver'],
@@ -298,6 +300,7 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'reloj.administrar': { etiqueta: 'Administrar reloj compartido y PIN' },
   'config.editar': { etiqueta: 'Configurar el taller', ayuda: 'Datos del negocio, preferencias y asistente de puesta en marcha' },
   'datos.importar': { etiqueta: 'Importar datos desde Excel o CSV', ayuda: 'Además hacen falta los permisos de crear (y de editar, para actualizar) de lo que se importa: clientes, vehículos, artículos o proveedores' },
+  'aperturas.gestionar': { etiqueta: 'Cargar saldos de apertura', ayuda: 'Registrar y anular los saldos con que el taller empieza a operar (hoy, deudas con proveedores). No son compras ni ventas y no afectan los resultados' },
   'licencia.ver': { etiqueta: 'Ver la licencia' },
   'registros.eliminar': { etiqueta: 'Eliminar clientes y vehículos' },
   'fechas.retroactivas': { etiqueta: 'Cargar operaciones con fecha anterior' },
@@ -313,7 +316,7 @@ export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Caja, bancos y finanzas', permisos: ['caja.operar', 'finanzas.ver', 'gastos.gestionar', 'bancos.ver', 'bancos.gestionar', 'bancos.ajustar', 'cheques.gestionar', 'tesoreria.ver', 'contabilidad.ver', 'contabilidad.gestionar'] },
   { titulo: 'Informes', permisos: ['reportes.ver', 'informes.exportar', 'productividad.ver'] },
   { titulo: 'Personal y asistencia', permisos: ['usuarios.gestionar', 'permisos.gestionar', 'asistencia.fichar', 'asistencia.ver', 'asistencia.corregir', 'reloj.administrar'] },
-  { titulo: 'Administración', permisos: ['config.editar', 'datos.importar', 'licencia.ver', 'registros.eliminar', 'fechas.retroactivas'] },
+  { titulo: 'Administración', permisos: ['config.editar', 'datos.importar', 'aperturas.gestionar', 'licencia.ver', 'registros.eliminar', 'fechas.retroactivas'] },
 ];
 
 /** Zonas horarias ofrecidas para el taller (la hora siempre se registra en el servidor, en UTC). */

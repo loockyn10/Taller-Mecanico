@@ -77,7 +77,7 @@ export const fechaAR = (iso: string): string => new Date(Date.parse(iso) - 3 * 3
 
 const num = (n: number | string | null | undefined) => (n == null ? '' : String(n));
 
-/** Condición SQL: el documento `alias` todavía no tiene su asiento ni fue descartado de forma definitiva. */
+/** Condición SQL: el documento `alias` todavía no tiene su asiento ni fue descartado de forma definitiva. (El alias del documento NO puede ser `a` ni `o`: son los de las subconsultas.) */
 function sinAsiento(alias: string, tipo: string, evento: 'alta' | 'anulacion'): string {
   return `NOT EXISTS (SELECT 1 FROM asientos a WHERE a.taller_id = ${alias}.taller_id AND a.origen_tipo = '${tipo}' AND a.origen_id = ${alias}.id AND a.evento = '${evento}')
     AND NOT EXISTS (SELECT 1 FROM contab_omitidos o WHERE o.taller_id = ${alias}.taller_id AND o.origen_tipo = '${tipo}' AND o.origen_id = ${alias}.id AND o.evento = '${evento}' AND (o.tipo = 'sin_efecto' OR o.intentos >= 3))`;
@@ -618,6 +618,28 @@ const aperturaCaja: FuenteDef = {
   cobertura: { sql: "SELECT COUNT(*) AS docs FROM caja_sesiones cs WHERE cs.taller_id = ? AND cs.saldo_inicial > 0 AND cs.numero = (SELECT MIN(numero) FROM caja_sesiones WHERE taller_id = cs.taller_id)" },
 };
 
+/** Saldos de apertura de proveedores (migración desde otro sistema): deuda inicial contra el patrimonio, NUNCA contra resultados ni compras. */
+const aperturaProveedores: FuenteDef = {
+  tipo: 'apertura_proveedores', prioridad: 3, etiqueta: 'Saldos de apertura de proveedores',
+  async pendientes(ctx, limite) {
+    const as = await all<{ id: string; numero: number; fecha_corte: string; created_at: string; usuario_id: string | null; total: number; origen: string }>(
+      ctx.db,
+      `SELECT ap.id, ap.numero, ap.fecha_corte, ap.created_at, ap.usuario_id, ap.total, ap.origen FROM aperturas_saldos ap
+        WHERE ap.taller_id = ? AND ap.tipo = 'proveedores' AND ${sinAsiento('ap', 'apertura_proveedores', 'alta')} ORDER BY ap.fecha_corte, ap.created_at LIMIT ?`,
+      ctx.tallerId, limite,
+    );
+    return as.map((a) => {
+      const imp = Math.abs(a.total);
+      return armar(ctx, {
+        origenTipo: 'apertura_proveedores', origenId: a.id, fecha: a.fecha_corte, usuarioId: a.usuario_id, orden: '0' + a.created_at, createdAt: a.created_at,
+        descripcion: `Saldos de apertura de proveedores #${a.numero} (corte ${a.fecha_corte}) · ${a.origen}`,
+      }, a.total > 0 ? [debe(ctx.rol('apertura'), imp), haber(ctx.rol('proveedores'), imp)] : [debe(ctx.rol('proveedores'), imp), haber(ctx.rol('apertura'), imp)]);
+    });
+  },
+  anulados: (ctx, limite) => anuladosPorAuditoria(ctx, 'apertura_proveedores', 'aperturas_saldos', "t.estado = 'anulada' AND t.tipo = 'proveedores'", 'apertura_saldos', limite),
+  cobertura: { sql: "SELECT COUNT(*) AS docs FROM aperturas_saldos WHERE taller_id = ? AND tipo = 'proveedores'" },
+};
+
 // ───────────────────────── Anulaciones ─────────────────────────
 /** Anulaciones cuyo momento y responsable están en la auditoría (acción `anular` de la entidad). */
 async function anuladosPorAuditoria(ctx: Ctx, tipo: string, tabla: string, condicion: string, entidad: string, limite: number): Promise<Anulacion[]> {
@@ -653,6 +675,6 @@ async function anuladosPorReverso(ctx: Ctx, tipo: string, tabla: string, condici
 }
 
 export const FUENTES: FuenteDef[] = [
-  aperturaBanco, aperturaCaja, venta, cobro, creditoAplicacion, devolucion, reintegro, compra, recepcion, facturaProveedor, pagoProveedor, gasto, cajaManual, bancoMov, stockAjuste,
+  aperturaBanco, aperturaCaja, aperturaProveedores, venta, cobro, creditoAplicacion, devolucion, reintegro, compra, recepcion, facturaProveedor, pagoProveedor, gasto, cajaManual, bancoMov, stockAjuste,
 ];
 export const fuentePorTipo = (t: string) => FUENTES.find((f) => f.tipo === t);

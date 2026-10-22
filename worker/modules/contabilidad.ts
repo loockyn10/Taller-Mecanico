@@ -1,8 +1,9 @@
 // Contabilidad de gestión: plan de cuentas, asientos de partida doble (manuales y automáticos), libro diario y mayor, balance de sumas y saldos,
 // estado de resultados y controles de consistencia. Información contable y administrativa INTERNA: no son libros fiscales ni tienen validez ante ARCA.
 //
-// Los asientos automáticos se generan a partir de las operaciones existentes con un proceso idempotente (lib/contab/sync.ts) que se ejecuta al consultar la
-// contabilidad. Nada de acá modifica ventas, cobros, compras ni movimientos de caja o banco.
+// Los asientos automáticos se generan a partir de las operaciones existentes con un proceso idempotente (lib/contab/sync.ts). Ese proceso NO corre al
+// consultar: se activa de forma explícita (POST /activar, que también genera lo histórico), se mantiene al día después de cada operación comercial
+// (index.ts) y puede pedirse a mano (POST /sincronizar). Los GET sólo leen. Nada de acá modifica ventas, cobros, compras ni movimientos de caja o banco.
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
@@ -13,7 +14,8 @@ import { requirePerm, tiene } from '../lib/auth';
 import { autorizarExportacion } from '../lib/exportar';
 import { codigoCuentaValido, naturalezaDe, rolDeGasto, TIPOS_CUENTA, validarLineas } from '../../shared/contabilidad';
 import { inicializarPlan } from '../lib/contab/plan';
-import { sincronizar } from '../lib/contab/sync';
+import { sincronizarControlado } from '../lib/contab/sync';
+import { estadoContabilidad } from '../lib/contab/estado';
 import { invertir, sentenciaRegistrar, sentenciasAsiento, sentenciasLineas, type LineaIn } from '../lib/contab/asientos';
 import { balanceSumasYSaldos, estadoResultados, flujoDeCaja, libroDiario, libroMayor, pendientesContabilizar, planConSaldos } from '../lib/contab/informes';
 import { controles } from '../lib/contab/controles';
@@ -22,17 +24,12 @@ export const contabilidad = new Hono<AppEnv>();
 const ver = requirePerm('contabilidad.ver');
 const gestionar = requirePerm('contabilidad.gestionar');
 
-/** Pone al día los asientos automáticos antes de consultar. Con la licencia suspendida sólo se consulta lo ya contabilizado. */
-async function alDia(c: Context<AppEnv>) {
+/** Las consultas y las altas de cuentas o asientos exigen que la contabilidad se haya activado: nada de lo que lee se genera "de paso". */
+async function exigirActivada(c: Context<AppEnv>) {
   const s = c.get('sesion');
-  if (!s.licenciaActiva) return { hayMas: false };
-  let hayMas = false;
-  for (let i = 0; i < 4; i++) {
-    const r = await sincronizar(c.env.DB, s.tallerId, { usuarioId: s.usuarioId, disparador: 'consulta' });
-    hayMas = r.hayMas;
-    if (!r.hayMas) break;
+  if (!(await first(c.env.DB, 'SELECT 1 FROM contab_config WHERE taller_id = ?', s.tallerId))) {
+    throw conflict('La contabilidad todavía no está activada en este taller. Activala desde Contabilidad › Resumen.', 'contabilidad_no_activada');
   }
-  return { hayMas };
 }
 
 /** Traduce los mensajes de los triggers contables a errores claros para quien usa la API. */
@@ -56,16 +53,34 @@ function periodo(c: Context<AppEnv>) {
 }
 
 // ═════════════════════════ Estado y proceso de contabilización ═════════════════════════
+/** Estado de la contabilidad (SOLO LECTURA): si está activada, si está al día y qué falta contabilizar. */
+contabilidad.get('/estado', ver, async (c) => c.json(await estadoContabilidad(c.env.DB, c.get('sesion').tallerId)));
+
+/**
+ * Activa la contabilidad del taller: crea el plan de cuentas y contabiliza, una sola vez y de forma idempotente, lo ya operado (los asientos
+ * quedan marcados como históricos y con la fecha original de cada operación). Vuelve a llamarse hasta que `hay_mas` sea falso si son muchas.
+ */
+contabilidad.post('/activar', ver, gestionar, async (c) => {
+  const s = c.get('sesion');
+  await body(c, z.object({}).passthrough());
+  await inicializarPlan(c.env.DB, s.tallerId);
+  const nueva = (await c.env.DB.prepare('UPDATE contab_config SET activada_por = ? WHERE taller_id = ? AND activada_por IS NULL').bind(s.usuarioId, s.tallerId).run()).meta?.changes ?? 0;
+  const r = await sincronizarControlado(c.env.DB, s.tallerId, { usuarioId: s.usuarioId, disparador: 'inicial' });
+  if (r.estado === 'ocupada') throw conflict('Ya hay una actualización contable en curso. Esperá unos segundos y volvé a consultar el estado.', 'sincronizacion_en_curso');
+  if (nueva) await auditar(c.env.DB, s.tallerId, s.usuarioId, 'contabilidad', null, 'activar', r.estado === 'ejecutada' ? { creados: r.resultado.creados, historicos: r.resultado.historicos, omitidos: r.resultado.omitidos } : undefined).run();
+  return c.json({ activada: true, ya_estaba_activada: nueva === 0, ...(r.estado === 'ejecutada' ? r.resultado : {}) });
+});
+
+/** Contabiliza lo pendiente a pedido (por ejemplo después de corregir una operación que tenía error). Idempotente. */
 contabilidad.post('/sincronizar', ver, gestionar, async (c) => {
   const s = c.get('sesion');
   const d = await body(c, z.object({ reintentar: z.boolean().default(false) }));
-  let r;
-  for (let i = 0; i < 4; i++) {
-    r = await sincronizar(c.env.DB, s.tallerId, { usuarioId: s.usuarioId, disparador: 'manual', reintentar: d.reintentar && i === 0 });
-    if (!r.hayMas) break;
-  }
-  await auditar(c.env.DB, s.tallerId, s.usuarioId, 'contabilidad', null, 'sincronizar', { creados: r!.creados, omitidos: r!.omitidos }).run();
-  return c.json(r);
+  await exigirActivada(c);
+  const r = await sincronizarControlado(c.env.DB, s.tallerId, { usuarioId: s.usuarioId, disparador: 'manual', reintentar: d.reintentar });
+  if (r.estado === 'ocupada') throw conflict('Ya hay una actualización contable en curso. Esperá unos segundos y volvé a consultar el estado.', 'sincronizacion_en_curso');
+  if (r.estado === 'no_activada') throw conflict('La contabilidad todavía no está activada en este taller.', 'contabilidad_no_activada');
+  await auditar(c.env.DB, s.tallerId, s.usuarioId, 'contabilidad', null, 'sincronizar', { creados: r.resultado.creados, omitidos: r.resultado.omitidos }).run();
+  return c.json(r.resultado);
 });
 
 contabilidad.get('/corridas', ver, async (c) => {
@@ -88,7 +103,7 @@ contabilidad.get('/omitidos', ver, async (c) => {
 // ═════════════════════════ Plan de cuentas ═════════════════════════
 contabilidad.get('/plan', ver, async (c) => {
   const s = c.get('sesion');
-  await alDia(c);
+  await exigirActivada(c);
   const { hasta } = query(c, z.object({ hasta: zFecha.optional() }));
   return c.json(await planConSaldos(c.env.DB, s.tallerId, hasta));
 });
@@ -129,7 +144,7 @@ async function validarPadre(db: D1Database, tallerId: string, padreId: string | 
 contabilidad.post('/cuentas', ver, gestionar, async (c) => {
   const s = c.get('sesion');
   const d = await body(c, zCuenta);
-  await inicializarPlan(c.env.DB, s.tallerId);
+  await exigirActivada(c);
   await validarPadre(c.env.DB, s.tallerId, d.padre_id, d.tipo);
   const nat = naturalezaDe(d.tipo as never);
   const naturaleza = d.contra ? (nat === 'deudora' ? 'acreedora' : 'deudora') : nat;
@@ -216,7 +231,7 @@ contabilidad.delete('/cuentas/:id', ver, gestionar, async (c) => {
 // Cuenta contable de cada categoría de gasto
 contabilidad.get('/categorias-gasto', ver, async (c) => {
   const s = c.get('sesion');
-  await inicializarPlan(c.env.DB, s.tallerId);
+  await exigirActivada(c);
   const cats = await all<{ id: string; nombre: string; tipo: string; activa: number; cuenta_contable_id: string | null }>(
     c.env.DB, 'SELECT id, nombre, tipo, activa, cuenta_contable_id FROM categorias_gasto WHERE taller_id = ? ORDER BY nombre COLLATE NOCASE', s.tallerId,
   );
@@ -310,7 +325,7 @@ contabilidad.get('/diario', ver, async (c) => {
   if (f.desde > f.hasta) throw badRequest('El período es inválido');
   await autorizarExportacion(c, 'contabilidad-libro-diario');
   const exportando = c.req.query('exportar') === '1';
-  await alDia(c);
+  await exigirActivada(c);
   return c.json(await libroDiario(c.env.DB, s.tallerId, { desde: f.desde, hasta: f.hasta, estado: f.estado, origen: f.origen, cuentaId: f.cuenta_id, q: f.q, limite: exportando ? 500 : f.limite, desplazamiento: exportando ? 0 : f.pagina * f.limite }));
 });
 
@@ -324,7 +339,7 @@ contabilidad.post('/asientos', ver, gestionar, async (c) => {
   const fecha = fechaContable(d.fecha);
   const error = d.registrar ? validarLineas(d.lineas) : null;
   if (error) throw badRequest(error);
-  await inicializarPlan(c.env.DB, s.tallerId);
+  await exigirActivada(c);
   await validarCuentasDeLineas(c.env.DB, s.tallerId, d.lineas);
   const id = uid();
   try {
@@ -474,7 +489,7 @@ contabilidad.get('/mayor', ver, async (c) => {
   const f = query(c, zPeriodo.extend({ cuenta_id: zId }));
   if (f.desde > f.hasta) throw badRequest('El período es inválido');
   await autorizarExportacion(c, 'contabilidad-libro-mayor');
-  await alDia(c);
+  await exigirActivada(c);
   const r = await libroMayor(c.env.DB, s.tallerId, f.cuenta_id, f.desde, f.hasta, c.req.query('exportar') === '1' ? 20000 : 2000);
   if (!r) throw notFound('Cuenta');
   return c.json(r);
@@ -484,7 +499,7 @@ contabilidad.get('/balance', ver, async (c) => {
   const s = c.get('sesion');
   const p = periodo(c);
   await autorizarExportacion(c, 'contabilidad-balance');
-  await alDia(c);
+  await exigirActivada(c);
   return c.json(await balanceSumasYSaldos(c.env.DB, s.tallerId, p.desde, p.hasta));
 });
 
@@ -492,7 +507,7 @@ contabilidad.get('/estado-resultados', ver, requirePerm('margenes.ver'), async (
   const s = c.get('sesion');
   const p = periodo(c);
   await autorizarExportacion(c, 'contabilidad-estado-resultados');
-  await alDia(c);
+  await exigirActivada(c);
   const [er, flujo] = await Promise.all([estadoResultados(c.env.DB, s.tallerId, p.desde, p.hasta, true), flujoDeCaja(c.env.DB, s.tallerId, p.desde, p.hasta)]);
   return c.json({ ...er, flujo_caja: flujo });
 });
@@ -500,7 +515,7 @@ contabilidad.get('/estado-resultados', ver, requirePerm('margenes.ver'), async (
 contabilidad.get('/resumen-contable', ver, async (c) => {
   const s = c.get('sesion');
   const p = periodo(c);
-  const { hayMas } = await alDia(c);
+  await exigirActivada(c);
   const verResultados = tiene(s, 'margenes.ver');
   const [plan, flujo, er, pend, ctl, asientos, corrida] = await Promise.all([
     planConSaldos(c.env.DB, s.tallerId, p.hasta),
@@ -528,13 +543,13 @@ contabilidad.get('/resumen-contable', ver, async (c) => {
       ...(tiene(s, 'stock.valorizar') ? { inventario: saldo('inventario') } : {}),
     },
     flujo_caja: flujo,
-    proceso: { asientos: asientos ?? { total: 0 }, pendientes: pend.pendientes, errores: pend.errores, sin_efecto: pend.sin_efecto, hay_mas: hayMas, ultima_corrida: corrida, controles_con_diferencia: incons, controles_con_aviso: ctl.filter((x) => x.estado === 'aviso').length },
+    proceso: { asientos: asientos ?? { total: 0 }, pendientes: pend.pendientes, errores: pend.errores, sin_efecto: pend.sin_efecto, ultima_corrida: corrida, controles_con_diferencia: incons, controles_con_aviso: ctl.filter((x) => x.estado === 'aviso').length },
   });
 });
 
 contabilidad.get('/controles', ver, async (c) => {
   const s = c.get('sesion');
   await autorizarExportacion(c, 'contabilidad-controles');
-  const { hayMas } = await alDia(c);
-  return c.json({ controles: await controles(c.env.DB, s.tallerId, { valorizar: tiene(s, 'stock.valorizar') }), hay_mas: hayMas });
+  await exigirActivada(c);
+  return c.json({ controles: await controles(c.env.DB, s.tallerId, { valorizar: tiene(s, 'stock.valorizar') }) });
 });

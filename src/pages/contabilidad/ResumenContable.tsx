@@ -32,7 +32,6 @@ export function ResumenContable({ desde, hasta, ir }: { desde: string; hasta: st
           <button className="font-semibold underline" onClick={() => ir('controles')}>Ver controles</button>
         </Aviso>
       )}
-      {p.hay_mas && <Aviso tono="ambar">Todavía quedan operaciones por contabilizar (son muchas). Volvé a actualizar para continuar.</Aviso>}
 
       {res ? (
         <Tarjeta
@@ -86,7 +85,7 @@ export function ResumenContable({ desde, hasta, ir }: { desde: string; hasta: st
           <div><dt className="text-xs font-medium text-tenue">Última actualización</dt><dd className="mt-0.5">{p.ultima_corrida ? fechaHora(p.ultima_corrida.iniciada_at) : '—'}</dd></div>
         </dl>
         <p className="mt-3 text-xs text-tenue">
-          Los asientos se generan solos a partir de ventas, cobros, compras, pagos, gastos y movimientos de caja y banco. Las operaciones anteriores a la contabilidad se contabilizaron una sola vez, con la fecha original, y están marcadas como históricas.{' '}
+          Los asientos se generan solos, después de cada venta, cobro, compra, pago, gasto o movimiento de caja y banco (consultar esta pantalla no genera nada). Las operaciones anteriores a la activación se contabilizaron una sola vez, con la fecha original, y están marcadas como históricas.{' '}
           <button className="underline" onClick={() => ir('diario')}>Ver libro diario</button>
         </p>
       </Tarjeta>

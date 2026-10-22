@@ -309,6 +309,7 @@ describe('artículos', () => {
     );
 
   it('importa el catálogo SIN movimientos de stock ni asientos: la existencia es un procedimiento aparte', async () => {
+    expect((await api.post('/api/contabilidad/activar', {})).status).toBe(200); // la activación es explícita: consultar no genera nada
     const antesDiario = (await api.get(`/api/contabilidad/diario?desde=${hoyAR(-30)}&hasta=${hoyAR()}&limite=500`)).body;
     const v = await validar(api, 'articulos', base());
     expect(v.resultados.map((r) => r.accion)).toEqual(['crear', 'crear', 'crear']);

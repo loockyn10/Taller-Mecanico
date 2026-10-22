@@ -86,7 +86,7 @@ function DeudaProveedores() {
           columnas={[
             { clave: 'v', titulo: 'Vence', render: (d: any) => <span className={d.dias_atraso > 0 ? 'font-medium text-red-600' : ''}>{fecha(d.vencimiento)}{d.dias_atraso > 0 ? ` (+${d.dias_atraso} d)` : ''}</span>, movil: 'meta' },
             { clave: 'p', titulo: 'Proveedor', render: (d: any) => d.proveedor, movil: 'titulo' },
-            { clave: 'c', titulo: 'Comprobante', render: (d: any) => (d.tipo === 'compra' ? `Compra #${numero(d.numero)}` : 'Factura') + (d.detalle ? ` ${d.detalle}` : ''), movil: 'subtitulo' },
+            { clave: 'c', titulo: 'Comprobante', render: (d: any) => (d.tipo === 'compra' ? `Compra #${numero(d.numero)}` : d.tipo === 'apertura' ? `Saldo de apertura N° ${numero(d.numero)}` : 'Factura') + (d.detalle ? ` ${d.detalle}` : ''), movil: 'subtitulo' },
             { clave: 't', titulo: 'Total', alinear: 'derecha', render: (d: any) => money(d.total), movil: 'meta' },
             { clave: 'x', titulo: 'Pendiente', alinear: 'derecha', render: (d: any) => <span className="font-semibold">{money(d.pendiente)}</span>, movil: 'derecha' },
           ]}
@@ -206,7 +206,7 @@ export function ProveedorDetalle() {
             clave={(d: any) => `${d.tipo}-${d.id}`}
             columnas={[
               { clave: 'v', titulo: 'Vence', render: (d: any) => <span className={d.dias_atraso > 0 ? 'font-medium text-red-600' : ''}>{fecha(d.vencimiento)}{d.dias_atraso > 0 ? ` (+${d.dias_atraso} d)` : ''}</span>, movil: 'meta' },
-              { clave: 'c', titulo: 'Comprobante', render: (d: any) => (d.tipo === 'compra' ? `Compra #${numero(d.numero)}` : 'Factura') + (d.detalle ? ` ${d.detalle}` : ''), movil: 'titulo' },
+              { clave: 'c', titulo: 'Comprobante', render: (d: any) => (d.tipo === 'compra' ? `Compra #${numero(d.numero)}` : d.tipo === 'apertura' ? `Saldo de apertura N° ${numero(d.numero)}` : 'Factura') + (d.detalle ? ` ${d.detalle}` : ''), movil: 'titulo' },
               { clave: 'f', titulo: 'Fecha', render: (d: any) => fecha(d.fecha), movil: 'meta' },
               { clave: 't', titulo: 'Total', alinear: 'derecha', render: (d: any) => money(d.total), movil: 'meta' },
               { clave: 'p', titulo: 'Pendiente', alinear: 'derecha', render: (d: any) => <span className="font-semibold">{money(d.pendiente)}</span>, movil: 'derecha' },
@@ -225,8 +225,8 @@ export function ProveedorDetalle() {
               clave: 'c', titulo: 'Concepto',
               render: (m: any) => (
                 <span className={m.anulado ? 'text-tenue line-through' : ''}>
-                  {m.tipo === 'compra' ? <Link className="text-marca-700" to={`/compras?ver=${m.id}`}>Compra #{numero(m.numero)}</Link> : m.tipo === 'factura' ? (m.haber ? 'Factura' : m.debe ? 'Nota de crédito' : 'Factura (asociada a una compra)') : `Pago #${numero(m.numero)}`}{' '}
-                  {m.tipo === 'compra' || m.tipo === 'factura' ? m.detalle ?? '' : `(${MEDIO_PAGO_LABEL[m.detalle as keyof typeof MEDIO_PAGO_LABEL] ?? m.detalle})`}
+                  {m.tipo === 'compra' ? <Link className="text-marca-700" to={`/compras?ver=${m.id}`}>Compra #{numero(m.numero)}</Link> : m.tipo === 'factura' ? (m.haber ? 'Factura' : m.debe ? 'Nota de crédito' : 'Factura (asociada a una compra)') : m.tipo === 'apertura' ? `Saldo de apertura N° ${numero(m.numero)}` : `Pago #${numero(m.numero)}`}{' '}
+                  {m.tipo === 'compra' || m.tipo === 'factura' || m.tipo === 'apertura' ? m.detalle ?? '' : `(${MEDIO_PAGO_LABEL[m.detalle as keyof typeof MEDIO_PAGO_LABEL] ?? m.detalle})`}
                   {m.anulado ? <Insignia tono="gris" className="ml-2 no-underline">Anulado</Insignia> : null}
                 </span>
               ),

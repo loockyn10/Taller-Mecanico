@@ -72,7 +72,7 @@ export async function controles(db: D1Database, tallerId: string, opciones: { va
   }
   out.push({
     clave: 'cobertura', titulo: 'Operaciones contabilizadas', estado: err ? 'diferencia' : pend ? 'aviso' : 'ok',
-    detalle: err ? `${err} operación(es) no se pudieron contabilizar porque sus importes no cierran: se muestran abajo con el motivo. No se ajustaron ni se ocultaron.` : pend ? `${pend} operación(es) esperan contabilizarse (se procesan al consultar la contabilidad).` : 'Cada operación tiene su asiento (o no tiene efecto contable).',
+    detalle: err ? `${err} operación(es) no se pudieron contabilizar porque sus importes no cierran: se muestran abajo con el motivo. No se ajustaron ni se ocultaron.` : pend ? `${pend} operación(es) esperan contabilizarse: se procesan después de la próxima operación comercial o con "Actualizar ahora" (consultar la contabilidad no las contabiliza).` : 'Cada operación tiene su asiento (o no tiene efecto contable).',
     items: cobertura,
   });
 
@@ -86,7 +86,7 @@ export async function controles(db: D1Database, tallerId: string, opciones: { va
     t, t,
   );
   out.push(cmp('anticipos', 'Anticipos y saldos a favor = saldo a favor de los clientes', saldoRol('anticipos'), fav?.v ?? 0, 'El pasivo con los clientes coincide con anticipos sin aplicar y créditos por devoluciones.'));
-  const prov = await first<{ v: number }>(db, `SELECT ${DEUDA_TOTAL_SQL} AS v`, t, t, t);
+  const prov = await first<{ v: number }>(db, `SELECT ${DEUDA_TOTAL_SQL} AS v`, t, t, t, t);
   out.push(cmp('proveedores', 'Proveedores = deuda de las cuentas corrientes de proveedores', saldoRol('proveedores'), prov?.v ?? 0, 'La cuenta Proveedores coincide con lo que se debe a los proveedores.'));
 
   // ── Caja y bancos
@@ -209,7 +209,7 @@ export async function controles(db: D1Database, tallerId: string, opciones: { va
   const p = await pendientesContabilizar(db, t);
   out.push({
     clave: 'saldos_iniciales', titulo: 'Saldos iniciales', estado: 'info',
-    detalle: `Los saldos iniciales de caja y de las cuentas bancarias se toman de los datos cargados. Los demás (inventario existente, deudas con proveedores o clientes anteriores al uso de Fierro) no tienen un saldo inicial registrado y no se inventan: si corresponde, cargalos con un asiento manual de apertura. ${p.sin_efecto ? `${p.sin_efecto} documento(s) sin importes no generan asiento.` : ''}`,
+    detalle: `Los saldos iniciales de caja, de las cuentas bancarias y de las deudas con proveedores (Administración › Apertura de saldos) se toman de lo cargado. Los de clientes (deudas anteriores al uso de Fierro) todavía no tienen documento de apertura y no se inventan; el inventario existente se carga como entrada de stock inicial (queda a clasificar). ${p.sin_efecto ? `${p.sin_efecto} documento(s) sin importes no generan asiento.` : ''}`,
   });
   return out;
 }

@@ -28,7 +28,7 @@ export interface ResultadoSync {
 
 export interface OpcionesSync {
   usuarioId: string | null;
-  disparador: 'consulta' | 'manual' | 'inicial';
+  disparador: 'consulta' | 'manual' | 'inicial' | 'operacion';
   /** Vuelve a intentar los documentos que fallaron antes. */
   reintentar?: boolean;
 }
@@ -140,14 +140,14 @@ export async function sincronizar(db: D1Database, tallerId: string, op: Opciones
   const total = creados.size;
   const omitidosN = omisiones.length + fallidos.length;
   const ultima = await first<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM contab_corridas WHERE taller_id = ?', tallerId);
-  // Las consultas que no cambian nada no dejan huella: sólo se registran las corridas que crearon asientos u omitieron documentos (y la primera).
-  if (total > 0 || omitidosN > 0 || !ultima?.n || op.disparador !== 'consulta') {
+  // Las pasadas automáticas que no cambian nada no dejan huella: sólo se registran las que crearon asientos u omitieron documentos, la primera y las pedidas a mano.
+  if (total > 0 || omitidosN > 0 || !ultima?.n || op.disparador === 'manual' || op.disparador === 'inicial') {
     await db
       .prepare(
         `INSERT INTO contab_corridas (id, taller_id, iniciada_at, terminada_at, usuario_id, disparador, asientos_creados, asientos_historicos, omitidos, restantes, detalle)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(corridaId, tallerId, inicio, ahora(), op.usuarioId, !ultima?.n && op.disparador === 'consulta' ? 'inicial' : op.disparador, total, historicos, omitidosN, hayMas ? 1 : 0, JSON.stringify({ por_origen: porOrigen, omitidos: [...omisiones, ...fallidos].slice(0, 20).map((o) => ({ origen: o.origenTipo, id: o.origenId, evento: o.evento, motivo: o.motivo })) }))
+      .bind(corridaId, tallerId, inicio, ahora(), op.usuarioId, !ultima?.n && op.disparador !== 'manual' ? 'inicial' : op.disparador, total, historicos, omitidosN, hayMas ? 1 : 0, JSON.stringify({ por_origen: porOrigen, omitidos: [...omisiones, ...fallidos].slice(0, 20).map((o) => ({ origen: o.origenTipo, id: o.origenId, evento: o.evento, motivo: o.motivo })) }))
       .run();
   }
   await db.prepare('UPDATE contab_config SET ultima_corrida_at = ? WHERE taller_id = ?').bind(ahora(), tallerId).run();
@@ -210,3 +210,98 @@ function mensajeLegible(e: unknown): string {
 
 /** Texto de un origen para mostrar. */
 export const etiquetaOrigen = (t: string) => ORIGEN_LABEL[t] ?? t;
+
+// ───────────────────────── Ejecución coordinada ─────────────────────────
+// La sincronización NUNCA corre al consultar. Se ejecuta (a) al activar la contabilidad, (b) a pedido de quien la gestiona y (c) después de cada
+// operación comercial que la cambia (ver `sincronizarTrasOperacion`). Para que dos procesos del mismo taller no se pisen se usa un bloqueo con
+// vencimiento en `contab_config`: si llega una operación mientras otro proceso corre, deja un pedido (`sync_solicitada`) y el que corre vuelve a pasar.
+const BLOQUEO_MS = 90_000;
+const PASADAS_MAX = 4;
+
+export type ResultadoControlado =
+  | { estado: 'no_activada' }
+  | { estado: 'ocupada' }
+  | { estado: 'ejecutada'; resultado: ResultadoSync; pasadas: number };
+
+/** Intenta quedarse con el turno de sincronización. */
+async function tomarTurno(db: D1Database, tallerId: string): Promise<boolean> {
+  const r = await db
+    .prepare('UPDATE contab_config SET sync_bloqueo_hasta = ?, sync_solicitada = 0 WHERE taller_id = ? AND (sync_bloqueo_hasta IS NULL OR sync_bloqueo_hasta < ?)')
+    .bind(new Date(Date.now() + BLOQUEO_MS).toISOString(), tallerId, ahora())
+    .run();
+  return (r.meta?.changes ?? 0) > 0;
+}
+
+async function soltarTurno(db: D1Database, tallerId: string, error: string | null) {
+  await db
+    .prepare('UPDATE contab_config SET sync_bloqueo_hasta = NULL, ultimo_error = ?, ultimo_error_at = CASE WHEN ? IS NULL THEN ultimo_error_at ELSE ? END WHERE taller_id = ?')
+    .bind(error, error, ahora(), tallerId)
+    .run();
+}
+
+/**
+ * Sincroniza un taller cuya contabilidad ya fue activada, de a una sola ejecución a la vez. Repite mientras queden documentos (tope por pasada) o haya
+ * llegado un pedido nuevo. Devuelve `ocupada` si otro proceso tiene el turno (en ese caso deja el pedido para que lo retome).
+ */
+export async function sincronizarControlado(db: D1Database, tallerId: string, op: OpcionesSync): Promise<ResultadoControlado> {
+  const cfg = await first<{ taller_id: string }>(db, 'SELECT taller_id FROM contab_config WHERE taller_id = ?', tallerId);
+  if (!cfg) return { estado: 'no_activada' };
+  if (!(await tomarTurno(db, tallerId))) {
+    await db.prepare('UPDATE contab_config SET sync_solicitada = 1 WHERE taller_id = ?').bind(tallerId).run();
+    return { estado: 'ocupada' };
+  }
+  let acumulado: ResultadoSync | null = null;
+  let pasadas = 0;
+  let error: string | null = null;
+  try {
+    let repetir = true;
+    while (repetir && pasadas < PASADAS_MAX) {
+      const r = await sincronizar(db, tallerId, { ...op, reintentar: op.reintentar && pasadas === 0 });
+      pasadas++;
+      acumulado = acumulado
+        ? { corridaId: r.corridaId, creados: acumulado.creados + r.creados, historicos: acumulado.historicos + r.historicos, omitidos: r.omitidos, hayMas: r.hayMas, porOrigen: sumar(acumulado.porOrigen, r.porOrigen) }
+        : r;
+      // Un pedido llegado durante la pasada se atiende en la siguiente.
+      const pedido = await first<{ s: number }>(db, 'SELECT sync_solicitada AS s FROM contab_config WHERE taller_id = ?', tallerId);
+      if (pedido?.s) await db.prepare('UPDATE contab_config SET sync_solicitada = 0 WHERE taller_id = ?').bind(tallerId).run();
+      repetir = r.hayMas || !!pedido?.s;
+    }
+  } catch (e) {
+    error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+  } finally {
+    await soltarTurno(db, tallerId, error);
+  }
+  if (error) throw new Error(error);
+  // Un pedido que entró justo antes de soltar el turno: se retoma una vez más.
+  const resto = await first<{ s: number }>(db, 'SELECT sync_solicitada AS s FROM contab_config WHERE taller_id = ?', tallerId);
+  if (resto?.s && (await tomarTurno(db, tallerId))) {
+    let err2: string | null = null;
+    try {
+      await sincronizar(db, tallerId, { ...op, reintentar: false });
+    } catch (e) {
+      err2 = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+    } finally {
+      await soltarTurno(db, tallerId, err2);
+    }
+  }
+  return { estado: 'ejecutada', resultado: acumulado!, pasadas };
+}
+
+function sumar(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
+  const r = { ...a };
+  for (const [k, v] of Object.entries(b)) r[k] = (r[k] ?? 0) + v;
+  return r;
+}
+
+/**
+ * Mantiene al día la contabilidad después de una operación comercial. No hace nada si el taller no activó la contabilidad. Nunca propaga errores:
+ * la operación ya está hecha; si la contabilización falla queda registrada como pendiente (y el motivo en `ultimo_error`) y se reintenta en la
+ * próxima operación o a pedido.
+ */
+export async function sincronizarTrasOperacion(db: D1Database, tallerId: string, usuarioId: string | null): Promise<void> {
+  try {
+    await sincronizarControlado(db, tallerId, { usuarioId, disparador: 'operacion' });
+  } catch {
+    /* ya quedó en contab_config.ultimo_error */
+  }
+}
