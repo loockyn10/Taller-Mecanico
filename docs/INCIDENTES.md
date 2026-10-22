@@ -8,7 +8,7 @@ Estado al **22/10/2026 (Sprint 13)**. Es una guía de **qué mirar y qué hacer*
 npm run platform -- salud
 ```
 
-Muestra, en un solo informe (solo lectura): si el **mantenimiento periódico** (Cron cada 5 minutos) está corriendo, la **cola de contabilización** (pendientes, fallidas, la más antigua y qué talleres), los **eventos de seguridad** de las últimas 24 h, los **errores no controlados del Worker** y cuándo llegó el último **aviso de respaldo externo**. Las `alertas` en la parte superior resumen lo que requiere atención. (Equivale a `GET /api/platform/salud` con el token de plataforma.)
+Muestra, en un solo informe (solo lectura): si el **mantenimiento periódico** (Cron cada 5 minutos) está corriendo, la **cola de contabilización** (pendientes, fallidas, la más antigua y qué talleres), los **eventos de seguridad** de las últimas 24 h, los **errores no controlados del Worker** y cuándo llegó el último **aviso de respaldo externo**. Las `alertas` en la parte superior resumen lo que requiere atención. (Equivale a `GET /api/platform/salud` con el token de plataforma. Contra producción: `FIERRO_API=https://taller-mecanico.estrubia455.workers.dev PLATFORM_ADMIN_TOKEN=… npm run platform -- salud`, con el token cargado en tu terminal y no en el historial de comandos.)
 
 | Alerta | Qué significa | Ir a |
 |---|---|---|
@@ -23,7 +23,7 @@ Muestra, en un solo informe (solo lectura): si el **mantenimiento periódico** (
 
 **Qué es:** un *Cron Trigger* gratuito de Cloudflare (`wrangler.jsonc › triggers.crons`, cada 5 minutos) que (a) vacía las colas de contabilización pendientes de cualquier taller, (b) avanza las reconciliaciones y (c) deja un latido (`plataforma_latidos`). **No es imprescindible para que el sistema funcione**: cada operación comercial contabiliza lo suyo al terminar; el Cron recupera lo que se haya perdido (por ejemplo, un Worker que terminó antes de contabilizar).
 
-**Si no corre:** 1) en el panel de Cloudflare › Workers › `taller-mecanico` › Settings › Triggers verificar que figure el Cron `*/5 * * * *`; 2) si no figura, el despliegue más reciente no lo registró: volver a desplegar (push a `main`); 3) mientras tanto, forzarlo a mano: `npm run platform -- mantenimiento` (hace exactamente lo mismo que el Cron).
+**Si no corre:** 1) en el panel de Cloudflare › Workers › `taller-mecanico` › Settings › Triggers verificar que figure el Cron `*/5 * * * *`; 2) si no figura: **Workers Builds publica con `wrangler versions upload`, que no registra los Cron Triggers** (ya pasó en el Sprint 13). Aplicarlos con `npx wrangler triggers deploy --name taller-mecanico` (gratuito; debe mostrar `schedule: */5 * * * *`). Los crons son una configuración del Worker, no de cada versión: los despliegues siguientes la conservan, pero hay que repetir el comando si se cambia la lista en `wrangler.jsonc`; 3) mientras tanto, forzarlo a mano: `npm run platform -- mantenimiento` (hace exactamente lo mismo que el Cron).
 
 ## 2. Operaciones sin contabilizar
 

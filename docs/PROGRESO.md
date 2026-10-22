@@ -755,3 +755,32 @@ Sin plataformas externas ni costo: (a) `GET /api/platform/salud` y `npm run plat
 
 ## 81. Pruebas
 `npm run typecheck`, `npm run build` OK. **107 unitarias y 378 de integración (24 archivos), todas OK** en una única corrida completa. Nuevas: `cola-contable` (14), `login-seguridad` (11), `observabilidad` (8 + 2 unitarias), `respaldo-cifrado` (9), la de la migración 0013 y los ajustes de `seguridad` (el cliente de pruebas ahora se presenta con su propio origen). Una prueba de concurrencia del Sprint 12 falló **una sola vez** durante una corrida completa en paralelo con otros procesos y no se reprodujo en 3 ejecuciones aisladas del archivo, 510 ventas concurrentes adicionales (parte de ellas con carga de CPU artificial) ni en las dos corridas completas posteriores; se dejó la aserción con el detalle de las respuestas para diagnosticarla si reaparece.
+
+## 82. Despliegue (2026-10-22)
+- **Respaldo previo** con `npm run respaldo -- plataforma --etiqueta antes-sprint13`: `respaldos/d1-antes-sprint13-20261022-2211.sql` (SHA-256 `c5efac88b673e007454b064e35e12c0f0089a87774eacfb875c67a94f0f49406`), verificado en memoria (integridad ok, 0 claves foráneas rotas, 94 tablas, 3.750 filas, 2 talleres, 12 migraciones); bookmark de Time Travel `0000003c-00000000-0000510c-3035fad2b458386e57c964721c6cb8b3`.
+- **Ensayo** de la 0013 sobre ese respaldo (`ensayar-migraciones`): 94 tablas y 3.750 filas **idénticas**, 4 tablas nuevas, 2 columnas nuevas en `contab_config`, integridad ok.
+- **Aplicada** a la D1 remota (única migración pendiente) **antes** de publicar el código (que es compatible con la base anterior y con la nueva). Comprobado con un segundo respaldo (`d1-despues-sprint13-20261022-2235.sql`): las 94 tablas existentes, **sin ninguna diferencia** de contenido; integridad ok; 0 claves foráneas rotas; 13 migraciones; ventas 70 por 10.691.200,63 y 67 cobros, igual que antes; contabilidad de ningún taller activada (cola vacía).
+- **Publicación:** commit `622a988` en `main` (push directo; Workers Builds). La SPA publicada es el mismo bundle que el build local (`index-CqXTeBBk.js`). Sin sesión: `/api/salud` 200; `/api/auth/me`, `/api/clientes`, `/api/contabilidad/estado` y `/api/contabilidad/cola` 401; `/api/platform/salud` sin token 401 (y quedó el primer evento de seguridad registrado); el aviso de respaldo sin token 401 (antes del despliegue esa ruta no existía: confirma que corre el código nuevo); `/activar` 200. En la D1 remota: 0 errores del Worker, cola vacía, `PRAGMA foreign_key_check` vacío.
+- **Hallazgo de despliegue:** Workers Builds publica con `wrangler versions upload` (la versión figura como `version_upload`), y ese camino **no registra los Cron Triggers**. El Worker ya exponía el manejador `scheduled`, pero el Cron no corría. Lo registré a mano con `npx wrangler triggers deploy --name taller-mecanico` (gratuito; muestra `schedule: */5 * * * *`) y **verifiqué una ejecución real**: `plataforma_latidos.mantenimiento` = 2026-10-22T22:50:59Z, `ok`, 0 talleres con cola, 0 errores. Los Cron Triggers son una configuración del Worker (no de cada versión), así que los despliegues siguientes la conservan; si algún día se cambia la lista de crons en `wrangler.jsonc`, hay que repetir ese comando (anotado en `docs/INCIDENTES.md` §1).
+- **Para los talleres existentes:** la contabilidad de ninguno está activada; sigue siendo explícita (Contabilidad › Activación). Al activarla se genera lo histórico por lotes y después se mantiene por la cola.
+- **Quien tenga su instancia local abierta** (`npm run dev`) debe aplicar la migración 0013 (`npm run db:migrate`) y reiniciarla.
+
+## 83. Estado de los entregables y limitaciones pendientes
+| Entregable | Estado |
+|---|---|
+| Sincronización contable incremental y recuperable | ✅ Publicada y probada (local: 378 pruebas de integración). El Cron corre en producción. Ningún taller de producción tiene la contabilidad activada todavía, por lo que **no se ejercitó con datos reales de producción** |
+| Respaldos programados | 🟡 **Preparados, no operativos**: el workflow de GitHub Actions no se ejecutó (faltan variables y secretos del propietario). El procedimiento sí se ejecutó y verificó de punta a punta desde esta computadora contra la D1 de producción |
+| Protección del inicio de sesión | ✅ Publicada y probada |
+| Mediciones de rendimiento | ✅ Hechas en instancia local aislada. 🟡 **Sin medición contra D1 real**: no se puede afirmar que soporte 100 talleres |
+| Verificación online autenticada | 🟡 94/94 contra una instancia local aislada; **no ejecutada contra producción con sesión** (restricción de esta sesión: no inicia sesión con contraseñas en un sitio que no es de ensayo). Comando listo en §79 |
+| Documentación de recuperación | ✅ `docs/INCIDENTES.md`, `docs/RESPALDOS.md` §7–§8 |
+
+**Problemas críticos / pendientes (ordenados):**
+1. **P0 operativo:** cargar la configuración de `docs/RESPALDOS.md` §7 y lograr **una ejecución real en verde** del workflow *Respaldo D1* (más una prueba de apertura del artefacto con la clave privada). Hasta entonces una pérdida de la cuenta de Cloudflare no es recuperable.
+2. **P0:** saldos de apertura de **clientes** (diseño en `docs/COMPARATIVA_CALDEN.md` §6.B), antes de ARCA (sin cambios desde el Sprint 12).
+3. **P1:** medición de capacidad contra una D1 real **de ensayo** (no la de producción): requiere crear un Worker y una D1 aparte (decisión del propietario) y reemplazar los supuestos de `docs/CAPACIDAD.md` §5 con Analytics de D1 de uso real. Verificar de qué plan de Cloudflare se trata: con el gratuito de D1 el modelo indica que no alcanza para más de unos pocos talleres.
+4. **P1:** correr `npm run verificar:online -- --url=… --env-file=.env.demo-remoto` contra producción desde la terminal del propietario.
+5. **P1:** límites por invocación de Cloudflare (consultas a D1, CPU del inicio de sesión de ~60 ms con 100.000 iteraciones) no verificados con el plan real; una pasada de reconciliación de 400 asientos hace decenas de consultas.
+6. **P2:** el tablero se refresca cada 60 s y concentra las lecturas del modelo de consumo (pasarlo a 5 min recorta ~80 %); informes proporcionales al historial (balance contable, cuentas corrientes) sin paginar.
+7. **P2:** una prueba de concurrencia del Sprint 12 falló una vez en una corrida completa sin reproducirse (§81); está instrumentada para diagnosticarla.
+8. Heredados: exportación de datos por el propietario desde la app, restauración de un taller a un taller nuevo, interfaz sin pruebas automáticas.
