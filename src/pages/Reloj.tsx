@@ -154,7 +154,7 @@ export function Reloj() {
           </div>
           <button
             type="button" onClick={confirmar} disabled={pin.length < 4 || enviando}
-            className={cn('mt-4 flex h-16 w-full items-center justify-center gap-3 rounded-2xl text-xl font-bold transition disabled:opacity-40', sel.dentro ? 'bg-sky-600 active:bg-sky-700' : 'bg-emerald-600 active:bg-emerald-700')}
+            className={cn('mt-4 flex h-16 w-full items-center justify-center gap-3 rounded-card text-xl font-bold transition disabled:opacity-40', sel.dentro ? 'bg-sky-600 active:bg-sky-700' : 'bg-emerald-600 active:bg-emerald-700')}
           >
             {sel.dentro ? <LogOut className="size-6" /> : <LogIn className="size-6" />}
             {enviando ? 'Registrando…' : sel.dentro ? 'Registrar salida' : 'Registrar entrada'}
@@ -179,7 +179,7 @@ export function Reloj() {
           <ul className="flex flex-wrap justify-center gap-3">
             {estado.personal.map((p) => (
               <li key={p.id} className="w-[calc(50%-0.375rem)] sm:w-44">
-                <button type="button" onClick={() => { setSel(p); setPin(''); setError(null); }} className="flex h-24 w-full flex-col items-center justify-center gap-1 rounded-2xl bg-slate-800 px-2 text-center ring-1 ring-slate-700 transition active:scale-[0.98] active:bg-slate-700">
+                <button type="button" onClick={() => { setSel(p); setPin(''); setError(null); }} className="flex h-24 w-full flex-col items-center justify-center gap-1 rounded-card bg-slate-800 px-2 text-center ring-1 ring-slate-700 transition active:scale-[0.98] active:bg-slate-700">
                   <UserRound className="size-6 text-slate-400" />
                   <span className="line-clamp-2 text-base font-semibold leading-tight">{p.nombre}</span>
                   <span className={cn('text-xs font-medium', p.dentro ? 'text-emerald-400' : 'text-slate-500')}>{p.dentro ? '● Adentro' : 'Afuera'}</span>
@@ -200,7 +200,7 @@ function Mensaje({ icono, titulo, texto }: { icono: React.ReactNode; titulo: str
   return <div className="mx-auto max-w-md text-center"><div className="mb-3 flex justify-center">{icono}</div><p className="text-2xl font-bold">{titulo}</p><p className="mt-2 text-slate-300">{texto}</p></div>;
 }
 function Tecla({ children, onClick, suave, ...p }: { children: React.ReactNode; onClick: () => void; suave?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button type="button" onClick={onClick} className={cn('h-16 rounded-2xl text-2xl font-semibold ring-1 transition active:scale-95', suave ? 'bg-transparent text-base text-slate-300 ring-slate-700 active:bg-slate-800' : 'bg-slate-800 ring-slate-700 active:bg-slate-700')} {...p}>{children}</button>;
+  return <button type="button" onClick={onClick} className={cn('h-16 rounded-card text-2xl font-semibold ring-1 transition active:scale-95', suave ? 'bg-transparent text-base text-slate-300 ring-slate-700 active:bg-slate-800' : 'bg-slate-800 ring-slate-700 active:bg-slate-700')} {...p}>{children}</button>;
 }
 
 function Activar({ aviso, onListo }: { aviso: string | null; onListo: () => void }) {
@@ -225,13 +225,13 @@ function Activar({ aviso, onListo }: { aviso: string | null; onListo: () => void
       <form className="mx-auto w-full max-w-sm space-y-4 text-center" onSubmit={(e) => { e.preventDefault(); enviar(); }}>
         <p className="text-2xl font-bold">Activar reloj</p>
         <p className="text-slate-300">Ingresá el código que generó el propietario en <em>Personal → Reloj compartido</em>.</p>
-        {aviso && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-300">{aviso}</p>}
+        {aviso && <p className="rounded-ctl bg-amber-500/10 px-3 py-2 text-sm text-amber-300">{aviso}</p>}
         <input
           value={codigo} onChange={(e) => setCodigo(e.target.value.toUpperCase())} autoFocus autoCapitalize="characters" autoComplete="off" spellCheck={false} maxLength={9} placeholder="XXXX-XXXX"
-          className="h-14 w-full rounded-xl bg-slate-800 text-center text-2xl font-bold tracking-[0.25em] text-white outline-none ring-1 ring-slate-600 focus:ring-2 focus:ring-sky-500"
+          className="h-14 w-full rounded-card bg-slate-800 text-center text-2xl font-bold tracking-[0.25em] text-white outline-none ring-1 ring-slate-600 focus:ring-2 focus:ring-sky-500"
         />
         {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
-        <button type="submit" disabled={codigo.replace(/\W/g, '').length < 8 || cargando} className="h-14 w-full rounded-xl bg-sky-600 text-lg font-bold disabled:opacity-40">{cargando ? 'Activando…' : 'Activar'}</button>
+        <button type="submit" disabled={codigo.replace(/\W/g, '').length < 8 || cargando} className="h-14 w-full rounded-card bg-sky-600 text-lg font-bold disabled:opacity-40">{cargando ? 'Activando…' : 'Activar'}</button>
       </form>
     </Pantalla>
   );

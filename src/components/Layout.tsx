@@ -14,8 +14,8 @@ function Marca() {
     <div className="flex items-center gap-2.5">
       <img src="/icon.svg" alt="" className="size-8" />
       <div className="leading-tight">
-        <div className="text-[15px] font-extrabold tracking-tight">Fierro</div>
-        <div className="text-[11px] text-tenue">Gestión de talleres</div>
+        <div className="text-[15px] font-extrabold tracking-tight text-white">Fierro</div>
+        <div className="text-micro text-petroleo-300">Gestión de talleres</div>
       </div>
     </div>
   );
@@ -30,8 +30,9 @@ function EnlaceItem({ it, activo, consulta, onNavegar }: { it: ItemNav; activo: 
     <Link
       to={it.a}
       onClick={onNavegar}
+      title={it.texto}
       aria-current={activo ? 'page' : undefined}
-      className={cn('flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors', activo ? 'bg-marca-50 text-marca-700' : 'text-slate-600 hover:bg-slate-100 hover:text-texto')}
+      className={cn('relative flex items-center gap-2.5 rounded-ctl px-2.5 py-2 text-sm font-medium transition-colors', activo ? 'bg-white/12 text-white before:absolute before:inset-y-1.5 before:-left-0.5 before:w-[3px] before:rounded-full before:bg-sky-400' : 'text-petroleo-100/85 hover:bg-white/7 hover:text-white')}
     >
       {it.icono}
       <span className="truncate">{consulta ? resaltar(it.texto, consulta) : it.texto}</span>
@@ -86,7 +87,7 @@ function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
     <>
       <div className="px-3 pb-2 pt-3">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-petroleo-300" />
           <input
             ref={entrada}
             value={q}
@@ -97,14 +98,14 @@ function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
             }}
             placeholder="Buscar sección..."
             aria-label="Buscar sección"
-            className="h-9 w-full rounded-lg border border-borde bg-slate-50 pl-8 pr-7 text-sm outline-none placeholder:text-slate-400 focus:border-marca-400 focus:bg-white focus:ring-2 focus:ring-marca-100"
+            className="h-9 w-full rounded-ctl border border-petroleo-700 bg-petroleo-800 pl-8 pr-7 text-base text-white outline-none placeholder:text-petroleo-300 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/25 sm:text-sm"
           />
           {buscando ? (
-            <button type="button" onClick={() => { setQ(''); entrada.current?.focus(); }} aria-label="Limpiar búsqueda" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-texto">
+            <button type="button" onClick={() => { setQ(''); entrada.current?.focus(); }} aria-label="Limpiar búsqueda" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-petroleo-300 hover:text-white">
               <X className="size-3.5" />
             </button>
           ) : (
-            <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-borde bg-white px-1.5 text-[11px] text-tenue lg:block">/</kbd>
+            <kbd className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded border border-petroleo-600 bg-petroleo-700 px-1.5 text-micro text-petroleo-200 lg:block">/</kbd>
           )}
         </div>
       </div>
@@ -113,7 +114,7 @@ function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
           resultados.length ? (
             resultados.map((r) => (
               <div key={r.grupo.id} className="mt-2">
-                <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{r.grupo.titulo}</div>
+                <div className="mb-1 px-2 text-micro font-semibold uppercase tracking-wider text-petroleo-300">{r.grupo.titulo}</div>
                 <ul className="space-y-0.5">
                   {r.items.map((i) => (
                     <li key={i.id}>
@@ -124,7 +125,7 @@ function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
               </div>
             ))
           ) : (
-            <p className="px-2 py-6 text-center text-sm text-tenue">No se encontraron secciones</p>
+            <p className="px-2 py-6 text-center text-sm text-petroleo-300">No se encontraron secciones</p>
           )
         ) : (
           <ul className="space-y-0.5">
@@ -146,14 +147,14 @@ function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
                     onClick={() => setAbierto(abre ? null : g.id)}
                     aria-expanded={abre}
                     aria-controls={`menu-${g.id}`}
-                    className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-semibold transition-colors hover:bg-slate-100', contieneActivo ? 'text-marca-700' : 'text-slate-700')}
+                    className={cn('flex w-full items-center gap-2.5 rounded-ctl px-2.5 py-2 text-sm font-semibold transition-colors hover:bg-white/7', contieneActivo ? 'text-white' : 'text-petroleo-100')}
                   >
                     {g.icono}
                     <span className="flex-1 text-left">{g.titulo}</span>
-                    <ChevronDown className={cn('size-4 text-slate-400 transition-transform duration-200', abre && 'rotate-180')} />
+                    <ChevronDown className={cn('size-4 text-petroleo-300 transition-transform duration-200', abre && 'rotate-180')} />
                   </button>
                   <div id={`menu-${g.id}`} className={cn('grid transition-[grid-template-rows] duration-200 ease-out', abre ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
-                    <ul className={cn('ml-4 min-h-0 space-y-0.5 overflow-hidden border-l border-borde pl-2', abre ? 'mt-0.5 pb-1' : 'invisible')}>
+                    <ul className={cn('ml-4 min-h-0 space-y-0.5 overflow-hidden border-l border-petroleo-700 pl-2', abre ? 'mt-0.5 pb-1' : 'invisible')}>
                       {g.items.map((i) => (
                         <li key={i.id}>
                           <EnlaceItem it={i} activo={actual?.item.id === i.id} onNavegar={onNavegar} />
@@ -195,13 +196,13 @@ function Usuario() {
   const { me, logout } = useAuth();
   if (!me) return null;
   return (
-    <div className="flex items-center gap-2 border-t border-borde p-3">
-      <div className="grid size-9 place-items-center rounded-full bg-marca-100 text-sm font-bold text-marca-700">{me.usuario.nombre.slice(0, 1).toUpperCase()}</div>
+    <div className="flex items-center gap-2 border-t border-petroleo-800 p-3">
+      <div className="grid size-9 shrink-0 place-items-center rounded-full bg-petroleo-600 text-sm font-bold text-white">{me.usuario.nombre.slice(0, 1).toUpperCase()}</div>
       <div className="min-w-0 flex-1 leading-tight">
-        <div className="truncate text-sm font-medium">{me.usuario.nombre}</div>
-        <div className="truncate text-xs text-tenue">{ROL_LABEL[me.usuario.rol]} · {me.taller.nombre}</div>
+        <div className="truncate text-sm font-medium text-white">{me.usuario.nombre}</div>
+        <div className="truncate text-xs text-petroleo-300">{ROL_LABEL[me.usuario.rol]} · {me.taller.nombre}</div>
       </div>
-      <Boton variante="fantasma" tam="sm" onClick={logout} aria-label="Cerrar sesión" title="Cerrar sesión" icono={<LogOut className="size-4" />} />
+      <Boton variante="fantasma" tam="sm" className="text-petroleo-200 hover:bg-white/10 hover:text-white" onClick={logout} aria-label="Cerrar sesión" title="Cerrar sesión" icono={<LogOut className="size-4" />} />
     </div>
   );
 }
@@ -223,11 +224,11 @@ function BusquedaGlobal({ abierto, onCerrar }: { abierto: boolean; onCerrar: () 
   };
   const vacio = data && !data.clientes.length && !data.vehiculos.length && !data.ordenes.length;
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 p-4 pt-[10vh] backdrop-blur-[2px]" onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}>
-      <div className="mx-auto max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <div className="fixed inset-0 z-50 bg-petroleo-950/50 p-4 pt-[10vh] backdrop-blur-[2px]" onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}>
+      <div className="mx-auto max-w-xl overflow-hidden rounded-modal bg-white shadow-modal">
         <div className="flex items-center gap-2 border-b border-borde px-4">
-          <Search className="size-4 text-slate-400" />
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && onCerrar()} placeholder="Patente, cliente o N° de OT…" className="h-14 flex-1 bg-transparent text-base outline-none" />
+          <Search className="size-4 text-slate-500" />
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && onCerrar()} placeholder="Patente, cliente o N° de OT…" className="h-14 min-w-0 flex-1 bg-transparent text-base outline-none" />
           <Boton variante="fantasma" tam="sm" onClick={onCerrar} icono={<X className="size-4" />} aria-label="Cerrar" />
         </div>
         <div className="max-h-[60vh] overflow-y-auto p-2 text-sm">
@@ -244,14 +245,14 @@ function BusquedaGlobal({ abierto, onCerrar }: { abierto: boolean; onCerrar: () 
 function Grupo({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
     <div className="mb-2">
-      <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{titulo}</div>
+      <div className="px-3 py-1 text-micro font-semibold uppercase tracking-wider text-slate-500">{titulo}</div>
       {children}
     </div>
   );
 }
 function Resultado({ titulo, detalle, onClick }: { titulo: string; detalle: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="flex w-full flex-col rounded-lg px-3 py-2 text-left hover:bg-marca-50">
+    <button type="button" onClick={onClick} className="flex w-full flex-col rounded-ctl px-3 py-2 text-left hover:bg-marca-50">
       <span className="font-medium">{titulo}</span>
       <span className="text-xs text-tenue">{detalle}</span>
     </button>
@@ -288,7 +289,7 @@ export function Layout() {
   return (
     <div className="flex h-full">
       {/* Barra lateral (escritorio) */}
-      <aside className="no-print hidden w-64 shrink-0 flex-col border-r border-borde bg-white lg:flex">
+      <aside className="no-print hidden w-menu shrink-0 flex-col bg-petroleo-900 lg:flex">
         <div className="px-4 pb-1 pt-4"><Marca /></div>
         <Navegacion />
         <Usuario />
@@ -297,11 +298,11 @@ export function Layout() {
       {/* Menú deslizable (móvil/tablet) */}
       {menu && (
         <div className="no-print fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setMenu(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-white shadow-xl">
+          <div className="absolute inset-0 bg-petroleo-950/55" onClick={() => setMenu(false)} />
+          <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-petroleo-900 shadow-modal">
             <div className="flex items-center justify-between px-4 pb-1 pt-4">
               <Marca />
-              <Boton variante="fantasma" tam="sm" onClick={() => setMenu(false)} icono={<X className="size-4" />} aria-label="Cerrar menú" />
+              <Boton variante="fantasma" tam="sm" className="text-petroleo-200 hover:bg-white/10 hover:text-white" onClick={() => setMenu(false)} icono={<X className="size-4" />} aria-label="Cerrar menú" />
             </div>
             <Navegacion onNavegar={() => setMenu(false)} />
             <Usuario />
@@ -310,39 +311,40 @@ export function Layout() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="no-print sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-borde bg-white/90 px-3 backdrop-blur sm:px-5">
+        <header className="no-print sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-borde bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-8">
           <Boton variante="fantasma" tam="sm" className="lg:hidden" onClick={() => setMenu(true)} icono={<Menu className="size-5" />} aria-label="Abrir menú" />
           <div className="lg:hidden"><img src="/icon.svg" alt="Fierro" className="size-7" /></div>
           {puedeBuscar && (
             <button
               type="button"
               onClick={() => setBusqueda(true)}
-              className="ml-1 flex h-9 max-w-md flex-1 items-center gap-2 rounded-lg border border-borde bg-slate-50 px-3 text-left text-sm text-slate-400 hover:bg-slate-100"
+              className="ml-1 flex h-9 min-w-0 max-w-md flex-1 items-center gap-2 rounded-ctl border border-borde bg-superficie-2 px-3 text-left text-sm text-slate-500 hover:border-borde-fuerte hover:bg-slate-100"
             >
               <Search className="size-4" />
               <span className="flex-1 truncate">Buscar patente, cliente u OT…</span>
-              <kbd className="hidden rounded border border-borde bg-white px-1.5 text-[11px] text-tenue sm:inline">Ctrl K</kbd>
+              <kbd className="hidden rounded border border-borde bg-white px-1.5 text-micro text-tenue sm:inline">Ctrl K</kbd>
             </button>
           )}
-          <div className="ml-auto hidden text-right text-xs leading-tight text-tenue sm:block">
-            <div className="font-medium text-texto">{me?.taller.nombre}</div>
+          <div className="ml-auto hidden min-w-0 max-w-[40%] text-right text-xs leading-tight text-tenue sm:block">
+            <div className="truncate font-medium text-texto">{me?.taller.nombre}</div>
             {me?.licencia?.estado === 'suspendida' && <div className="font-medium text-red-600">Licencia suspendida · solo lectura</div>}
           </div>
         </header>
         {me?.licencia?.estado === 'suspendida' && (
-          <div className="no-print bg-red-600 px-4 py-2 text-center text-sm text-white sm:hidden">Licencia suspendida: solo lectura</div>
+          <div className="no-print bg-peligro-600 px-4 py-2 text-center text-sm text-white sm:hidden">Licencia suspendida: solo lectura</div>
         )}
-        <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-7xl px-3 py-5 pb-24 sm:px-6 lg:pb-8">
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          {/* Ancho máximo del contenido (1600 px): en monitores grandes queda centrado y en pantallas chicas ocupa todo el ancho. */}
+          <div className="mx-auto w-full max-w-contenido px-4 py-5 pb-24 sm:px-6 lg:px-8 lg:pb-10">
             <Migas />
             <Outlet />
           </div>
         </main>
 
         {/* Navegación inferior (móvil) */}
-        <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid border-t border-borde bg-white pb-[env(safe-area-inset-bottom)] lg:hidden" style={{ gridTemplateColumns: `repeat(${Math.max(atajos.length, 1)}, minmax(0, 1fr))` }}>
+        <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid border-t border-borde bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_12px_-6px_rgb(18_30_48/0.15)] lg:hidden" style={{ gridTemplateColumns: `repeat(${Math.max(atajos.length, 1)}, minmax(0, 1fr))` }}>
           {atajos.map((x) => (
-            <NavLink key={x.a} to={x.a} end={x.a === '/'} className={({ isActive }) => cn('flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium', isActive ? 'text-marca-700' : 'text-slate-500')}>
+            <NavLink key={x.a} to={x.a} end={x.a === '/'} className={({ isActive }) => cn('flex min-w-0 flex-col items-center gap-0.5 px-1 py-2 text-micro font-medium', isActive ? 'text-marca-700' : 'text-slate-500')}>
               {x.i}
               {x.t}
             </NavLink>

@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Car, Plus, UserRound, X } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Boton, Buscador, Campo, cn, Input, Modal, Select, Textarea, useDebounce, useToast } from './ui';
+import { AccionesForm, Boton, Buscador, Campo, cn, Input, Modal, Select, Textarea, useDebounce, useToast } from './ui';
 import { CONDICIONES_IVA, CONDICION_IVA_LABEL } from '@shared/dominio';
 
 export interface ClienteMin {
@@ -77,10 +77,10 @@ export function FormCliente({ inicial, onGuardado, onCancelar }: { inicial?: any
       <Campo label="Notas" className="sm:col-span-2">
         <Textarea value={f.notas} onChange={set('notas')} rows={2} />
       </Campo>
-      <div className="flex justify-end gap-2 sm:col-span-2">
+      <AccionesForm className="sm:col-span-2">
         <Boton onClick={onCancelar}>Cancelar</Boton>
         <Boton type="submit" variante="primario" cargando={m.isPending}>Guardar</Boton>
-      </div>
+      </AccionesForm>
     </form>
   );
 }
@@ -189,10 +189,10 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
       <Campo label="Notas" className="sm:col-span-2">
         <Textarea value={f.notas} onChange={set('notas')} rows={2} />
       </Campo>
-      <div className="flex justify-end gap-2 sm:col-span-2">
+      <AccionesForm className="sm:col-span-2">
         <Boton onClick={onCancelar}>Cancelar</Boton>
         <Boton type="submit" variante="primario" cargando={m.isPending}>Guardar</Boton>
-      </div>
+      </AccionesForm>
     </form>
   );
 }
@@ -205,11 +205,11 @@ export function SelectorCliente({ valor, onCambio }: { valor: ClienteMin | null;
   const { data = [], isFetching } = useQuery({ queryKey: ['clientes', { q: dq, sel: true }], queryFn: () => api.get<ClienteMin[]>(`/clientes?limite=8&q=${encodeURIComponent(dq)}`), enabled: !valor && dq.length >= 1 });
   if (valor) {
     return (
-      <div className="flex items-center justify-between gap-2 rounded-lg border border-marca-200 bg-marca-50/60 px-3 py-2">
+      <div className="flex items-center justify-between gap-2 rounded-ctl border border-marca-200 bg-marca-50/60 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <UserRound className="size-4 shrink-0 text-marca-600" />
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{valor.nombre}</div>
+            <div className="break-words text-sm font-medium">{valor.nombre}</div>
             <div className="truncate text-xs text-tenue">#{valor.codigo} {valor.telefono ? `· ${valor.telefono}` : ''}</div>
           </div>
         </div>
@@ -224,11 +224,11 @@ export function SelectorCliente({ valor, onCambio }: { valor: ClienteMin | null;
         <Boton icono={<Plus className="size-4" />} onClick={() => setAlta(true)}>Nuevo</Boton>
       </div>
       {dq && (
-        <ul className="mt-1.5 max-h-56 overflow-y-auto rounded-lg border border-borde bg-white text-sm shadow-sm">
+        <ul className="mt-1.5 max-h-56 overflow-y-auto rounded-ctl border border-borde bg-white text-sm shadow-pop">
           {data.map((c) => (
             <li key={c.id}>
               <button type="button" className="flex w-full justify-between gap-2 px-3 py-2 text-left hover:bg-marca-50" onClick={() => onCambio(c)}>
-                <span className="truncate font-medium">{c.nombre}</span>
+                <span className="break-words font-medium">{c.nombre}</span>
                 <span className="shrink-0 text-xs text-tenue">{c.telefono ?? `#${c.codigo}`}</span>
               </button>
             </li>
@@ -254,7 +254,7 @@ export function SelectorCliente({ valor, onCambio }: { valor: ClienteMin | null;
 export function SelectorVehiculo({ clienteId, valor, onCambio }: { clienteId: string | null; valor: string | null; onCambio: (id: string | null, v?: any) => void }) {
   const [alta, setAlta] = useState(false);
   const { data = [] } = useQuery({ queryKey: ['vehiculos', { cliente_id: clienteId }], queryFn: () => api.get<any[]>(`/vehiculos?cliente_id=${clienteId}`), enabled: !!clienteId });
-  if (!clienteId) return <p className="rounded-lg border border-dashed border-borde px-3 py-2.5 text-sm text-tenue">Elegí primero el cliente</p>;
+  if (!clienteId) return <p className="rounded-ctl border border-dashed border-borde px-3 py-2.5 text-sm text-tenue">Elegí primero el cliente</p>;
   return (
     <div>
       <div className="flex flex-wrap gap-2">
@@ -263,7 +263,7 @@ export function SelectorVehiculo({ clienteId, valor, onCambio }: { clienteId: st
             key={v.id}
             type="button"
             onClick={() => onCambio(v.id, v)}
-            className={cn('flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm', valor === v.id ? 'border-marca-400 bg-marca-50 ring-2 ring-marca-100' : 'border-borde bg-white hover:bg-slate-50')}
+            className={cn('flex items-center gap-2 rounded-ctl border px-3 py-2 text-left text-sm', valor === v.id ? 'border-marca-400 bg-marca-50 ring-2 ring-marca-100' : 'border-borde bg-white hover:bg-slate-50')}
           >
             <Car className="size-4 text-tenue" />
             <span>

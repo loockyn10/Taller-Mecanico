@@ -122,9 +122,9 @@ export function FormPlanMantenimiento({ vehiculoId, inicial, onCerrar }: { vehic
           </Campo>
         </div>
         {!inicial?.fecha_realizado && (
-          <div className="rounded-xl border border-borde p-3">
+          <div className="rounded-card border border-borde p-3">
             <p className="mb-2 text-[13px] font-medium">¿Cuándo se hizo por última vez? <span className="font-normal text-tenue">(si fue antes de usar Fierro)</span></p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Campo label="Fecha"><Input type="date" value={f.ultima_fecha} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ ...f, ultima_fecha: e.target.value })} /></Campo>
               <Campo label="Kilometraje"><Input value={f.ultima_km} onChange={(e) => setF({ ...f, ultima_km: e.target.value.replace(/\D/g, '') })} inputMode="numeric" /></Campo>
             </div>

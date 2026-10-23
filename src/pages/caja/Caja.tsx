@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { invalidarDinero, useEstadoCaja } from '@/lib/caja';
 import { descargarCSV, pesosCSV } from '@/lib/csv';
 import { fecha, fechaHora, hoyISO, money, numero, sumarDias } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Indicador, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, Textarea, useDebounce, useToast, Vacio } from '@/components/ui';
+import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Indicador, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, TablaApilable, Tarjeta, Textarea, useDebounce, useToast, Vacio } from '@/components/ui';
 import { ModalGasto } from '@/components/FormGasto';
 import { MEDIOS_PAGO, MEDIO_PAGO_LABEL, RUBRO_CAJA_LABEL, type MedioPago, type RubroCaja } from '@shared/dominio';
 
@@ -128,7 +128,7 @@ function ModalArqueo({ esperado, onCerrar }: { esperado: number; onCerrar: () =>
         <p className="text-sm text-tenue">Contá el efectivo de la caja. El arqueo queda registrado pero <strong>no cierra</strong> la caja.</p>
         <ConteoEfectivo cantidades={cant} onChange={setCant} />
         <Campo label="Otros importes en efectivo (monedas sueltas, vales…)"><InputMoneda value={otros} onChange={setOtros} /></Campo>
-        <div className="grid grid-cols-3 gap-3 rounded-xl bg-slate-50 p-3 text-center text-sm">
+        <div className="grid grid-cols-3 gap-3 rounded-card bg-slate-50 p-3 text-center text-sm">
           <div><div className="text-xs text-tenue">Esperado</div><div className="font-semibold tabular-nums">{money(esperado)}</div></div>
           <div><div className="text-xs text-tenue">Contado</div><div className="font-semibold tabular-nums">{money(contado)}</div></div>
           <div><div className="text-xs text-tenue">Diferencia</div><div className={dif === 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-red-600'}>{money(dif)}</div></div>
@@ -177,7 +177,7 @@ function ModalCierre({ sesion, onCerrar }: { sesion: NonNullable<ReturnType<type
           <ConteoEfectivo cantidades={cant} onChange={setCant} />
           <Campo label="Otros importes en efectivo" className="mt-3 sm:max-w-xs"><InputMoneda value={otros} onChange={setOtros} /></Campo>
         </div>
-        <div className="grid grid-cols-3 gap-3 rounded-xl bg-slate-50 p-3 text-center text-sm">
+        <div className="grid grid-cols-3 gap-3 rounded-card bg-slate-50 p-3 text-center text-sm">
           <div><div className="text-xs text-tenue">Esperado (inicial {money(s.saldo_inicial)} + movimientos)</div><div className="font-semibold tabular-nums">{money(esperado)}</div></div>
           <div><div className="text-xs text-tenue">Declarado</div><div className="font-semibold tabular-nums">{money(contado)}</div></div>
           <div><div className="text-xs text-tenue">Diferencia</div><div className={dif === 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-red-600'}>{money(dif)}</div></div>
@@ -369,24 +369,24 @@ function DetalleSesion({ id, onCerrar }: { id: string; onCerrar: () => void }) {
           {s.estado === 'cerrada' && (
             <div>
               <h3 className="mb-2 text-sm font-semibold">Cierre: esperado vs. declarado</h3>
-              <table className="w-full text-sm">
-                <thead><tr className="border-b border-borde text-left text-xs uppercase text-tenue"><th className="py-2">Medio</th><th className="py-2 text-right">Esperado</th><th className="py-2 text-right">Declarado</th><th className="py-2 text-right">Diferencia</th></tr></thead>
+              <TablaApilable><table className="w-full text-sm">
+                <thead><tr className="border-b border-borde text-left text-xs font-semibold uppercase tracking-wide text-tenue"><th className="py-2">Medio</th><th className="py-2 text-right">Esperado</th><th className="py-2 text-right">Declarado</th><th className="py-2 text-right">Diferencia</th></tr></thead>
                 <tbody>{s.cierre.map((c: any) => <tr key={c.medio} className="border-b border-borde last:border-0"><td className="py-2">{MEDIO_PAGO_LABEL[c.medio as MedioPago]}</td><td className="py-2 text-right tabular-nums">{money(c.esperado)}</td><td className="py-2 text-right tabular-nums">{money(c.declarado)}</td><td className="py-2 text-right tabular-nums">{money(c.diferencia)}</td></tr>)}</tbody>
-              </table>
+              </table></TablaApilable>
               {s.notas_cierre && <p className="mt-2 text-sm"><span className="font-medium">Notas del cierre:</span> {s.notas_cierre}</p>}
             </div>
           )}
           {s.arqueos.length > 0 && (
             <div>
               <h3 className="mb-2 text-sm font-semibold">Arqueos durante la jornada</h3>
-              <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
+              <ul className="divide-y divide-borde rounded-ctl border border-borde text-sm">
                 {s.arqueos.map((a: any) => <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"><span>{fechaHora(a.created_at)} · {a.usuario ?? '—'}</span><span className="tabular-nums">esperado {money(a.esperado)} · contado {money(a.contado)}</span><Diferencia valor={a.diferencia} /></li>)}
               </ul>
             </div>
           )}
           <div>
             <h3 className="mb-2 text-sm font-semibold">Movimientos ({movs.length})</h3>
-            <div className="rounded-xl border border-borde"><TablaMovimientos filas={movs} /></div>
+            <div className="rounded-card border border-borde"><TablaMovimientos filas={movs} /></div>
           </div>
         </div>
       )}
@@ -402,7 +402,7 @@ function Historial() {
   const { data = [], isLoading, error, refetch } = useQuery({ queryKey: ['caja', 'sesiones', { desde, hasta, conDif }], queryFn: () => api.get<any[]>(`/caja/sesiones${qs({ desde, hasta, con_diferencia: conDif })}`) });
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Campo>
         <Campo label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Campo>
         <label className="mb-2 flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-marca-600" checked={conDif} onChange={(e) => setConDif(e.target.checked)} /> Sólo con diferencias</label>
@@ -448,8 +448,8 @@ function Reportes() {
   const tabla = (titulo: string, filas: any[], etiqueta: (f: any) => string) => (
     <Tarjeta titulo={titulo} sinPadding>
       {filas.length === 0 ? <p className="px-4 py-6 text-center text-sm text-tenue">Sin datos</p> : (
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-borde text-left text-xs uppercase text-tenue"><th className="px-4 py-2" /><th className="px-2 py-2 text-right">Ingresos</th><th className="px-2 py-2 text-right">Egresos</th><th className="px-4 py-2 text-right">Neto</th></tr></thead>
+        <TablaApilable><table className="w-full text-sm">
+          <thead><tr className="border-b border-borde text-left text-xs font-semibold uppercase tracking-wide text-tenue"><th className="px-4 py-2" /><th className="px-2 py-2 text-right">Ingresos</th><th className="px-2 py-2 text-right">Egresos</th><th className="px-4 py-2 text-right">Neto</th></tr></thead>
           <tbody>
             {filas.map((f, i) => {
               const ing = f.ingresos ?? Math.max(f.neto, 0);
@@ -457,14 +457,14 @@ function Reportes() {
               return <tr key={i} className="border-b border-borde last:border-0"><td className="px-4 py-2">{etiqueta(f)}</td><td className="px-2 py-2 text-right tabular-nums">{money(ing)}</td><td className="px-2 py-2 text-right tabular-nums">{money(egr)}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{money(f.neto ?? ing - egr)}</td></tr>;
             })}
           </tbody>
-        </table>
+        </table></TablaApilable>
       )}
     </Tarjeta>
   );
   const dias = useMemo(() => (data?.por_dia ?? []).map((d: any) => ({ ...d, neto: d.ingresos - d.egresos })), [data]);
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Campo>
         <Campo label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Campo>
         <Boton icono={<Download className="size-4" />} disabled={!data} onClick={exportar}>Exportar CSV</Boton>

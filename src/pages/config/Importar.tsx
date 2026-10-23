@@ -7,7 +7,7 @@ import { leerArchivo, type ArchivoLeido } from '@/lib/archivo';
 import { descargarCSV } from '@/lib/csv';
 import { fechaHora } from '@/lib/format';
 import { ETIQUETA_ACCION, informeProblemas, marcarDuplicadosDelArchivo, prepararHoja, valoresDe, type FilaOrigen } from '@/lib/importar';
-import { Aviso, Boton, Campo, Cargando, Check, cn, Encabezado, Insignia, Select, Tabla, Tarjeta, useToast } from '@/components/ui';
+import { Aviso, Boton, Campo, Cargando, Check, cn, Encabezado, Insignia, Select, Tabla, TablaApilable, Tarjeta, useToast } from '@/components/ui';
 import { SelectorCliente, type ClienteMin } from '@/components/selectores';
 import {
   camposDe, detectarSeparadorDecimal, encabezadosEjemplo, filaEjemplo, LIMITES_IMPORTACION, MODO_IMPORTACION_LABEL, MODOS_IMPORTACION, sugerirMapeo, TIPO_IMPORTACION_LABEL, TIPOS_IMPORTACION,
@@ -211,7 +211,7 @@ export function Importar() {
           <Tarjeta titulo="¿Qué querés importar?">
             <div className="grid gap-3 sm:grid-cols-2">
               {TIPOS_IMPORTACION.map((t) => (
-                <button key={t} type="button" onClick={() => { setTipo(t); setArchivo(null); setError(null); }} className={cn('rounded-xl border p-4 text-left transition-colors', tipo === t ? 'border-marca-500 bg-marca-50 ring-1 ring-marca-300' : 'border-borde hover:bg-slate-50')}>
+                <button key={t} type="button" onClick={() => { setTipo(t); setArchivo(null); setError(null); }} className={cn('rounded-card border p-4 text-left transition-colors', tipo === t ? 'border-marca-500 bg-marca-50 ring-1 ring-marca-300' : 'border-borde hover:bg-slate-50')}>
                   <p className="font-semibold">{TIPO_IMPORTACION_LABEL[t]}</p>
                   <p className="mt-0.5 text-sm text-tenue">{DESCRIPCION[t].texto}</p>
                   {DESCRIPCION[t].antes && <p className="mt-1 text-xs text-amber-700">{DESCRIPCION[t].antes}</p>}
@@ -229,7 +229,7 @@ export function Importar() {
               <div
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); elegirArchivo(e.dataTransfer.files?.[0]); }}
-                className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-borde px-4 py-8 text-center"
+                className="flex flex-col items-center gap-2 rounded-card border-2 border-dashed border-borde px-4 py-8 text-center"
               >
                 <FileSpreadsheet className="size-8 text-slate-300" />
                 {archivo ? (
@@ -317,9 +317,9 @@ export function Importar() {
             )}
           </Tarjeta>
           <Tarjeta titulo="Vista previa" subtitulo="Las primeras filas, tal como se leerían con esta relación de columnas" sinPadding>
-            <div className="overflow-x-auto">
+            <TablaApilable>
               <table className="w-full text-sm">
-                <thead><tr className="border-b border-borde bg-slate-50 text-left text-xs uppercase text-tenue"><th className="px-3 py-2">Fila</th>{campos.filter((c) => mapeo[c.clave] != null).map((c) => <th key={c.clave} className="px-3 py-2">{c.etiqueta}</th>)}</tr></thead>
+                <thead><tr className="border-b border-borde bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-tenue"><th className="px-3 py-2">Fila</th>{campos.filter((c) => mapeo[c.clave] != null).map((c) => <th key={c.clave} className="px-3 py-2">{c.etiqueta}</th>)}</tr></thead>
                 <tbody>
                   {filas.slice(0, 6).map((f) => (
                     <tr key={f.n} className="border-b border-borde last:border-0">
@@ -329,7 +329,7 @@ export function Importar() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TablaApilable>
           </Tarjeta>
           {faltantes.length > 0 && <Aviso tono="ambar">Falta relacionar: {faltantes.map((f) => f.etiqueta).join(', ')}.</Aviso>}
           {!tieneReferencia && <Aviso tono="ambar">Para vincular cada vehículo con su cliente relacioná al menos una de las columnas del cliente (documento, código o nombre).</Aviso>}
@@ -346,7 +346,7 @@ export function Importar() {
           <Tarjeta titulo="¿Qué hacemos con los registros que ya existen?" subtitulo="Los nombres nunca se usan para detectar repetidos: dos personas pueden llamarse igual. Se usan el documento, la patente, los códigos y el CUIT.">
             <div className="space-y-2">
               {MODOS_IMPORTACION.map((m) => (
-                <label key={m} className={cn('flex cursor-pointer gap-3 rounded-lg border p-3', modo === m ? 'border-marca-500 bg-marca-50' : 'border-borde')}>
+                <label key={m} className={cn('flex cursor-pointer gap-3 rounded-ctl border p-3', modo === m ? 'border-marca-500 bg-marca-50' : 'border-borde')}>
                   <input type="radio" name="modo" checked={modo === m} onChange={() => setModo(m)} className="mt-1" />
                   <span><span className="block font-medium">{MODO_IMPORTACION_LABEL[m].titulo}</span><span className="block text-sm text-tenue">{MODO_IMPORTACION_LABEL[m].detalle}</span></span>
                 </label>
@@ -368,7 +368,7 @@ export function Importar() {
                 <div className="space-y-3">
                   <Check checked={stock.activo} onChange={(v) => setStock({ ...stock, activo: v, confirmado: false })} label="Cargar también las existencias del archivo como stock inicial" />
                   {stock.activo && (
-                    <div className="ml-6 space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm">
+                    <div className="ml-6 space-y-3 rounded-ctl border border-amber-200 bg-amber-50/60 p-3 text-sm">
                       <p>Para cada artículo <b>nuevo</b> se registra una <b>entrada de stock</b> valorizada a su costo. En Contabilidad aparece como “entradas de mercadería sin compra (a clasificar)”. No se cargan existencias en artículos que ya existían ni se generan deudas ni saldos.</p>
                       {puede('stock.ajustar') ? (
                         <>
@@ -406,7 +406,7 @@ export function Importar() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {([['crear', 'Se crean', 'text-emerald-700'], ['actualizar', 'Se actualizan', 'text-marca-700'], ['omitir', 'Se omiten', 'text-slate-600'], ['error', 'Con errores', 'text-red-700']] as const).map(([k, t, c]) => (
-              <button key={k} type="button" onClick={() => setFiltro(k)} className={cn('rounded-xl border bg-white p-3 text-left', filtro === k ? 'border-marca-400 ring-1 ring-marca-300' : 'border-borde')}>
+              <button key={k} type="button" onClick={() => setFiltro(k)} className={cn('rounded-card border bg-white p-3 text-left', filtro === k ? 'border-marca-400 ring-1 ring-marca-300' : 'border-borde')}>
                 <p className="text-xs text-tenue">{t}</p>
                 <p className={cn('text-2xl font-bold tabular-nums', c)}>{resumen[k]}</p>
               </button>
@@ -417,7 +417,7 @@ export function Importar() {
             <Tarjeta titulo="Referencias para resolver" subtitulo="Estas filas apuntan a registros que no se encontraron (o hay más de uno). Elegí a cuál corresponde cada uno y volvé a revisar; o importá primero lo que falta.">
               <div className="space-y-3">
                 {pendientes.map(([k, p]) => (
-                  <div key={k} className="grid gap-2 rounded-lg border border-borde p-3 sm:grid-cols-[1fr_1.2fr] sm:items-center">
+                  <div key={k} className="grid gap-2 rounded-ctl border border-borde p-3 sm:grid-cols-[1fr_1.2fr] sm:items-center">
                     <div className="text-sm">
                       <p className="font-medium">{p.tipo === 'cliente' ? 'Cliente' : 'Proveedor'}: {p.etiqueta}</p>
                       <p className="text-xs text-tenue">{p.motivo === 'ambiguo' ? 'Hay más de uno que coincide' : 'No existe en Fierro'} · {p.filas.length} fila{p.filas.length === 1 ? '' : 's'} (ej.: {p.filas.slice(0, 4).join(', ')})</p>
@@ -508,7 +508,7 @@ export function Importar() {
               <div className="flex items-center gap-2 text-emerald-700"><CheckCircle2 className="size-6" /><span className="text-lg font-semibold">Listo</span></div>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 {([['Creados', final.creados], ['Actualizados', final.actualizados], ['Omitidos', final.omitidos], ['Con errores', final.errores]] as const).map(([t, v]) => (
-                  <div key={t} className="rounded-xl border border-borde p-3"><p className="text-xs text-tenue">{t}</p><p className="text-2xl font-bold tabular-nums">{v}</p></div>
+                  <div key={t} className="rounded-card border border-borde p-3"><p className="text-xs text-tenue">{t}</p><p className="text-2xl font-bold tabular-nums">{v}</p></div>
                 ))}
               </div>
               {final.previa && <Aviso tono="ambar">Este mismo archivo ya se había importado antes ({fechaHora(final.previa.created_at)}{final.previa.usuario ? `, por ${final.previa.usuario}` : ''}). Lo que ya existía se omitió o actualizó según la opción elegida.</Aviso>}

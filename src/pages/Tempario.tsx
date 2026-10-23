@@ -74,7 +74,7 @@ function Tarifas({ cats }: { cats: any[] }) {
         </Campo>
       </div>
       {cats.length > 0 && (
-        <details className="mt-4 rounded-xl border border-borde px-3 py-2" open={Object.values(actual.categorias).some((v) => v)}>
+        <details className="mt-4 rounded-card border border-borde px-3 py-2" open={Object.values(actual.categorias).some((v) => v)}>
           <summary className="cursor-pointer text-sm font-medium">Tarifas por categoría (opcional)</summary>
           <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {cats.map((c) => (
@@ -109,13 +109,13 @@ function TiemposEspecificos({ servicio, puedeEditar }: { servicio: any; puedeEdi
   const quitar = useMutation({ mutationFn: (id: string) => api.del(`/tempario/tiempos/${id}`), onSuccess: inv, onError: toast.error });
   const criterio = (r: any) => [r.modelo ? `${r.marca} ${r.modelo}` : r.marca, r.motor ? `motor ${r.motor}` : null, r.anio_desde || r.anio_hasta ? `años ${r.anio_desde ?? '…'}–${r.anio_hasta ?? '…'}` : null].filter(Boolean).join(' · ');
   return (
-    <div className="space-y-3 rounded-xl border border-borde bg-slate-50/60 p-3">
+    <div className="space-y-3 rounded-card border border-borde bg-slate-50/60 p-3">
       <div>
         <h4 className="text-sm font-semibold">Tiempos específicos (opcional)</h4>
         <p className="text-xs text-tenue">Si el vehículo coincide con una regla, se usa su tiempo en lugar del general ({formatearMinutos(servicio.tiempo_min)}). Gana la regla más específica: modelo, marca, motorización, años.</p>
       </div>
       {reglas.length > 0 && (
-        <ul className="divide-y divide-borde rounded-lg border border-borde bg-white text-sm">
+        <ul className="divide-y divide-borde rounded-ctl border border-borde bg-white text-sm">
           {reglas.map((r) => (
             <li key={r.id} className="flex items-center justify-between gap-2 px-3 py-2">
               <span className="min-w-0 truncate">{criterio(r)}</span>
@@ -166,7 +166,7 @@ function ImportarPlantilla({ onCerrar }: { onCerrar: () => void }) {
         {cats.map((cat) => (
           <div key={cat}>
             <h4 className="mb-1 text-sm font-semibold">{cat}</h4>
-            <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
+            <ul className="divide-y divide-borde rounded-ctl border border-borde text-sm">
               {ops.filter((o) => o.categoria === cat).map((o) => (
                 <li key={o.codigo} className="flex items-center justify-between gap-3 px-3 py-2">
                   <Check checked={elegidas.has(o.codigo)} disabled={o.estado === 'existente'} onChange={(v) => { const s = new Set(elegidas); if (v) s.add(o.codigo); else s.delete(o.codigo); setSel(s); }} label={<span><span className="mr-2 font-mono text-xs text-tenue">{o.codigo}</span>{o.nombre}</span>} />
@@ -311,7 +311,7 @@ export function Tempario() {
               </Aviso>
             )}
             {verPrecios && (
-              <div className="grid gap-3 rounded-xl border border-borde p-3 sm:grid-cols-2">
+              <div className="grid gap-3 rounded-card border border-borde p-3 sm:grid-cols-2">
                 <Campo label="Cómo se calcula la mano de obra">
                   <Select value={f.modo_precio} onChange={(e) => setF({ ...f, modo_precio: e.target.value })}>
                     <option value="fijo">Precio fijo</option>

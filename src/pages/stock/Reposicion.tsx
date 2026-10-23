@@ -65,7 +65,7 @@ export function Reposicion() {
           <Boton icono={<Download className="size-4" />} onClick={() => descargarCSV('reposicion', ['Artículo', 'Código', 'Proveedor', 'Stock', 'Mínimo', 'Sugerido', 'Costo unitario'], data.map((a) => [a.nombre, a.codigo ?? '', a.proveedor ?? '', a.stock, a.stock_minimo, cantidadDe(a), pesosCSV(a.costo)]))}>Exportar CSV</Boton>
         )}
       />
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-center gap-3">
         <Select value={vista} onChange={(e) => { setVista(e.target.value); setSel({}); setCant({}); }} className="w-auto" aria-label="Vista de reposición">
           <option value="">Mínimo general (sobre el stock total)</option>
           {depositos.filter((d) => d.activo).map((d) => <option key={d.id} value={d.id}>Mínimos del depósito: {d.nombre}</option>)}
@@ -102,7 +102,7 @@ export function Reposicion() {
                     <li key={clave_fila(a)} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-2.5 text-sm">
                       {puede('compras.gestionar') ? <input type="checkbox" className="size-4 accent-marca-600" checked={clave_fila(a) in sel} onChange={(e) => setSel((s) => { const n = { ...s }; if (e.target.checked) n[clave_fila(a)] = 1; else delete n[clave_fila(a)]; return n; })} aria-label={`Seleccionar ${a.nombre}`} /> : <span />}
                       <div className="min-w-0">
-                        <div className="truncate font-medium">{a.nombre}</div>
+                        <div className="break-words font-medium">{a.nombre}</div>
                         <div className="text-xs text-tenue">{[a.codigo, a.marca].filter(Boolean).join(' · ')}{a.deposito ? <Insignia tono="azul" className="ml-2">{a.deposito}</Insignia> : null}</div>
                       </div>
                       <div className="flex items-center gap-3 text-right">
@@ -122,7 +122,7 @@ export function Reposicion() {
             );
           })}
           {seleccionados.length > 0 && (
-            <div className="flex items-center justify-between rounded-xl border border-marca-200 bg-marca-50 px-4 py-3 text-sm">
+            <div className="flex items-center justify-between rounded-card border border-marca-200 bg-marca-50 px-4 py-3 text-sm">
               <span><Insignia tono="azul">{seleccionados.length}</Insignia> seleccionado(s) de distintos proveedores: armá la compra grupo por grupo.</span>
               <Boton tam="sm" onClick={() => setSel({})}>Limpiar selección</Boton>
             </div>

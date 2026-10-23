@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CalendarClock, ChevronLeft, ChevronRight, Plus, Wrench } from 'lucide-react';
 import { api } from '@/lib/api';
 import { hoyISO, money, numero, sumarDias } from '@/lib/format';
-import { Aviso, Boton, Campo, Cargando, Encabezado, Input, Modal, Select, Tarjeta, Textarea, useConfirmar, useToast, cn } from '@/components/ui';
+import { Aviso, Boton, BotonIcono, Campo, Cargando, cn, Encabezado, Input, Modal, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoTurnoBadge } from '@/components/estados';
 import { SelectorCliente, SelectorVehiculo, useMecanicos, type ClienteMin } from '@/components/selectores';
 import { ESTADOS_TURNO, ESTADO_TURNO_LABEL } from '@shared/dominio';
@@ -53,7 +53,7 @@ function FormTurno({ inicial, onCerrar, extra }: { inicial: any; onCerrar: () =>
       pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="primario" disabled={!cliente} cargando={m.isPending} onClick={() => m.mutate()}>Guardar</Boton></>}
     >
       <div className="space-y-4">
-        {extra && <div className="flex flex-wrap gap-2 rounded-lg bg-slate-50 p-2">{extra}</div>}
+        {extra && <div className="flex flex-wrap gap-2 rounded-ctl bg-slate-50 p-2">{extra}</div>}
         {inicial.presupuesto_numero && <Aviso>Vinculado al presupuesto P-{numero(inicial.presupuesto_numero)}</Aviso>}
         <SelectorCliente valor={cliente} onCambio={(c) => { setCliente(c); setF({ ...f, vehiculo_id: null }); }} />
         <SelectorVehiculo clienteId={cliente?.id ?? null} valor={f.vehiculo_id} onCambio={(v) => setF({ ...f, vehiculo_id: v })} />
@@ -154,21 +154,21 @@ export function Agenda() {
             const delDia = turnos.filter((t) => t.fecha === d);
             const fechaD = new Date(`${d}T12:00:00`);
             return (
-              <div key={d} className={cn('min-h-32 rounded-xl border bg-white', d === hoy ? 'border-marca-300 ring-2 ring-marca-100' : 'border-borde')}>
+              <div key={d} className={cn('min-h-32 rounded-card border bg-white', d === hoy ? 'border-marca-300 ring-2 ring-marca-100' : 'border-borde')}>
                 <div className="flex items-center justify-between border-b border-borde px-3 py-2">
                   <span className="text-sm font-semibold capitalize">{fechaD.toLocaleDateString('es-AR', { weekday: 'short' })} {fechaD.getDate()}</span>
-                  <button type="button" onClick={() => setForm({ fecha: d })} className="rounded p-1 text-tenue hover:bg-slate-100" aria-label="Agregar turno"><Plus className="size-4" /></button>
+                  <BotonIcono etiqueta="Agregar turno" className="-my-1 size-8" onClick={() => setForm({ fecha: d })}><Plus className="size-4" /></BotonIcono>
                 </div>
                 <div className="space-y-1.5 p-2">
                   {delDia.map((t) => (
-                    <button key={t.id} type="button" onClick={() => setForm(t)} className={cn('w-full rounded-lg border px-2 py-1.5 text-left text-xs hover:border-marca-300', t.estado === 'cancelado' || t.estado === 'ausente' ? 'border-borde bg-slate-50 text-tenue line-through' : 'border-marca-100 bg-marca-50/50')}>
+                    <button key={t.id} type="button" onClick={() => setForm(t)} className={cn('w-full rounded-ctl border px-2 py-1.5 text-left text-xs hover:border-marca-300', t.estado === 'cancelado' || t.estado === 'ausente' ? 'border-borde bg-slate-50 text-tenue line-through' : 'border-marca-100 bg-marca-50/50')}>
                       <div className="font-semibold">{t.hora} · {t.patente ?? 'Sin vehículo'}</div>
                       <div className="truncate">{t.cliente}</div>
                       {t.motivo && <div className="truncate text-tenue">{t.motivo}</div>}
                       <div className="mt-1"><EstadoTurnoBadge estado={t.estado} /></div>
                     </button>
                   ))}
-                  {!delDia.length && <p className="py-2 text-center text-xs text-slate-400">Libre</p>}
+                  {!delDia.length && <p className="py-2 text-center text-xs text-slate-500">Libre</p>}
                 </div>
               </div>
             );

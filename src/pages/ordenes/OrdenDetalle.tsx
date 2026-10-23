@@ -129,7 +129,7 @@ function CambiarEstado({ orden, onCerrar, soloTaller }: { orden: any; onCerrar: 
       <div className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-2">
           {opciones.map((e) => (
-            <button key={e} type="button" onClick={() => setDestino(e)} className={`rounded-lg border px-3 py-2.5 text-left text-sm font-medium ${destino === e ? 'border-marca-400 bg-marca-50 ring-2 ring-marca-100' : 'border-borde hover:bg-slate-50'}`}>
+            <button key={e} type="button" onClick={() => setDestino(e)} className={`rounded-ctl border px-3 py-2.5 text-left text-sm font-medium ${destino === e ? 'border-marca-400 bg-marca-50 ring-2 ring-marca-100' : 'border-borde hover:bg-slate-50'}`}>
               {ESTADO_OT_LABEL[e]}
             </button>
           ))}
@@ -149,7 +149,7 @@ function ItemsSinImportes({ items }: { items: any[] }) {
     <ul className="divide-y divide-borde text-sm">
       {items.map((i) => (
         <li key={i.id} className="flex items-center justify-between gap-3 py-2.5">
-          <span className="min-w-0 truncate">{i.descripcion}</span>
+          <span className="min-w-0 break-words">{i.descripcion}</span>
           <span className="shrink-0 tabular-nums text-tenue">{i.tipo === 'articulo' ? 'Repuesto' : 'Trabajo'} · ×{i.cantidad}</span>
         </li>
       ))}

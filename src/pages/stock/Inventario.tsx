@@ -25,7 +25,7 @@ function Valorizado() {
   const exportar = () => data && descargarCSV('inventario-valorizado', ['Código', 'Artículo', 'Categoría', 'Proveedor', 'Stock', 'Unidad', 'Costo unitario', 'Valor a costo', 'Precio unitario', 'Valor a precio'], data.items.map((i: any) => [i.codigo ?? '', i.nombre, i.categoria, i.proveedor ?? '', coma(i.stock), i.unidad, pesosCSV(i.costo), pesosCSV(i.valor_costo), pesosCSV(i.precio), pesosCSV(i.valor_venta)]));
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-end gap-3 no-print">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3 no-print">
         <Buscador value={q} onChange={setQ} placeholder="Artículo o código…" className="min-w-52 flex-1" />
         <Campo label="Categoría"><Select value={cat} onChange={(e) => setCat(e.target.value)} className="w-auto"><option value="">Todas</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}<option value="sin">Sin categoría</option></Select></Campo>
         <Campo label="Proveedor"><Select value={prov} onChange={(e) => setProv(e.target.value)} className="w-auto"><option value="">Todos</option>{provs.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</Select></Campo>

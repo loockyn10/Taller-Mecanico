@@ -138,7 +138,7 @@ function MinimosDeposito({ articulo }: { articulo: any }) {
           const v = actual[d.id];
           const bajo = v.minimo !== '' && d.stock <= Number(v.minimo);
           return (
-            <div key={d.id} className="rounded-lg border border-borde p-3 text-sm">
+            <div key={d.id} className="rounded-ctl border border-borde p-3 text-sm">
               <div className="mb-2 flex items-center justify-between"><span className="font-medium">{d.nombre}</span><span className={bajo ? 'font-semibold text-amber-700' : 'text-tenue'}>Stock {cantidad(d.stock)}{bajo ? ' · bajo el mínimo' : ''}</span></div>
               <div className="grid grid-cols-2 gap-2">
                 <Campo label="Mínimo"><Input type="number" min={0} step="any" disabled={!edita} value={v.minimo} onChange={(e) => setF({ ...actual, [d.id]: { ...v, minimo: e.target.value } })} placeholder="Sin mínimo" /></Campo>
@@ -210,7 +210,7 @@ export function Articulos() {
   return (
     <>
       <Encabezado titulo="Artículos y stock" subtitulo="Repuestos, lubricantes e insumos" acciones={<>{puede('stock.ver') && <Boton icono={<ShoppingCart className="size-4" />} onClick={() => nav('/reposicion')}>Reposición</Boton>}{puede('catalogo.editar') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setForm(true)}>Nuevo artículo</Boton>}</>} />
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-center gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Nombre, código, marca o código de barras" className="min-w-56 flex-1" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (a) nav(`/articulos/${a.id}`); }} />
         <Select value={cat} onChange={(e) => setCat(e.target.value)} className="w-auto">
           <option value="">Todas las categorías</option>

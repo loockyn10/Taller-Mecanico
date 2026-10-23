@@ -5,7 +5,7 @@ import { Columns3, List, Plus, Wrench } from 'lucide-react';
 import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, money, numero } from '@/lib/format';
-import { Boton, Buscador, Cargando, Encabezado, ErrorCaja, Select, Tabla, Tarjeta, useDebounce, Vacio, cn } from '@/components/ui';
+import { Boton, Buscador, Cargando, cn, Encabezado, ErrorCaja, Segmentado, Select, Tabla, Tarjeta, useDebounce, Vacio } from '@/components/ui';
 import { EstadoOTBadge, TONO_OT } from '@/components/estados';
 import { useMecanicos } from '@/components/selectores';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADO_OT_LABEL } from '@shared/dominio';
@@ -37,7 +37,7 @@ export function Ordenes() {
   return (
     <>
       <Encabezado titulo="Órdenes de trabajo" subtitulo="Seguimiento de los vehículos en el taller" acciones={puede('ordenes.crear') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/ordenes/nueva')}>Nueva OT</Boton>} />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="filtros mb-4 flex flex-wrap items-center gap-2">
         <Buscador value={q} onChange={setQ} placeholder="Patente, cliente o N° de OT" className="min-w-56 flex-1" />
         <Select value={estado} onChange={(e) => setSp(e.target.value === 'abiertas' ? {} : { estado: e.target.value })} className="w-auto">
           <option value="abiertas">Abiertas</option>
@@ -49,10 +49,7 @@ export function Ordenes() {
           {mecanicos.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}
         </Select>
         {estado === 'abiertas' && (
-          <div className="flex rounded-lg border border-borde bg-white p-0.5">
-            <button type="button" onClick={() => cambiarVista('tablero')} className={cn('flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm', vista === 'tablero' ? 'bg-marca-50 text-marca-700' : 'text-tenue')}><Columns3 className="size-4" /> Tablero</button>
-            <button type="button" onClick={() => cambiarVista('lista')} className={cn('flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm', vista === 'lista' ? 'bg-marca-50 text-marca-700' : 'text-tenue')}><List className="size-4" /> Lista</button>
-          </div>
+          <Segmentado activo={vista} onCambio={cambiarVista} items={[{ clave: 'tablero', titulo: 'Tablero', icono: <Columns3 className="size-4" /> }, { clave: 'lista', titulo: 'Lista', icono: <List className="size-4" /> }]} />
         )}
       </div>
 
@@ -61,18 +58,19 @@ export function Ordenes() {
       ) : error ? (
         <ErrorCaja error={error} reintentar={refetch} />
       ) : tablero ? (
-        <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-3 sm:mx-0 sm:px-0">
+        // Las columnas se reparten en filas según el ancho disponible: el tablero nunca obliga a desplazarse en horizontal.
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(16.5rem,100%),1fr))] items-start gap-3">
           {ESTADOS_OT_ABIERTOS.map((e) => {
             const col = data.filter((o) => o.estado === e);
             return (
-              <div key={e} className={cn('w-72 shrink-0 rounded-xl border border-t-4 border-borde bg-slate-50/70', BORDE[TONO_OT[e]])}>
+              <div key={e} className={cn('min-w-0 rounded-card border border-t-4 border-borde bg-superficie-2', BORDE[TONO_OT[e]])}>
                 <div className="flex items-center justify-between px-3 py-2.5">
                   <span className="text-sm font-semibold">{ESTADO_OT_LABEL[e]}</span>
                   <span className="rounded-full bg-white px-2 text-xs font-medium text-tenue ring-1 ring-borde">{col.length}</span>
                 </div>
                 <div className="space-y-2 px-2 pb-2">
                   {col.map((o) => (
-                    <Link key={o.id} to={`/ordenes/${o.id}`} className="block rounded-lg border border-borde bg-white p-3 shadow-sm transition hover:border-marca-300 hover:shadow">
+                    <Link key={o.id} to={`/ordenes/${o.id}`} className="block rounded-ctl border border-borde bg-white p-3 shadow-card transition hover:border-marca-300 hover:shadow-pop">
                       <div className="flex items-center justify-between">
                         <span className="font-bold tracking-wide">{o.patente}</span>
                         <span className="text-xs text-tenue">#{numero(o.numero)}</span>
@@ -86,7 +84,7 @@ export function Ordenes() {
                       {o.fecha_prometida && <div className={cn('mt-1 text-xs', o.fecha_prometida < new Date().toISOString().slice(0, 10) ? 'font-medium text-red-600' : 'text-tenue')}>Prometida: {fecha(o.fecha_prometida)}</div>}
                     </Link>
                   ))}
-                  {!col.length && <p className="px-1 py-4 text-center text-xs text-slate-400">—</p>}
+                  {!col.length && <p className="px-1 py-4 text-center text-xs text-slate-500">—</p>}
                 </div>
               </div>
             );

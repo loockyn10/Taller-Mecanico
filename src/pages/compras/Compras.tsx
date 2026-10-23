@@ -43,7 +43,7 @@ export function Compras() {
     <>
       {dialogo}
       <Encabezado titulo="Compras" subtitulo="Ingreso de mercadería de proveedores: suma stock, actualiza costos y genera deuda" acciones={<Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/compras/nueva')}>Registrar compra</Boton>} />
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Proveedor, N° de comprobante" className="min-w-52 flex-1" />
         <Select value={proveedor} onChange={(e) => setProveedor(e.target.value)} className="w-auto" aria-label="Proveedor"><option value="">Todos los proveedores</option>{provs.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</Select>
         <Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto" aria-label="Estado"><option value="">Todas</option><option value="registrada">Registradas</option><option value="anulada">Anuladas</option></Select>
@@ -80,7 +80,7 @@ export function Compras() {
           <div className="space-y-3 text-sm">
             <p className="text-tenue">{fecha(det.fecha)} · {det.tipo_doc} {det.numero_doc ?? ''} · <Link className="text-marca-700" to={`/proveedores/${det.proveedor_id}`}>Cuenta del proveedor</Link></p>
             {det.estado === 'anulada' && <Aviso tono="rojo">Compra anulada.</Aviso>}
-            <ul className="divide-y divide-borde rounded-lg border border-borde">
+            <ul className="divide-y divide-borde rounded-ctl border border-borde">
               {det.items.map((i: any) => (
                 <li key={i.id} className="flex justify-between gap-2 px-3 py-2">
                   <span>{i.articulo} × {cantidad(i.cantidad)} <span className="text-tenue">a {money(i.costo_unitario)}</span></span>
@@ -97,7 +97,7 @@ export function Compras() {
             {det.pagos.length > 0 && (
               <div>
                 <h3 className="mb-1 font-semibold">Pago de contado</h3>
-                <ul className="divide-y divide-borde rounded-lg border border-borde">
+                <ul className="divide-y divide-borde rounded-ctl border border-borde">
                   {det.pagos.map((p: any) => <li key={p.id} className="flex justify-between px-3 py-2"><span>Pago #{numero(p.numero)} · {MEDIO_PAGO_LABEL[p.medio as MedioPago]} {p.estado === 'anulado' && <Insignia tono="gris">Anulado</Insignia>}</span><span className="tabular-nums">{money(p.importe)}</span></li>)}
                 </ul>
               </div>
@@ -166,7 +166,7 @@ export function NuevaCompra() {
         <Tarjeta titulo="Artículos recibidos" className="xl:col-span-2">
           <Buscador value={q} onChange={setQ} placeholder="Buscar artículo para agregar… (o escaneá el código de barras)" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (!a) return toast.error(new Error(`No hay ningún artículo con el código ${codigo}`)); setItems((prev) => (prev.some((i) => i.articulo.id === a.id) ? prev : [...prev, { articulo: a, cantidad: 1, costo: a.costo }])); setQ(''); }} />
           {dq && (
-            <ul className="mt-1.5 max-h-56 divide-y divide-borde overflow-y-auto rounded-lg border border-borde text-sm">
+            <ul className="mt-1.5 max-h-56 divide-y divide-borde overflow-y-auto rounded-ctl border border-borde text-sm">
               {res.map((a) => (
                 <li key={a.id}>
                   <button type="button" className="flex w-full justify-between px-3 py-2 text-left hover:bg-marca-50" onClick={() => { if (!items.some((i) => i.articulo.id === a.id)) setItems([...items, { articulo: a, cantidad: 1, costo: a.costo }]); setQ(''); }}>
@@ -178,10 +178,10 @@ export function NuevaCompra() {
               {!res.length && <li className="px-3 py-2 text-tenue">Sin resultados. Crealo primero en Artículos.</li>}
             </ul>
           )}
-          <ul className="mt-4 divide-y divide-borde rounded-xl border border-borde">
+          <ul className="mt-4 divide-y divide-borde rounded-card border border-borde">
             {items.map((i, idx) => (
               <li key={i.articulo.id} className="grid grid-cols-2 items-center gap-2 px-3 py-2 sm:grid-cols-[1fr_100px_150px_120px_40px]">
-                <span className="col-span-2 truncate text-sm font-medium sm:col-span-1">{i.articulo.nombre}</span>
+                <span className="col-span-2 break-words text-sm font-medium sm:col-span-1">{i.articulo.nombre}</span>
                 <Input type="number" min={0.001} step="any" value={i.cantidad} onChange={(e) => setItems(items.map((x, j) => (j === idx ? { ...x, cantidad: Math.round(Number(e.target.value) * 1000) / 1000 } : x)))} className="h-9 text-right" aria-label="Cantidad" />
                 <InputMoneda value={i.costo} onChange={(v) => setItems(items.map((x, j) => (j === idx ? { ...x, costo: v } : x)))} className="[&_input]:h-9" />
                 <span className="text-right text-sm font-semibold tabular-nums">{money(Math.round(i.cantidad * i.costo))}</span>
@@ -200,7 +200,7 @@ export function NuevaCompra() {
                   {provs.filter((p) => p.activo).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                 </Select>
               </Campo>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Campo label="Tipo">
                   <Select value={f.tipo_doc} onChange={(e) => setF({ ...f, tipo_doc: e.target.value })}>
                     <option value="factura">Factura</option><option value="remito">Remito</option><option value="ticket">Ticket</option><option value="otro">Otro</option>
@@ -210,13 +210,13 @@ export function NuevaCompra() {
                 <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito de ingreso" />
               </div>
               <Campo label="Número"><Input value={f.numero_doc} onChange={(e) => setF({ ...f, numero_doc: e.target.value })} placeholder="A-0001-00001234" /></Campo>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Campo label="IVA"><InputMoneda value={f.iva} onChange={(v) => setF({ ...f, iva: v })} /></Campo>
                 <Campo label="Otros impuestos"><InputMoneda value={f.otros} onChange={(v) => setF({ ...f, otros: v })} /></Campo>
               </div>
               <Check checked={f.actualizar_costos} onChange={(v) => setF({ ...f, actualizar_costos: v })} label="Actualizar el costo de los artículos" />
               <Campo label="Notas"><Textarea rows={2} value={f.notas} onChange={(e) => setF({ ...f, notas: e.target.value })} /></Campo>
-              <div className="rounded-lg bg-slate-50 p-3 text-right text-sm">
+              <div className="rounded-ctl bg-slate-50 p-3 text-right text-sm">
                 <div>Neto: {money(neto)}</div>
                 <div className="text-lg font-bold">Total: {money(total)}</div>
               </div>

@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { invalidarDinero } from '@/lib/caja';
 import { descargarCSV, pesosCSV } from '@/lib/csv';
 import { fecha, hoyISO, money } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, Check, Dato, Encabezado, ErrorCaja, Indicador, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
+import { Aviso, Boton, Buscador, Campo, Cargando, Check, Dato, Encabezado, ErrorCaja, Indicador, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, TablaApilable, Tarjeta, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
 import { ModalGasto } from '@/components/FormGasto';
 import { primerDiaMes, SelectorPeriodo } from '@/components/Periodo';
 import { FRECUENCIAS_GASTO, FRECUENCIA_GASTO_LABEL, MEDIOS_PAGO, MEDIO_PAGO_LABEL, TIPOS_CATEGORIA_GASTO, TIPO_CATEGORIA_GASTO_LABEL, type MedioPago, type TipoCategoriaGasto } from '@shared/dominio';
@@ -39,10 +39,10 @@ function Resumen() {
           <div className="grid gap-5 lg:grid-cols-2">
             <Tarjeta titulo="Por medio de pago" sinPadding>
               {data.por_medio.length === 0 ? <p className="px-4 py-6 text-center text-sm text-tenue">Sin movimientos en el período</p> : (
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-borde text-left text-xs uppercase text-tenue"><th className="px-4 py-2">Medio</th><th className="px-2 py-2 text-right">Ingresos</th><th className="px-2 py-2 text-right">Egresos</th><th className="px-4 py-2 text-right">Neto</th></tr></thead>
+                <TablaApilable><table className="w-full text-sm">
+                  <thead><tr className="border-b border-borde text-left text-xs font-semibold uppercase tracking-wide text-tenue"><th className="px-4 py-2">Medio</th><th className="px-2 py-2 text-right">Ingresos</th><th className="px-2 py-2 text-right">Egresos</th><th className="px-4 py-2 text-right">Neto</th></tr></thead>
                   <tbody>{data.por_medio.map((m: any) => <tr key={m.medio} className="border-b border-borde last:border-0"><td className="px-4 py-2">{MEDIO_PAGO_LABEL[m.medio as MedioPago]}</td><td className="px-2 py-2 text-right tabular-nums">{money(m.ingresos)}</td><td className="px-2 py-2 text-right tabular-nums">{money(m.egresos)}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{money(m.ingresos - m.egresos)}</td></tr>)}</tbody>
-                </table>
+                </table></TablaApilable>
               )}
             </Tarjeta>
             <Tarjeta titulo="Gastos por categoría" sinPadding>
@@ -116,7 +116,7 @@ function Gastos() {
   });
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Campo>
         <Campo label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Campo>
         <Campo label="Categoría"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)} className="w-auto"><option value="">Todas</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</Select></Campo>

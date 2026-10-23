@@ -157,7 +157,7 @@ export function ModalDevolucion({ ventaId, onCerrar }: { ventaId: string; onCerr
           <Aviso>Nota de crédito <strong>interna (no fiscal)</strong>. Se registra aparte: el comprobante original no se modifica ni se borra.</Aviso>
           <div>
             <h3 className="mb-2 text-sm font-semibold">1. Qué se devuelve</h3>
-            <ul className="divide-y divide-borde rounded-lg border border-borde">
+            <ul className="divide-y divide-borde rounded-ctl border border-borde">
               {lineas.map((l) => {
                 const agotada = l.restante <= 0;
                 const x = sel[l.venta_item_id];
@@ -224,7 +224,7 @@ export function ModalDevolucion({ ventaId, onCerrar }: { ventaId: string; onCerr
                 <div>
                   <h3 className="mb-2 text-sm font-semibold">2. Dinero ya cobrado: {money(yaPagado)}</h3>
                   {puedeReintegrar ? (
-                    <div className="space-y-3 rounded-lg border border-borde p-3">
+                    <div className="space-y-3 rounded-ctl border border-borde p-3">
                       <div className="flex flex-wrap gap-4">
                         <label className="flex items-center gap-2 text-sm"><input type="radio" className="accent-marca-600" checked={!reintegrar} disabled={consumidorFinal} onChange={() => setReintegrar(false)} /> Dejar como saldo a favor del cliente</label>
                         <label className="flex items-center gap-2 text-sm"><input type="radio" className="accent-marca-600" checked={reintegrar} onChange={() => { setReintegrar(true); setMedios([formaVacia('efectivo', yaPagado)]); }} /> Reintegrar dinero ahora</label>
@@ -248,18 +248,18 @@ export function ModalDevolucion({ ventaId, onCerrar }: { ventaId: string; onCerr
               <div>
                 <h3 className="mb-2 text-sm font-semibold">{yaPagado > 0 ? '3' : '2'}. Consecuencias — revisalas antes de confirmar</h3>
                 <div className="grid gap-3 text-sm sm:grid-cols-2">
-                  <div className="rounded-lg bg-slate-50 p-3">
+                  <div className="rounded-ctl bg-slate-50 p-3">
                     <p className="text-xs font-semibold uppercase text-tenue">Comprobante #{numero(c.comprobante.numero)}</p>
                     <p>Total {money(c.comprobante.total)} (no cambia) · devuelto {money(c.comprobante.devuelto_antes)} → <strong>{money(c.comprobante.devuelto_despues)}</strong></p>
                     <p>Saldo pendiente {money(c.comprobante.saldo_antes)} → <strong>{money(c.comprobante.saldo_despues)}</strong></p>
                     <p>Crédito de esta nota: <strong>{money(c.credito.total)}</strong> ({money(c.credito.cancela_deuda)} cancela deuda{c.credito.ya_pagado > 0 ? `, ${money(c.credito.ya_pagado)} ya cobrado` : ''})</p>
                   </div>
-                  <div className="rounded-lg bg-slate-50 p-3">
+                  <div className="rounded-ctl bg-slate-50 p-3">
                     <p className="text-xs font-semibold uppercase text-tenue">Cuenta corriente de {c.cuenta_corriente.cliente}</p>
                     <p>Saldo {money(c.cuenta_corriente.saldo_antes)} → <strong>{money(c.cuenta_corriente.saldo_despues)}</strong></p>
                     {c.cuenta_corriente.saldo_despues < 0 && <p className="text-xs text-tenue">Un saldo negativo es saldo a favor del cliente.</p>}
                   </div>
-                  <div className="rounded-lg bg-slate-50 p-3">
+                  <div className="rounded-ctl bg-slate-50 p-3">
                     <p className="text-xs font-semibold uppercase text-tenue">Dinero</p>
                     {c.dinero.reintegro > 0 ? (
                       <>
@@ -269,7 +269,7 @@ export function ModalDevolucion({ ventaId, onCerrar }: { ventaId: string; onCerr
                     ) : <p>No sale dinero.</p>}
                     {c.dinero.saldo_a_favor > 0 && <p>Queda a favor del cliente: <strong>{money(c.dinero.saldo_a_favor)}</strong></p>}
                   </div>
-                  <div className="rounded-lg bg-slate-50 p-3">
+                  <div className="rounded-ctl bg-slate-50 p-3">
                     <p className="text-xs font-semibold uppercase text-tenue">Stock</p>
                     {c.stock.reingresan.length === 0 && c.stock.no_reingresan.length === 0 && <p>No hay repuestos en esta devolución.</p>}
                     {c.stock.reingresan.map((s: any, i: number) => <p key={i}>+{fmtCant(s.cantidad)} {s.descripcion} → {s.deposito}</p>)}
@@ -324,7 +324,7 @@ export function ModalAplicarCreditos({ venta, onCerrar }: { venta: { id: string;
       {isLoading ? <p className="text-sm text-tenue">Cargando…</p> : creditos.length === 0 ? <Aviso>El cliente no tiene anticipos ni saldo a favor disponible.</Aviso> : (
         <div className="space-y-3">
           <Aviso>Aplicar saldo a favor <strong>no mueve dinero</strong>: el dinero ya ingresó cuando se cobró el anticipo o el comprobante original. Solo reduce la deuda de este comprobante (pendiente {money(venta.saldo)}).</Aviso>
-          <ul className="divide-y divide-borde rounded-lg border border-borde">
+          <ul className="divide-y divide-borde rounded-ctl border border-borde">
             {creditos.map((c) => (
               <li key={k(c)} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
                 <Check

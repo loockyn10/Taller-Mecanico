@@ -74,7 +74,7 @@ export function Equipo() {
       <Tarjeta titulo="Roles disponibles" className="mt-5" subtitulo="Cada rol es una plantilla de permisos. Después de asignarlo podés ajustar los permisos de cada persona.">
         <ul className="grid gap-3 md:grid-cols-2">
           {(['propietario', 'administrador', 'recepcion', 'mecanico', 'deposito', 'caja'] as Rol[]).map((r) => (
-            <li key={r} className="rounded-lg border border-borde p-3 text-sm">
+            <li key={r} className="rounded-ctl border border-borde p-3 text-sm">
               <div className="mb-1 flex items-center gap-2"><Insignia tono={TONO_ROL[r]}>{PLANTILLAS[r].etiqueta}</Insignia></div>
               <p className="text-tenue">{PLANTILLAS[r].descripcion}</p>
             </li>
@@ -217,7 +217,7 @@ function FichaPersona({ id, roles, onCerrar, onCambio, puedePermisos, puedePin }
                 {u.personalizado && <p className="text-sm text-amber-700">Esta persona tiene permisos personalizados (+{u.ajustes.g.length} / −{u.ajustes.r.length} respecto del rol).</p>}
                 <div className="grid gap-4 md:grid-cols-2">
                   {GRUPOS_PERMISOS.map((g) => (
-                    <section key={g.titulo} className="rounded-lg border border-borde p-3">
+                    <section key={g.titulo} className="rounded-ctl border border-borde p-3">
                       <h3 className="mb-2 text-sm font-semibold">{g.titulo}</h3>
                       <ul className="space-y-1.5">
                         {g.permisos.map((perm) => {

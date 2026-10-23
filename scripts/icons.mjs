@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT } from './lib.mjs';
 
-const AZUL = [0x1c, 0x3f, 0xaa];
+const AZUL = [0x2d, 0x5b, 0x87];
 const BLANCO = [255, 255, 255];
 const AMBAR = [0xf5, 0xa5, 0x24];
 

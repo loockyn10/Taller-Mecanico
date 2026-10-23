@@ -6,7 +6,7 @@ import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { descargarCSV, exportarAutorizado, pesosCSV } from '@/lib/csv';
 import { fecha, hoyISO, money } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, ErrorCaja, Input, InputMoneda, Insignia, Modal, Select, Tarjeta, Vacio, useConfirmar, useDebounce, useToast } from '@/components/ui';
+import { Aviso, Boton, BotonIcono, Buscador, Campo, Cargando, ErrorCaja, Input, InputMoneda, Insignia, Modal, Select, TablaApilable, Tarjeta, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
 import { ORIGEN_LABEL } from '@shared/contabilidad';
 import { BotonImprimir, EstadoAsiento, imp, OrigenLink, Periodo } from './comun';
 
@@ -86,12 +86,12 @@ export function FormAsiento({ inicial, modo, onCerrar }: { inicial?: Asiento; mo
               <Input className="col-span-12 sm:col-span-2" placeholder="Detalle" value={l.detalle} maxLength={200} onChange={(e) => set(i, { detalle: e.target.value })} />
               <InputMoneda className="col-span-5 sm:col-span-2" value={l.debe} onChange={(v) => set(i, { debe: v, haber: v ? 0 : l.haber })} />
               <InputMoneda className="col-span-5 sm:col-span-2" value={l.haber} onChange={(v) => set(i, { haber: v, debe: v ? 0 : l.debe })} />
-              <button type="button" title="Quitar línea" disabled={f.lineas.length <= 2} className="col-span-2 justify-self-end rounded p-1.5 text-tenue hover:bg-red-50 hover:text-red-600 disabled:opacity-30 sm:col-span-1" onClick={() => setF({ ...f, lineas: f.lineas.filter((_, k) => k !== i) })}><Trash2 className="size-4" /></button>
+              <BotonIcono etiqueta="Quitar línea" peligro disabled={f.lineas.length <= 2} className="col-span-2 justify-self-end sm:col-span-1" onClick={() => setF({ ...f, lineas: f.lineas.filter((_, k) => k !== i) })}><Trash2 className="size-4" /></BotonIcono>
             </div>
           ))}
           <Boton tam="sm" icono={<Plus className="size-4" />} onClick={() => setF({ ...f, lineas: [...f.lineas, { cuenta_id: '', debe: 0, haber: 0, detalle: '' }] })}>Agregar línea</Boton>
         </div>
-        <div className={`flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm ${balancea ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+        <div className={`flex flex-wrap items-center justify-between gap-2 rounded-ctl px-3 py-2 text-sm ${balancea ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
           <span>Debe {money(debe)} · Haber {money(haber)}</span>
           <strong>{balancea ? 'El asiento balancea' : debe === haber ? 'Cargá importes' : `Diferencia ${money(Math.abs(debe - haber))}: no se puede registrar`}</strong>
         </div>
@@ -112,7 +112,7 @@ function TarjetaAsiento({ a, gestiona, onEditar, onCorregir }: { a: Asiento; ges
   });
   const manual = a.modo === 'manual';
   return (
-    <div className={`rounded-xl border bg-white ${a.estado === 'revertido' ? 'border-borde opacity-80' : 'border-borde'} shadow-[0_1px_2px_rgba(16,24,40,0.04)]`}>
+    <div className={`rounded-card border bg-white ${a.estado === 'revertido' ? 'border-borde opacity-80' : 'border-borde'} shadow-[0_1px_2px_rgba(16,24,40,0.04)]`}>
       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-borde px-4 py-2.5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -144,7 +144,7 @@ function TarjetaAsiento({ a, gestiona, onEditar, onCorregir }: { a: Asiento; ges
           </div>
         )}
       </div>
-      <div className="overflow-x-auto">
+      <TablaApilable>
         <table className="w-full text-sm">
           <tbody>
             {a.lineas.map((l, i) => (
@@ -157,7 +157,7 @@ function TarjetaAsiento({ a, gestiona, onEditar, onCorregir }: { a: Asiento; ges
             ))}
           </tbody>
         </table>
-      </div>
+      </TablaApilable>
       <Modal abierto={motivo !== null} onCerrar={() => setMotivo(null)} titulo={`Revertir el asiento N° ${a.numero}`} ancho="sm"
         pie={<><Boton onClick={() => setMotivo(null)}>Cancelar</Boton><Boton variante="peligro" disabled={(motivo ?? '').trim().length < 3} cargando={accion.isPending} onClick={() => accion.mutate({ ruta: 'revertir', datos: { motivo } })}>Revertir</Boton></>}>
         <p className="mb-3 text-sm text-tenue">Se registra un contra-asiento con los importes invertidos. El original no se modifica y queda marcado como revertido.</p>

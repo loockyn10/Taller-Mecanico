@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { fecha, hoyISO, money, sumarDias } from '@/lib/format';
-import { Boton, Campo, Cargando, Encabezado, ErrorCaja, Indicador, Input, Tarjeta } from '@/components/ui';
+import { Cargando, Encabezado, ErrorCaja, Indicador, Tarjeta } from '@/components/ui';
+import { SelectorPeriodo } from '@/components/Periodo';
 import { MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
 
 function Barras({ filas, etiqueta, valor, formato = money }: { filas: any[]; etiqueta: (f: any) => string; valor: (f: any) => number; formato?: (n: number) => string }) {
@@ -13,7 +14,7 @@ function Barras({ filas, etiqueta, valor, formato = money }: { filas: any[]; eti
       {filas.map((f, i) => (
         <li key={i}>
           <div className="mb-1 flex justify-between gap-3 text-sm">
-            <span className="truncate">{etiqueta(f)}</span>
+            <span className="min-w-0 break-words">{etiqueta(f)}</span>
             <span className="shrink-0 font-medium tabular-nums">{formato(valor(f))}</span>
           </div>
           <div className="h-2 rounded-full bg-slate-100">
@@ -25,24 +26,20 @@ function Barras({ filas, etiqueta, valor, formato = money }: { filas: any[]; eti
   );
 }
 
-const RANGOS = [
-  { t: 'Este mes', f: () => [`${hoyISO().slice(0, 8)}01`, hoyISO()] },
-  { t: 'Últimos 7 días', f: () => [sumarDias(hoyISO(), -6), hoyISO()] },
-  { t: 'Últimos 30 días', f: () => [sumarDias(hoyISO(), -29), hoyISO()] },
-  { t: 'Este año', f: () => [`${hoyISO().slice(0, 4)}-01-01`, hoyISO()] },
+const atajos = () => [
+  { texto: 'Este mes', desde: `${hoyISO().slice(0, 8)}01`, hasta: hoyISO() },
+  { texto: 'Últimos 7 días', desde: sumarDias(hoyISO(), -6), hasta: hoyISO() },
+  { texto: 'Últimos 30 días', desde: sumarDias(hoyISO(), -29), hasta: hoyISO() },
+  { texto: 'Este año', desde: `${hoyISO().slice(0, 4)}-01-01`, hasta: hoyISO() },
 ];
 
 export function Reportes() {
-  const [[desde, hasta], setRango] = useState<string[]>(RANGOS[0].f());
+  const [[desde, hasta], setRango] = useState<string[]>(() => [atajos()[0].desde, atajos()[0].hasta]);
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['reportes', desde, hasta], queryFn: () => api.get(`/reportes?desde=${desde}&hasta=${hasta}`) });
   return (
     <>
       <Encabezado titulo="Estadísticas" subtitulo={`Del ${fecha(desde)} al ${fecha(hasta)}`} />
-      <div className="mb-5 flex flex-wrap items-end gap-2">
-        {RANGOS.map((r) => <Boton key={r.t} tam="sm" onClick={() => setRango(r.f())}>{r.t}</Boton>)}
-        <Campo label="Desde"><Input type="date" value={desde} onChange={(e) => setRango([e.target.value, hasta])} /></Campo>
-        <Campo label="Hasta"><Input type="date" value={hasta} onChange={(e) => setRango([desde, e.target.value])} /></Campo>
-      </div>
+      <SelectorPeriodo desde={desde} hasta={hasta} atajos={atajos()} onCambio={(d, h) => setRango([d, h])} />
       {isLoading ? <Cargando /> : error ? <ErrorCaja error={error} reintentar={refetch} /> : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

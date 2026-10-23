@@ -15,7 +15,7 @@ const TONO: Record<EstadoAnticipo, 'ambar' | 'azul' | 'verde' | 'violeta' | 'gri
 
 function Filtros({ desde, hasta, setDesde, setHasta, q, setQ, children }: any) {
   return (
-    <div className="mb-4 flex flex-wrap items-end gap-3">
+    <div className="filtros mb-4 flex flex-wrap items-end gap-3">
       <Campo label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Campo>
       <Campo label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Campo>
       {children}
@@ -113,7 +113,7 @@ function DetalleAnticipo({ id, onCerrar }: { id: string; onCerrar: () => void })
           <div>
             <h3 className="mb-2 text-sm font-semibold">Aplicaciones a comprobantes</h3>
             {a.aplicaciones.length === 0 ? <p className="text-sm text-tenue">Todavía no se aplicó a ningún comprobante.</p> : (
-              <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
+              <ul className="divide-y divide-borde rounded-ctl border border-borde text-sm">
                 {a.aplicaciones.map((x: any) => (
                   <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                     <span><Link className="text-marca-700" to={`/ventas/${x.venta_id}`}>Comprobante #{numero(x.venta_numero)}</Link>{x.orden_numero ? ` · OT #${numero(x.orden_numero)}` : ''} · {fecha(x.fecha)} {x.estado === 'anulada' && <Insignia tono="gris">Deshecha</Insignia>}</span>
@@ -126,7 +126,7 @@ function DetalleAnticipo({ id, onCerrar }: { id: string; onCerrar: () => void })
           {a.reintegros.length > 0 && (
             <div>
               <h3 className="mb-2 text-sm font-semibold">Devoluciones de dinero</h3>
-              <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
+              <ul className="divide-y divide-borde rounded-ctl border border-borde text-sm">
                 {a.reintegros.map((x: any) => (
                   <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                     <span>Reintegro #{numero(x.numero)} · {fecha(x.fecha)} · {MEDIOS_LABEL(x.medios)} {x.estado === 'anulado' && <Insignia tono="gris">Anulado</Insignia>}</span>
@@ -231,7 +231,7 @@ function DetalleDevolucion({ id, onCerrar }: { id: string; onCerrar: () => void 
             <Dato etiqueta="Saldo a favor">{money(d.credito_disponible)}</Dato>
             <Dato etiqueta="Motivo" className="col-span-2 sm:col-span-4">{d.motivo}</Dato>
           </dl>
-          <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
+          <ul className="divide-y divide-borde rounded-ctl border border-borde text-sm">
             {d.items.map((i: any) => (
               <li key={i.id} className="flex flex-wrap justify-between gap-2 px-3 py-2">
                 <span>{i.cantidad} × {i.descripcion}{i.tipo === 'articulo' ? (i.reingresa ? ` · vuelve a ${i.deposito}` : ' · no vuelve al inventario') : ''}</span>
@@ -240,7 +240,7 @@ function DetalleDevolucion({ id, onCerrar }: { id: string; onCerrar: () => void 
             ))}
           </ul>
           {d.reintegros.length > 0 && (
-            <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
+            <ul className="divide-y divide-borde rounded-ctl border border-borde text-sm">
               {d.reintegros.map((x: any) => (
                 <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                   <span>Reintegro #{numero(x.numero)} · {fecha(x.fecha)} · {MEDIOS_LABEL(x.medios)} {x.estado === 'anulado' && <Insignia tono="gris">Anulado</Insignia>}</span>

@@ -113,7 +113,7 @@ export function Proveedores() {
       <Encabezado titulo="Proveedores" subtitulo={puede('compras.gestionar') ? `Deuda total con proveedores: ${money(deuda)}` : undefined} acciones={puede('compras.gestionar') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setForm(true)}>Nuevo proveedor</Boton>} />
       {puede('compras.gestionar') && <Pestanas items={[{ clave: 'lista', titulo: 'Proveedores' }, { clave: 'deuda', titulo: 'Deuda y vencimientos' }]} activo={tab} onCambio={(t) => setSp(t === 'deuda' ? { tab: 'deuda' } : {})} />}
       {tab === 'deuda' ? <DeudaProveedores /> : <>
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-center gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Nombre o CUIT" className="min-w-52 flex-1" />
         <Check checked={conDeuda} onChange={setConDeuda} label="Con deuda" />
         <Check checked={inactivos} onChange={setInactivos} label="Mostrar inactivos" />

@@ -36,15 +36,15 @@ export function Movimientos() {
         subtitulo="Cada entrada y salida queda registrada con su origen; el stock solo cambia mediante movimientos"
         acciones={data.length > 0 && <Boton icono={<Download className="size-4" />} onClick={() => descargarCSV('movimientos-stock', ['Fecha', 'Artículo', 'Tipo', 'Motivo', 'Cantidad', 'Stock resultante', 'Detalle', 'Usuario'], data.map((m) => [m.created_at, m.articulo, TIPOS_MOVIMIENTO_STOCK_LABEL[m.tipo] ?? m.tipo, motivo(m), String(m.cantidad).replace('.', ','), String(m.stock_resultante).replace('.', ','), m.notas ?? '', m.usuario ?? '']))}>CSV</Boton>}
       />
-      <div className="mb-4 flex flex-wrap items-start gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-start gap-3">
         <div className="relative min-w-56 flex-1">
           {articuloId ? (
-            <div className="flex h-10 items-center justify-between rounded-lg border border-marca-300 bg-marca-50 px-3 text-sm"><span className="truncate font-medium">{articuloId.nombre}</span><button type="button" className="ml-2 text-marca-700 underline" onClick={() => { setArticuloId(null); setQ(''); }}>Quitar</button></div>
+            <div className="flex h-10 items-center justify-between rounded-ctl border border-marca-300 bg-marca-50 px-3 text-sm"><span className="truncate font-medium">{articuloId.nombre}</span><button type="button" className="ml-2 text-marca-700 underline" onClick={() => { setArticuloId(null); setQ(''); }}>Quitar</button></div>
           ) : (
             <>
               <Buscador value={q} onChange={setQ} placeholder="Filtrar por artículo… (o escaneá el código de barras)" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (a) { setArticuloId({ id: a.id, nombre: a.nombre }); setQ(''); } }} />
               {sugeridos.length > 0 && (
-                <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-borde bg-white text-sm shadow-lg">
+                <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-ctl border border-borde bg-white text-sm shadow-pop">
                   {sugeridos.map((a) => <li key={a.id}><button type="button" className="w-full px-3 py-2 text-left hover:bg-marca-50" onClick={() => { setArticuloId({ id: a.id, nombre: a.nombre }); setQ(''); }}>{a.nombre} <span className="text-tenue">{a.codigo ?? ''}</span></button></li>)}
                 </ul>
               )}

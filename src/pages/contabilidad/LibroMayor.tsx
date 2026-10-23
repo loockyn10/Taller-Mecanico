@@ -5,7 +5,7 @@ import { Download } from 'lucide-react';
 import { api } from '@/lib/api';
 import { descargarCSV, exportarAutorizado, pesosCSV } from '@/lib/csv';
 import { fecha, money } from '@/lib/format';
-import { Aviso, Boton, Campo, Cargando, ErrorCaja, Select, Tarjeta, Vacio, useToast } from '@/components/ui';
+import { Aviso, Boton, Campo, Cargando, ErrorCaja, Select, TablaApilable, Tarjeta, useToast, Vacio } from '@/components/ui';
 import { ORIGEN_LABEL } from '@shared/contabilidad';
 import { BotonImprimir, imp, OrigenLink, Periodo } from './comun';
 
@@ -41,7 +41,7 @@ export function LibroMayor({ desde, hasta }: { desde: string; hasta: string }) {
         : isLoading ? <Cargando /> : error ? <ErrorCaja error={error} reintentar={refetch} /> : m.error ? <Aviso tono="ambar">{m.error}</Aviso> : (
         <Tarjeta sinPadding titulo={`${m.cuenta.codigo} ${m.cuenta.nombre}`} subtitulo={`Saldo en sentido ${m.cuenta.naturaleza}`}>
           {m.truncado && <Aviso tono="ambar" className="m-3">Se muestran los primeros movimientos: acotá el período para ver el resto.</Aviso>}
-          <div className="overflow-x-auto">
+          <TablaApilable>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-borde bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wide text-tenue">
@@ -69,7 +69,7 @@ export function LibroMayor({ desde, hasta }: { desde: string; hasta: string }) {
                 <tr className="border-t-2 border-borde font-semibold"><td className="px-4 py-2" colSpan={3}>Totales del período</td><td className="px-4 py-2 text-right tabular-nums">{money(m.debe)}</td><td className="px-4 py-2 text-right tabular-nums">{money(m.haber)}</td><td className="px-4 py-2 text-right tabular-nums">{money(m.saldo_final)}</td></tr>
               </tfoot>
             </table>
-          </div>
+          </TablaApilable>
         </Tarjeta>
       )}
     </div>

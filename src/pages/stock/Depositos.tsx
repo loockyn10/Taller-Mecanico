@@ -101,16 +101,16 @@ function FormTransferencia({ deps, onCerrar }: { deps: DepositoApi[]; onCerrar: 
         <div className="relative">
           <Buscador value={q} onChange={setQ} onEnter={leer} placeholder="Buscar artículo con stock en el origen (o escaneá el código de barras)" />
           {dq && (data?.items?.length ?? 0) > 0 && (
-            <ul className="absolute z-10 mt-1 max-h-56 w-full divide-y divide-borde overflow-y-auto rounded-lg border border-borde bg-white text-sm shadow-lg">
+            <ul className="absolute z-10 mt-1 max-h-56 w-full divide-y divide-borde overflow-y-auto rounded-ctl border border-borde bg-white text-sm shadow-pop">
               {data.items.map((a: any) => <li key={a.articulo_id}><button type="button" className="flex w-full justify-between px-3 py-2 text-left hover:bg-marca-50" onClick={() => agregar(a)}><span>{a.nombre} <span className="text-tenue">{a.codigo ?? ''}</span></span><span className="text-tenue">{cantidad(a.stock)} {a.unidad}</span></button></li>)}
             </ul>
           )}
         </div>
-        {items.length === 0 ? <p className="rounded-lg border border-dashed border-borde px-4 py-6 text-center text-sm text-tenue">Agregá los artículos a transferir</p> : (
-          <ul className="divide-y divide-borde rounded-xl border border-borde">
+        {items.length === 0 ? <p className="rounded-ctl border border-dashed border-borde px-4 py-6 text-center text-sm text-tenue">Agregá los artículos a transferir</p> : (
+          <ul className="divide-y divide-borde rounded-card border border-borde">
             {items.map((i) => (
               <li key={i.articulo_id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                <span className="min-w-0 truncate">{i.nombre} <span className="text-xs text-tenue">(disponible {cantidad(i.disponible)})</span></span>
+                <span className="min-w-0 break-words">{i.nombre} <span className="text-xs text-tenue">(disponible {cantidad(i.disponible)})</span></span>
                 <span className="flex items-center gap-2">
                   <Input type="number" min={0} step="any" value={i.cantidad} className="h-9 w-24 text-right" aria-label="Cantidad" onChange={(e) => setItems(items.map((x) => (x.articulo_id === i.articulo_id ? { ...x, cantidad: Number(e.target.value) } : x)))} />
                   {i.cantidad > i.disponible && <Insignia tono="rojo">Excede</Insignia>}
@@ -145,7 +145,7 @@ function DetalleTransferencia({ id, onCerrar }: { id: string; onCerrar: () => vo
         <div className="space-y-3 text-sm">
           <p><strong>{t.origen}</strong> → <strong>{t.destino}</strong> · {fecha(t.fecha)} · {t.usuario ?? '—'} {t.estado === 'anulada' && <Insignia tono="gris">Anulada</Insignia>}</p>
           {t.notas && <p className="text-tenue">{t.notas}</p>}
-          <ul className="divide-y divide-borde rounded-xl border border-borde">{t.items.map((i: any) => <li key={i.articulo_id} className="flex justify-between px-3 py-2"><span>{i.nombre}</span><span className="tabular-nums">{cantidad(i.cantidad)} {i.unidad}</span></li>)}</ul>
+          <ul className="divide-y divide-borde rounded-card border border-borde">{t.items.map((i: any) => <li key={i.articulo_id} className="flex justify-between px-3 py-2"><span>{i.nombre}</span><span className="tabular-nums">{cantidad(i.cantidad)} {i.unidad}</span></li>)}</ul>
         </div>
       )}
     </Modal>

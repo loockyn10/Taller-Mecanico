@@ -156,7 +156,7 @@ function Detalle({ id, onCerrar }: { id: string; onCerrar: () => void }) {
           {c.observaciones && <p><span className="font-medium">Observaciones:</span> {c.observaciones}</p>}
           <div>
             <h3 className="mb-1 text-sm font-semibold">Historial</h3>
-            <ul className="divide-y divide-borde rounded-lg border border-borde">
+            <ul className="divide-y divide-borde rounded-ctl border border-borde">
               {c.eventos.map((e: any) => (
                 <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                   <span>{e.estado_desde ? <>{ESTADO_CHEQUE_LABEL[e.estado_desde as EstadoCheque]} → </> : null}<strong>{ESTADO_CHEQUE_LABEL[e.estado_hacia as EstadoCheque]}</strong>{e.detalle ? <span className="text-tenue"> · {e.detalle}</span> : null}</span>
@@ -228,7 +228,7 @@ export function Cheques() {
         </>
       )}
       <Pestanas items={[{ clave: 'recibido', titulo: 'Recibidos' }, { clave: 'emitido', titulo: 'Emitidos' }]} activo={tab} onCambio={(t) => { setTab(t); setEstado(''); }} />
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Número, banco, titular, CUIT, cliente…" className="min-w-56 flex-1" />
         <Campo label="Estado"><Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto"><option value="">Todos</option>{ESTADOS_CHEQUE.map((e) => <option key={e} value={e}>{ESTADO_CHEQUE_LABEL[e]}</option>)}</Select></Campo>
         <Campo label="Tipo"><Select value={modalidad} onChange={(e) => setModalidad(e.target.value)} className="w-auto"><option value="">Todos</option><option value="fisico">Físico</option><option value="echeq">eCheq</option></Select></Campo>

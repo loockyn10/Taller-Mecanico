@@ -121,7 +121,7 @@ function Registros({ puedeCorregir, puedeExportar }: { puedeCorregir: boolean; p
   return (
     <>
       <SelectorPeriodo desde={desde} hasta={hasta} onCambio={(d, h) => { setDesde(d); setHasta(h); }} />
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Persona"><Select value={usuario} onChange={(e) => setUsuario(e.target.value)} className="w-56"><option value="">Todas</option>{personal.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</Select></Campo>
         <label className="mb-2 flex items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-marca-600" checked={soloAbiertas} onChange={(e) => setSoloAbiertas(e.target.checked)} /> Solo jornadas abiertas</label>
         <div className="ml-auto flex gap-2">
@@ -253,7 +253,7 @@ function HistorialModal({ j, zona, onCerrar }: { j: any; zona: string; onCerrar:
       {isLoading ? <Cargando /> : (
         <ul className="space-y-3 text-sm">
           {(data as any[]).map((c) => (
-            <li key={c.id} className="rounded-lg border border-borde p-3">
+            <li key={c.id} className="rounded-ctl border border-borde p-3">
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2"><Insignia tono={c.accion === 'anular' ? 'rojo' : c.accion === 'crear' ? 'azul' : 'ambar'}>{c.accion === 'crear' ? 'Carga manual' : c.accion === 'editar' ? 'Corrección' : 'Anulación'}</Insignia><span className="text-xs text-tenue">{fechaHoraZona(c.created_at, zona)} · {c.usuario}</span></div>
               <div className="grid gap-1 sm:grid-cols-2"><div><span className="text-xs text-tenue">Antes</span><div>{fmt(c.anterior)}</div></div><div><span className="text-xs text-tenue">Después</span><div>{fmt(c.nuevo)}</div></div></div>
               <p className="mt-1 text-tenue">Motivo: {c.motivo}</p>
@@ -284,7 +284,7 @@ function Resumen({ puedeExportar }: { puedeExportar: boolean }) {
   return (
     <>
       <SelectorPeriodo desde={desde} hasta={hasta} onCambio={(d, h) => { setDesde(d); setHasta(h); }} />
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Persona"><Select value={usuario} onChange={(e) => setUsuario(e.target.value)} className="w-56"><option value="">Todas</option>{personal.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</Select></Campo>
         <Campo label="Agrupar"><Select value={agrupar} onChange={(e) => setAgrupar(e.target.value as any)} className="w-44"><option value="empleado">Por persona</option><option value="dia">Por día</option></Select></Campo>
         {puedeExportar && <Boton className="ml-auto" icono={<Download className="size-4" />} onClick={exportar} disabled={!data?.filas.length}>Exportar CSV</Boton>}

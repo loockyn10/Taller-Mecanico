@@ -7,7 +7,7 @@ import { api, nuevaClave } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, hoyISO, money } from '@/lib/format';
 import { leerArchivo, type ArchivoLeido } from '@/lib/archivo';
-import { Aviso, Boton, Campo, Cargando, Check, Encabezado, ErrorCaja, Input, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useToast } from '@/components/ui';
+import { Aviso, Boton, Campo, Cargando, Check, Encabezado, ErrorCaja, Input, Insignia, Modal, Select, Tabla, TablaApilable, Tarjeta, Textarea, useToast } from '@/components/ui';
 
 interface FilaEntrada { n: number; proveedor_id?: string; proveedor?: string; importe: string; referencia: string; vencimiento: string }
 interface FilaRevisada { n: number; estado: 'ok' | 'aviso' | 'error'; proveedor: string | null; importe: number | null; referencia: string | null; vencimiento: string | null; mensajes: string[] }
@@ -184,7 +184,7 @@ function CargarProveedores() {
         </div>
 
         {archivo && (
-          <div className="rounded-lg bg-slate-50 p-3 text-sm">
+          <div className="rounded-ctl bg-slate-50 p-3 text-sm">
             <p className="mb-2 font-medium">{archivo.nombre} · indicá qué columna es cada dato</p>
             <div className="grid gap-2 sm:grid-cols-4">
               {([['proveedor', 'Proveedor (CUIT, código o nombre)'], ['importe', 'Saldo'], ['referencia', 'Comprobante (opcional)'], ['vencimiento', 'Vencimiento (opcional)']] as const).map(([k, t]) => (
@@ -201,9 +201,9 @@ function CargarProveedores() {
         )}
 
         {filas.length > 0 && (
-          <div className="overflow-x-auto">
+          <TablaApilable>
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-borde text-left text-xs font-semibold uppercase text-tenue"><th className="py-1.5 pr-2">Proveedor</th><th className="pr-2">Saldo</th><th className="pr-2">Comprobante</th><th className="pr-2">Vence</th><th /></tr></thead>
+              <thead><tr className="border-b border-borde text-left text-xs font-semibold uppercase tracking-wide text-tenue"><th className="py-1.5 pr-2">Proveedor</th><th className="pr-2">Saldo</th><th className="pr-2">Comprobante</th><th className="pr-2">Vence</th><th /></tr></thead>
               <tbody>
                 {filas.map((f, i) => (
                   <tr key={i} className="border-b border-borde last:border-0">
@@ -223,7 +223,7 @@ function CargarProveedores() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TablaApilable>
         )}
 
         {filas.length > 0 && (

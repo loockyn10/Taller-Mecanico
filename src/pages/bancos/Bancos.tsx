@@ -105,7 +105,7 @@ function ModalOperacion({ op, cuentas, cuentaInicial, onCerrar }: { op: Operacio
         {(op === 'manual' || op === 'ajuste') && (
           <Campo label="Tipo"><Select value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}><option value="ingreso">Ingreso (suma al saldo)</option><option value="egreso">Egreso (resta del saldo)</option></Select></Campo>
         )}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Campo label="Importe" requerido><InputMoneda value={f.importe} onChange={(v) => setF({ ...f, importe: v })} autoFocus /></Campo>
           <Campo label="Fecha" hint={puede('fechas.retroactivas') ? undefined : 'Sólo hoy'}><Input type="date" value={f.fecha} max={hoyISO()} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Campo>
         </div>
@@ -133,7 +133,7 @@ function Cuentas({ cuentas, onOp }: { cuentas: any[]; onOp: (op: Operacion, cuen
         {usd !== 0 && <Indicador titulo="Saldo en dólares" valor={`US$ ${(usd / 100).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`} tono="cian" />}
         <Indicador titulo="Movimientos sin conciliar" valor={String(cuentas.reduce((a, c) => a + c.pendientes, 0))} tono="ambar" />
       </div>
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="filtros mb-4 flex flex-wrap gap-2">
         <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setForm('nueva')}>Nueva cuenta</Boton>
         <Boton icono={<Banknote className="size-4" />} disabled={!cuentas.some((c) => c.activa && c.moneda === 'ARS')} onClick={() => onOp('deposito')}>Depositar efectivo</Boton>
         <Boton disabled={!cuentas.some((c) => c.activa && c.moneda === 'ARS')} onClick={() => onOp('extraccion')}>Extraer efectivo</Boton>
@@ -200,7 +200,7 @@ function Movimientos({ cuentas }: { cuentas: any[] }) {
   const exportar = () => descargarCSV('movimientos-bancarios', ['Fecha', 'Cuenta', 'Categoría', 'Concepto', 'Referencia', 'Ingreso', 'Egreso', 'Conciliado', 'Usuario'], data.map((x) => [x.fecha, x.cuenta, CATEGORIA_BANCO_LABEL[x.categoria] ?? x.categoria, x.concepto, x.referencia ?? '', x.tipo === 'ingreso' ? pesosCSV(x.importe) : '', x.tipo === 'egreso' ? pesosCSV(x.importe) : '', x.conciliado ? 'Sí' : 'No', x.usuario ?? '']));
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Cuenta"><Select value={cuenta} onChange={(e) => setCuenta(e.target.value)} className="w-auto"><option value="">Todas</option>{cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</Select></Campo>
         <Campo label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Campo>
         <Campo label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Campo>
@@ -291,7 +291,7 @@ function Conciliacion({ cuentas }: { cuentas: any[] }) {
   const alternar = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Cuenta"><Select value={cuentaId} onChange={(e) => { setCuentaId(e.target.value); setSel(new Set()); }} className="w-auto">{cuentas.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</Select></Campo>
         <Campo label="Fecha de corte del extracto"><Input type="date" value={corte} max={hoyISO()} onChange={(e) => setCorte(e.target.value)} /></Campo>
         <Campo label="Saldo según el extracto"><InputMoneda value={saldoExtracto} onChange={setSaldoExtracto} className="w-48" /></Campo>
@@ -351,7 +351,7 @@ function Conciliacion({ cuentas }: { cuentas: any[] }) {
         {!det ? <Cargando /> : (
           <div className="space-y-3 text-sm">
             <p>Corte {fecha(det.fecha_corte)} · extracto {money(det.saldo_extracto)} · libros {money(det.saldo_libros)} · diferencia <strong>{money(det.diferencia)}</strong>{det.notas ? ` · ${det.notas}` : ''}</p>
-            <ul className="divide-y divide-borde rounded-lg border border-borde">{det.movimientos.map((x: any) => <li key={x.id} className="flex justify-between gap-3 px-3 py-1.5"><span className="truncate">{fecha(x.fecha)} · {x.concepto}</span><span className="tabular-nums">{x.tipo === 'ingreso' ? '+' : '−'}{money(x.importe)}</span></li>)}</ul>
+            <ul className="divide-y divide-borde rounded-ctl border border-borde">{det.movimientos.map((x: any) => <li key={x.id} className="flex justify-between gap-3 px-3 py-1.5"><span className="truncate">{fecha(x.fecha)} · {x.concepto}</span><span className="tabular-nums">{x.tipo === 'ingreso' ? '+' : '−'}{money(x.importe)}</span></li>)}</ul>
           </div>
         )}
       </Modal>

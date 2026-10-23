@@ -40,7 +40,7 @@ function FormAntecedente({ vehiculoId, inicial, onCerrar }: { vehiculoId: string
     <Modal abierto onCerrar={onCerrar} titulo={inicial ? 'Editar antecedente' : 'Cargar antecedente anterior'} ancho="lg"
       pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="primario" disabled={f.descripcion.trim().length < 3} cargando={guardar.isPending} onClick={() => guardar.mutate()}>Guardar</Boton></>}>
       <div className="grid gap-3 sm:grid-cols-3">
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:col-span-3">Para trabajos hechos antes de usar Fierro o en otro taller. Quedan marcados como “cargados manualmente”, separados de las órdenes de trabajo.</p>
+        <p className="rounded-ctl bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:col-span-3">Para trabajos hechos antes de usar Fierro o en otro taller. Quedan marcados como “cargados manualmente”, separados de las órdenes de trabajo.</p>
         <Campo label="Fecha" requerido><Input type="date" max={hoyISO()} value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Campo>
         <Campo label="Kilometraje"><Input value={f.km} onChange={(e) => setF({ ...f, km: e.target.value.replace(/\D/g, '') })} inputMode="numeric" /></Campo>
         <Campo label="Tipo"><Select value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>{Object.entries(TIPOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Campo>
@@ -94,7 +94,7 @@ function EntradaOrden({ e, puedeVerOrden }: { e: any; puedeVerOrden: boolean }) 
         {tieneDetalle && <button type="button" className="font-medium text-marca-700" onClick={() => setAbierta((v) => !v)}>{abierta ? 'Ocultar detalle técnico' : 'Ver tareas y observaciones'}</button>}
       </div>
       {abierta && (
-        <div className="mt-2 space-y-2 rounded-lg bg-slate-50 p-3 text-sm">
+        <div className="mt-2 space-y-2 rounded-ctl bg-slate-50 p-3 text-sm">
           {e.tareas.length > 0 && (
             <ul className="space-y-1">
               {e.tareas.map((t: any, i: number) => (
@@ -165,7 +165,7 @@ export function HistorialTecnico({ vehiculoId, className }: { vehiculoId: string
       acciones={puedeEditar && <Boton tam="sm" icono={<Plus className="size-4" />} onClick={() => setForm({})}>Cargar antecedente</Boton>}
     >
       {dialogo}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="filtros mb-4 flex flex-wrap items-center gap-2">
         <Chip activo={filtro === 'todo'} onClick={() => setFiltro('todo')}>Todo</Chip>
         <Chip activo={filtro === 'fierro'} onClick={() => setFiltro('fierro')}>Hechos en Fierro</Chip>
         <Chip activo={filtro === 'manual'} onClick={() => setFiltro('manual')}>Cargados manualmente</Chip>

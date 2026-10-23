@@ -19,7 +19,7 @@ export function Presupuestos() {
   return (
     <>
       <Encabezado titulo="Presupuestos" subtitulo="Cotizaciones para el cliente; al aprobarse se convierten en órdenes de trabajo" acciones={puede('presupuestos.gestionar') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/presupuestos/nuevo')}>Nuevo presupuesto</Boton>} />
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="filtros mb-4 flex flex-wrap gap-2">
         <Buscador value={q} onChange={setQ} placeholder="Cliente, patente o número" className="min-w-56 flex-1" />
         <Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto">
           <option value="">Todos los estados</option>

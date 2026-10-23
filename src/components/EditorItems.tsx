@@ -100,7 +100,7 @@ function AgregarServicio({ onAgregar, listaId, vehiculoId }: { onAgregar: (i: It
         ))}
       </div>
       <Buscador value={q} onChange={setQ} placeholder="Filtrar servicios…" />
-      <ul className="max-h-60 divide-y divide-borde overflow-y-auto rounded-lg border border-borde bg-white text-sm">
+      <ul className="max-h-60 divide-y divide-borde overflow-y-auto rounded-ctl border border-borde bg-white text-sm">
         {lista.map((s) => (
           <li key={s.id}>
             <button
@@ -109,7 +109,7 @@ function AgregarServicio({ onAgregar, listaId, vehiculoId }: { onAgregar: (i: It
               onClick={() => onAgregar({ key: k(), tipo: 'servicio', servicio_id: s.id, descripcion: s.nombre, cantidad: 1, precio_unitario: s.precio_lista ?? s.precio, desc_pct: 0, tiempo_min: s.tiempo_efectivo_min ?? null })}
             >
               <span className="min-w-0">
-                <span className="block truncate">{s.nombre}</span>
+                <span className="block break-words">{s.nombre}</span>
                 <span className="flex flex-wrap items-center gap-x-2 text-xs text-tenue">
                   {s.categoria ?? 'Sin categoría'}
                   {s.tiempo_efectivo_min ? <span className="inline-flex items-center gap-1"><Clock className="size-3" />{formatearMinutos(s.tiempo_efectivo_min)}{s.tiempo_origen === 'especifico' ? ' · para este vehículo' : s.origen === 'plantilla' ? ' · orientativo' : ''}</span> : null}
@@ -141,7 +141,7 @@ function AgregarArticulo({ onAgregar, listaId }: { onAgregar: (i: ItemUI) => voi
     <div className="space-y-2">
       <Buscador value={q} onChange={setQ} onEnter={leer} placeholder="Buscar repuesto por nombre, código o marca… (o escaneá el código de barras)" autoFocus />
       {dq && (
-        <ul className="max-h-60 divide-y divide-borde overflow-y-auto rounded-lg border border-borde bg-white text-sm">
+        <ul className="max-h-60 divide-y divide-borde overflow-y-auto rounded-ctl border border-borde bg-white text-sm">
           {data.map((a) => (
             <li key={a.id}>
               <button
@@ -153,7 +153,7 @@ function AgregarArticulo({ onAgregar, listaId }: { onAgregar: (i: ItemUI) => voi
                 }}
               >
                 <span className="min-w-0">
-                  <span className="block truncate">{a.nombre}</span>
+                  <span className="block break-words">{a.nombre}</span>
                   <span className="text-xs text-tenue">{[a.codigo, a.marca].filter(Boolean).join(' · ')}</span>
                 </span>
                 <span className="shrink-0 text-right">
@@ -216,7 +216,7 @@ export function EditorItems({
             <Boton variante={modo === 'libre' ? 'primario' : 'secundario'} icono={<Plus className="size-4" />} onClick={() => setModo(modo === 'libre' ? null : 'libre')}>Línea libre</Boton>
           </div>
           {modo && (
-            <div className="mt-3 rounded-xl border border-borde bg-slate-50/60 p-3">
+            <div className="mt-3 rounded-card border border-borde bg-slate-50/60 p-3">
               {modo === 'servicio' && <AgregarServicio onAgregar={agregar} listaId={listaId} vehiculoId={vehiculoId} />}
               {modo === 'articulo' && <AgregarArticulo onAgregar={agregar} listaId={listaId} />}
               {modo === 'libre' && <AgregarLibre onAgregar={agregar} />}
@@ -226,9 +226,9 @@ export function EditorItems({
       )}
 
       {items.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-borde px-4 py-6 text-center text-sm text-tenue">Todavía no hay ítems cargados</p>
+        <p className="rounded-ctl border border-dashed border-borde px-4 py-6 text-center text-sm text-tenue">Todavía no hay ítems cargados</p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-borde">
+        <div className="overflow-hidden rounded-card border border-borde">
           <div className="hidden grid-cols-[minmax(0,1fr)_70px_130px_70px_120px_36px] gap-2 border-b border-borde bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-tenue md:grid">
             <span>Descripción</span>
             <span className="text-right">Cant.</span>
@@ -325,7 +325,7 @@ export function ResumenTotales({ t, params }: { t: ReturnType<typeof calcularTot
     </div>
   );
   return (
-    <div className="space-y-1.5 rounded-xl bg-slate-50 p-4 text-sm">
+    <div className="space-y-1.5 rounded-card bg-slate-50 p-4 text-sm">
       {fila('Repuestos', t.subtotal_articulos)}
       {fila('Mano de obra y servicios', t.subtotal_servicios)}
       {t.descuento > 0 && fila('Descuento', -t.descuento)}

@@ -4,7 +4,7 @@ import { Download } from 'lucide-react';
 import { api } from '@/lib/api';
 import { descargarCSV, exportarAutorizado, pesosCSV } from '@/lib/csv';
 import { money } from '@/lib/format';
-import { Aviso, Boton, Cargando, ErrorCaja, Insignia, Tarjeta, useToast } from '@/components/ui';
+import { Aviso, Boton, Cargando, ErrorCaja, Insignia, TablaApilable, Tarjeta, useToast } from '@/components/ui';
 import { BotonImprimir, nombreArchivo, Periodo } from './comun';
 
 export function EstadoResultados({ desde, hasta }: { desde: string; hasta: string }) {
@@ -37,7 +37,7 @@ export function EstadoResultados({ desde, hasta }: { desde: string; hasta: strin
       ) : <Aviso tono="verde">Resultado completo con los datos registrados en el período.</Aviso>}
 
       <Tarjeta sinPadding titulo="Resultado económico del período" subtitulo="Base devengado: cuenta lo vendido y lo comprado en el período, se haya cobrado o pagado o no.">
-        <table className="w-full text-sm">
+        <TablaApilable><table className="w-full text-sm">
           <tbody>
             {r.lineas.map((l: any) => (
               <tr key={l.clave} className={`border-b border-borde last:border-0 ${l.tipo === 'total' ? 'bg-marca-50/60 text-base font-bold' : l.tipo === 'subtotal' ? 'bg-slate-50/70 font-semibold' : ''}`}>
@@ -46,7 +46,7 @@ export function EstadoResultados({ desde, hasta }: { desde: string; hasta: strin
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></TablaApilable>
       </Tarjeta>
 
       {est && (

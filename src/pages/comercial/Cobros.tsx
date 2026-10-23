@@ -38,14 +38,14 @@ function DetalleCobro({ id, onCerrar, onAnular }: { id: string; onCerrar: () => 
           </dl>
           <div>
             <h3 className="mb-2 text-sm font-semibold">Formas de pago</h3>
-            <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
+            <ul className="divide-y divide-borde rounded-ctl border border-borde text-sm">
               {c.medios.map((m: any, i: number) => <li key={i} className="flex justify-between px-3 py-2"><span>{MEDIO_PAGO_LABEL[m.medio as MedioPago]}{m.referencia ? ` · ${m.referencia}` : ''}</span><span className="tabular-nums">{money(m.importe)}</span></li>)}
             </ul>
           </div>
           {c.tipo === 'anticipo' && <Aviso>Anticipo: dinero recibido antes de la venta (no es una venta). Aplicado {money(c.credito_aplicado)} · devuelto {money(c.devuelto)} · disponible {money(c.estado === 'registrado' ? c.total - c.credito_aplicado - c.devuelto : 0)}. El detalle de aplicaciones está en la pestaña Anticipos.</Aviso>}
           {c.tipo !== 'anticipo' && <div>
             <h3 className="mb-2 text-sm font-semibold">Comprobantes cancelados</h3>
-            <ul className="divide-y divide-borde rounded-lg border border-borde text-sm">
+            <ul className="divide-y divide-borde rounded-ctl border border-borde text-sm">
               {c.aplicaciones.map((a: any) => (
                 <li key={a.venta_id} className="flex flex-wrap justify-between gap-2 px-3 py-2">
                   <span><Link className="text-marca-700" to={`/ventas/${a.venta_id}`} onClick={onCerrar}>Comprobante #{numero(a.numero)}</Link>{a.orden_numero ? ` · OT #${numero(a.orden_numero)}` : ''} · total {money(a.total)}</span>
@@ -104,14 +104,14 @@ export function Cobros() {
       {tab === 'anticipos' && <AnticiposTab />}
       {tab === 'devoluciones' && <DevolucionesTab abrirId={ver} />}
       {tab === 'cobros' && <>
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Campo label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Campo>
         <Campo label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Campo>
         <Campo label="Estado"><Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto"><option value="">Todos</option><option value="registrado">Vigentes</option><option value="anulado">Anulados</option></Select></Campo>
         <Campo label="Medio"><Select value={medio} onChange={(e) => setMedio(e.target.value)} className="w-auto"><option value="">Todos</option>{MEDIOS_PAGO.map((x) => <option key={x} value={x}>{MEDIO_PAGO_LABEL[x]}</option>)}</Select></Campo>
         <Buscador value={q} onChange={setQ} placeholder="Cliente o N° de recibo" className="min-w-48 flex-1" />
       </div>
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="filtros mb-4 flex flex-wrap gap-2">
         <Insignia tono="verde" className="px-3 py-1 text-sm">Total vigente: {money(vigentes.reduce((a, c) => a + c.total, 0))}</Insignia>
         {[...porMedio.entries()].map(([medio, t]) => <Insignia key={medio} className="px-3 py-1 text-sm">{MEDIO_PAGO_LABEL[medio as MedioPago]}: {money(t)}</Insignia>)}
       </div>

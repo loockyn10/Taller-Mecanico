@@ -35,7 +35,7 @@ export function Ventas() {
         acciones={puede('ventas.emitir') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/ventas/nueva')}>Venta de mostrador</Boton>}
       />
       <Aviso className="mb-4">Los comprobantes son <strong>internos (no fiscales)</strong>. La facturación electrónica ARCA todavía no está integrada; el sistema está preparado para incorporarla sin rehacer ventas ni cobros.</Aviso>
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-center gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Cliente o número" className="min-w-56 flex-1" />
         <Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto" aria-label="Estado de cobro">
           <option value="">Todos los estados</option>
@@ -252,7 +252,7 @@ export function VentaMostrador() {
                 </Select>
               </Campo>
               {condicion === 'contado' && (
-                <div className="space-y-2 rounded-lg bg-slate-50 p-3">
+                <div className="space-y-2 rounded-ctl bg-slate-50 p-3">
                   <Campo label="Medio de pago">
                     <SelectorMedio value={medio} onChange={setMedio} />
                   </Campo>

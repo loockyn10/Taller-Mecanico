@@ -79,7 +79,7 @@ function FormFactura({ inicial, onCerrar }: { inicial?: { proveedor_id?: string;
           <Campo label="Vencimiento" hint={f.vencimiento ? undefined : 'Calculado según la condición'}><Input type="date" value={f.vencimiento || venc} min={f.fecha} onChange={(e) => setF({ ...f, vencimiento: e.target.value })} /></Campo>
         </div>
 
-        <div className="rounded-lg border border-borde p-3">
+        <div className="rounded-ctl border border-borde p-3">
           <Campo label="Asociar a">
             <Select value={f.asociar} onChange={(e) => setF({ ...f, asociar: e.target.value, compra_id: '', orden_compra_id: '' })}>
               <option value="">Nada: es una factura independiente (genera deuda)</option>
@@ -140,7 +140,7 @@ export function FacturasProveedor() {
   return (
     <>
       <Encabezado titulo="Facturas de proveedores" subtitulo="Comprobantes de compra, IVA y vencimientos" acciones={<Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setNueva({})}>Registrar factura</Boton>} />
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Proveedor, número o CUIT…" className="min-w-52 flex-1" />
         <Campo label="Proveedor"><Select value={proveedor} onChange={(e) => setProveedor(e.target.value)} className="w-auto"><option value="">Todos</option>{provs.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</Select></Campo>
         <Campo label="Estado"><Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto"><option value="">Todas</option><option value="registrada">Registradas</option><option value="anulada">Anuladas</option></Select></Campo>

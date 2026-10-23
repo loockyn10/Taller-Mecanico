@@ -1,6 +1,6 @@
 # Progreso del desarrollo · Fierro v0.1.0
 
-Última actualización: 2026-10-22 (ver las secciones 63 a 71: Sprint 12, comparativa con Caldén, sincronización contable controlada, saldos de apertura y respaldos). Documento para retomar el trabajo en nuevas sesiones.
+Última actualización: 2026-10-23 (ver las secciones 84 a 89: Sprint 14, evolución visual y responsive integral). Documento para retomar el trabajo en nuevas sesiones.
 
 ## 1. Arquitectura implementada
 - **Un único Worker** (`worker/index.ts`, Hono) sirve la API en `/api/*` y la SPA compilada (assets estáticos). En desarrollo, Vite sirve la SPA y redirige `/api` a `wrangler dev`.
@@ -784,3 +784,55 @@ Sin plataformas externas ni costo: (a) `GET /api/platform/salud` y `npm run plat
 6. **P2:** el tablero se refresca cada 60 s y concentra las lecturas del modelo de consumo (pasarlo a 5 min recorta ~80 %); informes proporcionales al historial (balance contable, cuentas corrientes) sin paginar.
 7. **P2:** una prueba de concurrencia del Sprint 12 falló una vez en una corrida completa sin reproducirse (§81); está instrumentada para diagnosticarla.
 8. Heredados: exportación de datos por el propietario desde la app, restauración de un taller a un taller nuevo, interfaz sin pruebas automáticas.
+
+---
+
+# Sprint 14 · Evolución visual y responsive integral (2026-10-23)
+
+Sólo interfaz: **sin cambios en el servidor, la base, las migraciones, los permisos ni los cálculos** (el diff toca únicamente `src/`, `public/`, `index.html`, `vite.config.ts`, `scripts/icons.mjs` y este documento).
+
+## 84. Sistema visual adoptado
+Todo sale de los tokens de `src/index.css` (`@theme`); ninguna pantalla define los suyos. Para cambiar la identidad basta con tocar ese bloque.
+- **Fondo y superficies:** `fondo` gris azulado (#edf1f5), `superficie` blanca, `superficie-2` gris muy claro (cabeceras de tabla, pies de modal, paneles), bordes `borde` / `borde-suave` / `borde-fuerte` (campos).
+- **Marca:** escala `marca-*` en **azul acero** (600 = #2d5b87) para acciones principales, foco y estados activos. El ícono, los PNG de la PWA, `theme-color` y el manifiesto usan el mismo azul.
+- **Navegación:** escala `petroleo-*` (azul petróleo) para la barra lateral, el menú móvil y el panel de Login/Activación; ítem activo con relleno translúcido y barra celeste.
+- **Estados:** alias semánticos `exito-*`, `aviso-*`, `peligro-*` (verde, ámbar, rojo) usados por insignias, avisos, botones y alertas. La escala `slate` se redefinió con grises azulados; los textos que usaban `slate-400` pasaron a `slate-500` (texto secundario ≥ 5:1 sobre blanco y sobre el fondo).
+- **Radios:** `rounded-ctl` (8 px: botones y campos), `rounded-card` (12 px: tarjetas, paneles), `rounded-modal` (16 px). **Sombras:** `shadow-card` (casi plana), `shadow-pop` (menús), `shadow-modal`.
+- **Layout:** `max-w-contenido` = **1600 px** (centrado en monitores grandes), `max-w-formulario` = 960 px (Configuración y Puesta en marcha no estiran los campos), `w-menu` = 16 rem. **Tipografía:** Inter/Segoe UI; `text-micro` para etiquetas mínimas; los campos usan 16 px en celular (evita el zoom de iOS) y 14 px desde `sm`.
+- Reemplazo mecánico en todo `src/`: `rounded-xl/lg/2xl` → `rounded-card/ctl/modal`; `shadow-sm/lg` sueltas → tokens.
+
+## 85. Componentes compartidos mejorados (`src/components/ui.tsx`)
+- **Botones** (`Boton`: principal relleno, secundario con borde, fantasma, peligro, éxito; alto táctil en celular) y **`BotonIcono`** nuevo (36 px, etiqueta obligatoria) que reemplazó a botones de ícono sueltos de 24 px (Plan de cuentas, Libro diario, Agenda, Configuración).
+- **Campos** (`Input`, `Select`, `Textarea`, `InputMoneda`, `Campo`, `Check`, `Chip`) con el mismo borde, foco y tamaño; **`Grilla`** (1 columna en celular → 2 → 3/4), **`Seccion`** y **`AccionesForm`** (botonera fija al pie de un formulario dentro de un modal) nuevos. Los formularios de modales con importes, fechas o selectores pasaron a 1 columna en celular. `Grilla` y `Seccion` quedan disponibles pero todavía no se usan en las pantallas existentes (se conservó su maquetación).
+- **`Tabla`:** decide por el **ancho real del contenedor** (no por el de la pantalla, que con el menú abierto engaña): si la tabla no entra pasa sola a tarjetas (título, subtítulo, importe, datos secundarios agrupados) y vuelve a tabla apenas hay lugar. **`TablaApilable`** nueva aplica lo mismo a las `<table>` escritas a mano (libros contables, informes, balance, caja, importación): cada fila se apila con las etiquetas de su columna; sólo en pantalla (al imprimir vuelve a ser tabla).
+- **`Modal`:** `dvh`, cuerpo con desplazamiento vertical propio, título y pie siempre visibles; en celular sube desde abajo, con botones a todo el ancho y respeto del área segura.
+- **`Pestanas`** como control segmentado que se reparte en varias filas (ya no hay pestañas con desplazamiento horizontal); **`Segmentado`** nuevo (Tablero/Lista); **`Indicador`** con letra proporcional al ancho real de la tarjeta (consulta de contenedor) y valores compuestos ("a / b") que pasan de línea sin cortar cada importe; `Encabezado` sin truncar el título; `Aviso`, `ErrorCaja`, `Cargando`, `Vacio`, toasts y confirmaciones con los mismos tokens y roles de accesibilidad; clase **`.filtros`** que reparte los filtros de 28 listados en celular; `SelectorPeriodo` rehecho (dos fechas en una fila, atajos debajo) y reutilizado por Estadísticas.
+- **Layout y navegación (`Layout.tsx`):** barra lateral petróleo con buscador, categorías desplegables, ítem activo resaltado y migas, todo conservado; encabezado, barra inferior móvil y búsqueda global con los tokens nuevos; `main` con `min-w-0`.
+- Texto largo: los nombres de artículos y clientes en listas y selectores ya no se cortan con puntos suspensivos (se parten); los truncados que quedan son de una línea.
+
+## 86. Pantallas revisadas
+Las 52 rutas (incluidas las de detalle) más las pestañas de cada pantalla que las tiene: Inicio, Clientes, Vehículos, Órdenes de trabajo (tablero y lista), Presupuestos, Agenda, Tempario, Mantenimientos, Personal (Equipo, Asistencia, Panel, Reloj compartido), Mis trabajos, Inventario, Depósitos, Compras, Órdenes de compra, Facturas de proveedor, Ventas, Cobranzas, Cuentas corrientes, Caja, Finanzas, Tesorería, Bancos, Cheques, Contabilidad (todas sus pestañas), Estadísticas, Informes, Configuración, Puesta en marcha, Importación, Apertura de saldos, Login y Activación. El Reloj compartido (pantalla oscura de kiosco) sólo toma los radios y la escala de grises nuevos.
+
+## 87. Problemas de desborde corregidos (causas, no `overflow-x: hidden`)
+| Causa | Dónde se veía | Corrección |
+|---|---|---|
+| Hijos de una grilla que no se achican por debajo de su contenido | Ficha de OT, Estadísticas, Finanzas, detalle de orden de compra (hasta 640 px en un celular de 375) | `.grid > * { min-width: 0 }` global + `min-w-0` en `Tarjeta`, `Campo`, `Dato` e inputs |
+| Tablas con `overflow-x-auto` interno al abrir el menú lateral (contenido de ~705 px en 1024) | Todas las listas con `Tabla` y 12 tablas escritas a mano | Cambio automático a tarjetas por ancho real del contenedor (`Tabla` / `TablaApilable`) |
+| Tablero Kanban de 6 columnas fijas de 288 px (1.512 px) | Órdenes de trabajo | Grilla `auto-fill` que reparte las columnas en filas |
+| Pestañas con scroll horizontal | Configuración (779 px), Finanzas, ficha de OT | Control segmentado con salto de línea |
+| Importes en tarjetas de dos columnas (`whitespace-nowrap`) y valores compuestos | Finanzas, Productividad, Contabilidad | Letra proporcional por consulta de contenedor; "a / b" divisible |
+| Lista de informes (cuatro pantallas de alto en celular) | Informes | Selector agrupado en celular, lista lateral desde `lg` |
+| Controles de período desalineados | Estadísticas | `SelectorPeriodo` compartido con `atajos` |
+| Formularios dentro de modales sin botonera visible | Alta/edición de cliente y vehículo | `AccionesForm` fija al pie |
+
+## 88. Comprobaciones responsive
+Instancia local aislada (puertos 8790/5180, base temporal con el generador de demo y usuarios de otros roles; nunca se tocó la instancia habitual ni la D1 remota). Un arnés temporal (no versionado) recorrió **todas las rutas, las pestañas y entre 14 y 28 ventanas modales por ancho**, midiendo el ancho del documento y del contenido, elementos fuera de pantalla, contenedores con scroll horizontal propio, pies de modal fuera de la pantalla y la pantalla de error del compilador:
+- **360, 375, 768, 1024 y 1366 px:** 0 desbordes de página, 0 contenedores con scroll horizontal, 0 modales o botones fuera de pantalla. **1920 px:** contenido centrado de exactamente 1600 px.
+- **Roles:** propietario, recepción y mecánico (Mis trabajos, su detalle y Asistencia) a 375 px. Caja y depósito sólo se dieron de alta: su menú depende de los mismos permisos, que no se tocaron.
+- Capturas de revisión visual en 390, 1366 y 1920 px de Inicio, Órdenes, Clientes, Ventas, Caja, Configuración, Puesta en marcha, Informes, Agenda, Estadísticas, Login y Mis trabajos.
+- `npm run typecheck` y `npm run build` OK; **107 pruebas unitarias OK**. No se corrió la suite de integración (`vitest.api`): no se tocó nada de `worker/`, `shared/` ni `migrations/`.
+- **No comprobado:** dispositivos reales (se usó la emulación de tamaño del navegador integrado, no un celular físico ni Safari/iOS); impresión/PDF de los comprobantes (sólo cambia la escala de grises, no se imprimieron); el Reloj compartido con un dispositivo activado.
+- Hallazgo del arnés: la primera versión de `TablaApilable` aplicaba la clase de apilado desde otro efecto y a veces medía la tabla ya apilada; ahora la clase la maneja React en el mismo render (probado con 12 navegaciones seguidas).
+
+## 89. Despliegue
+(se completa tras publicar)

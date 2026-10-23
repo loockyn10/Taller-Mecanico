@@ -32,7 +32,7 @@ export function OrdenesCompra() {
   return (
     <>
       <Encabezado titulo="Órdenes de compra" subtitulo={abiertas.length ? `${abiertas.length} orden(es) esperando mercadería` : 'Pedidos a proveedores y recepción de mercadería'} acciones={<Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/ordenes-compra/nueva')}>Nueva orden</Boton>} />
-      <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-end gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Proveedor, número u observaciones…" className="min-w-52 flex-1" />
         <Campo label="Estado"><Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto"><option value="">Todos</option>{ESTADOS_ORDEN_COMPRA.map((e) => <option key={e} value={e}>{ESTADO_OC_LABEL[e]}</option>)}</Select></Campo>
         <Campo label="Proveedor"><Select value={proveedor} onChange={(e) => setProveedor(e.target.value)} className="w-auto"><option value="">Todos</option>{provs.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</Select></Campo>
@@ -111,7 +111,7 @@ export function OrdenCompraForm() {
           <Tarjeta titulo="Artículos a pedir" className="xl:col-span-2">
             <Buscador value={q} onChange={setQ} placeholder="Buscar artículo para agregar… (o escaneá el código de barras)" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (!a) return toast.error(new Error(`No hay ningún artículo con el código ${codigo}`)); setItems((prev) => (prev.some((i) => i.articulo_id === a.id) ? prev : [...prev, { articulo_id: a.id, nombre: a.nombre, codigo: a.codigo, cantidad: 1, costo_unitario: a.costo, desc_pct: 0 }])); setQ(''); }} />
             {dq && (
-              <ul className="mt-1.5 max-h-56 divide-y divide-borde overflow-y-auto rounded-lg border border-borde text-sm">
+              <ul className="mt-1.5 max-h-56 divide-y divide-borde overflow-y-auto rounded-ctl border border-borde text-sm">
                 {res.map((a) => (
                   <li key={a.id}>
                     <button type="button" className="flex w-full justify-between px-3 py-2 text-left hover:bg-marca-50" onClick={() => { if (!items.some((i) => i.articulo_id === a.id)) setItems([...items, { articulo_id: a.id, nombre: a.nombre, codigo: a.codigo, cantidad: Math.max(1, a.stock_objetivo ? a.stock_objetivo - a.stock : 1), costo_unitario: a.costo, desc_pct: 0 }]); setQ(''); }}>
@@ -123,10 +123,10 @@ export function OrdenCompraForm() {
                 {!res.length && <li className="px-3 py-2 text-tenue">Sin resultados. Crealo primero en Artículos.</li>}
               </ul>
             )}
-            <ul className="mt-4 divide-y divide-borde rounded-xl border border-borde">
+            <ul className="mt-4 divide-y divide-borde rounded-card border border-borde">
               {items.map((i, idx) => (
                 <li key={i.articulo_id} className="grid grid-cols-2 items-center gap-2 px-3 py-2 sm:grid-cols-[1fr_90px_140px_80px_110px_40px]">
-                  <span className="col-span-2 truncate text-sm font-medium sm:col-span-1">{i.nombre}</span>
+                  <span className="col-span-2 break-words text-sm font-medium sm:col-span-1">{i.nombre}</span>
                   <Input type="number" min={0.001} step="any" value={i.cantidad} onChange={(e) => setItems(items.map((x, j) => (j === idx ? { ...x, cantidad: Math.round(Number(e.target.value) * 1000) / 1000 } : x)))} className="h-9 text-right" aria-label="Cantidad" />
                   <InputMoneda value={i.costo_unitario} onChange={(v) => setItems(items.map((x, j) => (j === idx ? { ...x, costo_unitario: v } : x)))} className="[&_input]:h-9" />
                   <Input type="number" min={0} max={100} step="any" value={i.desc_pct} onChange={(e) => setItems(items.map((x, j) => (j === idx ? { ...x, desc_pct: Math.min(100, Math.max(0, Number(e.target.value))) } : x)))} className="h-9 text-right" aria-label="Descuento %" title="Descuento %" />
@@ -147,7 +147,7 @@ export function OrdenCompraForm() {
                     {provs.filter((p) => p.activo).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                   </Select>
                 </Campo>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Campo label="Fecha"><Input type="date" value={f.fecha} max={hoyISO()} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Campo>
                   <Campo label="Entrega prevista"><Input type="date" value={f.fecha_prevista} min={f.fecha} onChange={(e) => setF({ ...f, fecha_prevista: e.target.value })} /></Campo>
                   <Campo label="Descuento global %"><Input type="number" min={0} max={100} step="any" value={f.descuento_pct} onChange={(e) => setF({ ...f, descuento_pct: Math.min(100, Math.max(0, Number(e.target.value))) })} /></Campo>
@@ -155,7 +155,7 @@ export function OrdenCompraForm() {
                 </div>
                 <Check checked={f.actualizar_costos} onChange={(v) => setF({ ...f, actualizar_costos: v })} label="Actualizar el costo de los artículos al recibir" />
                 <Campo label="Observaciones"><Textarea rows={2} value={f.observaciones} onChange={(e) => setF({ ...f, observaciones: e.target.value })} /></Campo>
-                <div className="space-y-0.5 rounded-lg bg-slate-50 p-3 text-right text-sm">
+                <div className="space-y-0.5 rounded-ctl bg-slate-50 p-3 text-right text-sm">
                   <div>Subtotal: {money(t.subtotal)}</div>
                   {t.descuento > 0 && <div>Descuento: −{money(t.descuento)}</div>}
                   {f.iva_pct > 0 && <div>IVA {f.iva_pct}%: {money(t.iva)}</div>}
@@ -215,12 +215,12 @@ function ModalRecepcion({ orden, onCerrar }: { orden: any; onCerrar: () => void 
           <Campo label="Notas"><Input value={notas} onChange={(e) => setNotas(e.target.value)} /></Campo>
           <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito de ingreso" />
         </div>
-        <ul className="divide-y divide-borde rounded-xl border border-borde">
+        <ul className="divide-y divide-borde rounded-card border border-borde">
           {pendientes.map((i: any) => {
             const c = cant[i.id] ?? 0;
             return (
               <li key={i.id} className="grid grid-cols-[1fr_auto] items-center gap-2 px-3 py-2 sm:grid-cols-[1fr_120px_130px_100px]">
-                <div className="min-w-0"><div className="truncate text-sm font-medium">{i.articulo}</div><div className="text-xs text-tenue">Pedido {cantidad(i.cantidad)} · ya recibido {cantidad(i.cantidad_recibida)}</div></div>
+                <div className="min-w-0"><div className="break-words text-sm font-medium">{i.articulo}</div><div className="text-xs text-tenue">Pedido {cantidad(i.cantidad)} · ya recibido {cantidad(i.cantidad_recibida)}</div></div>
                 <div className="text-right text-sm text-tenue sm:order-none">Pendiente <strong className="text-texto">{cantidad(i.pendiente)}</strong></div>
                 <Input type="number" min={0} max={i.pendiente} step="any" value={c} onChange={(e) => setCant({ ...cant, [i.id]: Math.max(0, Math.min(i.pendiente, Math.round(Number(e.target.value) * 1000) / 1000)) })} className="h-9 text-right" aria-label={`Cantidad recibida de ${i.articulo}`} />
                 <span className={`text-right text-xs ${c < i.pendiente ? 'font-medium text-amber-700' : 'text-emerald-700'}`}>{c < i.pendiente ? `Faltan ${cantidad(Math.round((i.pendiente - c) * 1000) / 1000)}` : 'Completo'}</span>

@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { descargarCSV, exportarAutorizado, pesosCSV } from '@/lib/csv';
 import { money } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, Check, ErrorCaja, Input, Insignia, Modal, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
+import { Aviso, Boton, BotonIcono, Buscador, Campo, Cargando, Check, ErrorCaja, Input, Insignia, Modal, Select, TablaApilable, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { TIPO_LABEL, TIPOS_CUENTA } from '@shared/contabilidad';
 import { BotonImprimir } from './comun';
 
@@ -59,7 +59,7 @@ function FormCuenta({ cuenta, cuentas, onCerrar }: { cuenta: Cuenta | null; cuen
           <Campo label="Código" requerido hint="Ej. 6.1.11"><Input value={f.codigo} onChange={(e) => setF({ ...f, codigo: e.target.value.trim() })} /></Campo>
           <Campo label="Nombre" requerido className="col-span-2"><Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} maxLength={120} /></Campo>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Campo label="Tipo">
             <Select value={f.tipo} disabled={!!cuenta} onChange={(e) => setF({ ...f, tipo: e.target.value, padre_id: '' })}>
               {TIPOS_CUENTA.map((t) => <option key={t} value={t}>{TIPO_LABEL[t]}</option>)}
@@ -150,7 +150,7 @@ export function PlanCuentas({ hasta }: { hasta: string }) {
         {gestiona && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => setEditando('nueva')}>Nueva cuenta</Boton>}
       </div>
       <Tarjeta sinPadding titulo="Plan de cuentas" subtitulo={`Saldos al ${hasta.split('-').reverse().join('/')} · el saldo está en el sentido normal de cada cuenta`}>
-        <div className="overflow-x-auto">
+        <TablaApilable>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-borde bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wide text-tenue">
@@ -172,8 +172,8 @@ export function PlanCuentas({ hasta }: { hasta: string }) {
                   <td className="no-print px-4 py-2 text-right">
                     {gestiona && (
                       <span className="inline-flex gap-1">
-                        <button title="Editar" className="rounded p-1.5 text-tenue hover:bg-slate-100" onClick={() => setEditando(c)}><Pencil className="size-4" /></button>
-                        {!c.rol && !c.cuenta_bancaria_id && !c.movimientos && <button title="Eliminar" className="rounded p-1.5 text-tenue hover:bg-red-50 hover:text-red-600" onClick={() => eliminar(c)}><Trash2 className="size-4" /></button>}
+                        <BotonIcono etiqueta="Editar" onClick={() => setEditando(c)}><Pencil className="size-4" /></BotonIcono>
+                        {!c.rol && !c.cuenta_bancaria_id && !c.movimientos && <BotonIcono etiqueta="Eliminar" peligro onClick={() => eliminar(c)}><Trash2 className="size-4" /></BotonIcono>}
                       </span>
                     )}
                   </td>
@@ -181,7 +181,7 @@ export function PlanCuentas({ hasta }: { hasta: string }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TablaApilable>
       </Tarjeta>
       <div className="no-print"><CategoriasGasto cuentas={data ?? []} puedeEditar={gestiona} /></div>
       {editando && <FormCuenta cuenta={editando === 'nueva' ? null : editando} cuentas={data ?? []} onCerrar={() => setEditando(null)} />}

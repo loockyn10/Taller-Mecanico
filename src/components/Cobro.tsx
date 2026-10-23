@@ -157,7 +157,7 @@ export function ModalCobro({ abierto, onCerrar, clienteId, ventaId }: { abierto:
                 </div>
               )}
             </div>
-            <ul className="divide-y divide-borde rounded-lg border border-borde">
+            <ul className="divide-y divide-borde rounded-ctl border border-borde">
               {pendientes.map((p) => (
                 <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
                   <Check

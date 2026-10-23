@@ -120,7 +120,7 @@ export function ActivarContabilidad({ estado }: { estado: EstadoContab }) {
             <p className="mb-1.5 font-medium">Lo que se va a contabilizar ({total} documento{total === 1 ? '' : 's'}):</p>
             <ul className="grid gap-1 sm:grid-cols-2">
               {estado.por_origen.map((o) => (
-                <li key={o.tipo} className="flex justify-between rounded-lg bg-slate-50 px-3 py-1.5">
+                <li key={o.tipo} className="flex justify-between rounded-ctl bg-slate-50 px-3 py-1.5">
                   <span>{o.etiqueta}</span>
                   <span className="tabular-nums text-tenue">{o.documentos}</span>
                 </li>

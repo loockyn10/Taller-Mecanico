@@ -1,47 +1,214 @@
 @import 'tailwindcss';
 
-/* Sistema de diseño de Fierro: tokens centralizados */
+/*
+ * Sistema visual de Fierro (Sprint 14).
+ * Todos los colores, radios, sombras, anchos y tipografías de la interfaz salen de estos tokens: ninguna pantalla define
+ * los suyos. Para cambiar la identidad visual basta con tocar este bloque.
+ *
+ *  · Fondo gris azulado, superficies blancas y grises diferenciadas.
+ *  · Azul acero como color de marca y de acciones principales.
+ *  · Azul petróleo para la navegación.
+ *  · Verde / ámbar / rojo sólo para estados.
+ */
 @theme {
   --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
 
-  --color-marca-50: #eef3ff;
-  --color-marca-100: #dce6ff;
-  --color-marca-200: #b9ccff;
-  --color-marca-300: #8aa8fb;
-  --color-marca-400: #5a7ff2;
-  --color-marca-500: #355ee3;
-  --color-marca-600: #1c3faa;
-  --color-marca-700: #18348c;
-  --color-marca-800: #152c72;
-  --color-marca-900: #11235a;
+  /* ── Marca: azul acero ── */
+  --color-marca-50: #eef4fa;
+  --color-marca-100: #dde9f4;
+  --color-marca-200: #bcd2e6;
+  --color-marca-300: #92b4d2;
+  --color-marca-400: #5f8fbb;
+  --color-marca-500: #3f71a0;
+  --color-marca-600: #2d5b87;
+  --color-marca-700: #254b6f;
+  --color-marca-800: #1e3c59;
+  --color-marca-900: #172e45;
+
+  /* ── Navegación: azul petróleo ── */
+  --color-petroleo-50: #e8f1f3;
+  --color-petroleo-100: #cfe0e5;
+  --color-petroleo-200: #a9c6cf;
+  --color-petroleo-300: #7ea4b1;
+  --color-petroleo-400: #5a8494;
+  --color-petroleo-500: #416a7a;
+  --color-petroleo-600: #31535f;
+  --color-petroleo-700: #25414c;
+  --color-petroleo-800: #1b323b;
+  --color-petroleo-900: #13252d;
+  --color-petroleo-950: #0d1b21;
+
+  /* ── Grises (reemplazan a slate): neutros con un poco de azul ── */
+  --color-slate-50: #f4f7fa;
+  --color-slate-100: #eaeff4;
+  --color-slate-200: #dbe3ec;
+  --color-slate-300: #c3cfdb;
+  --color-slate-400: #8493a7;
+  --color-slate-500: #5b6c81;
+  --color-slate-600: #465669;
+  --color-slate-700: #33414f;
+  --color-slate-800: #212c39;
+  --color-slate-900: #121a25;
+
+  /* ── Superficies y texto ── */
+  --color-fondo: #edf1f5;
+  --color-superficie: #ffffff;
+  --color-superficie-2: #f5f7fa;
+  --color-borde: #d9e0e8;
+  --color-borde-suave: #e6ebf1;
+  --color-borde-fuerte: #b8c4d2;
+  --color-texto: #162231;
+  --color-tenue: #536479;
+
+  /* ── Estados (alias de la paleta estándar para tener un nombre semántico) ── */
+  --color-exito-50: var(--color-emerald-50);
+  --color-exito-200: var(--color-emerald-200);
+  --color-exito-600: var(--color-emerald-600);
+  --color-exito-700: var(--color-emerald-700);
+  --color-aviso-50: var(--color-amber-50);
+  --color-aviso-200: var(--color-amber-200);
+  --color-aviso-600: var(--color-amber-600);
+  --color-aviso-800: var(--color-amber-800);
+  --color-peligro-50: var(--color-red-50);
+  --color-peligro-200: var(--color-red-200);
+  --color-peligro-600: var(--color-red-600);
+  --color-peligro-700: var(--color-red-700);
 
   --color-ambar-400: #f7b955;
   --color-ambar-500: #f5a524;
   --color-ambar-600: #d98a0c;
 
-  --color-fondo: #f6f7f9;
-  --color-superficie: #ffffff;
-  --color-borde: #e3e6eb;
-  --color-texto: #18202c;
-  --color-tenue: #5d6878;
+  /* ── Radios ── */
+  --radius-ctl: 0.5rem; /* botones, campos */
+  --radius-card: 0.75rem; /* tarjetas, paneles */
+  --radius-modal: 1rem; /* ventanas */
+
+  /* ── Sombras (discretas) ── */
+  --shadow-card: 0 1px 2px rgb(18 30 48 / 0.05), 0 0 0 1px rgb(18 30 48 / 0.015);
+  --shadow-pop: 0 8px 24px -6px rgb(18 30 48 / 0.2);
+  --shadow-modal: 0 24px 56px -14px rgb(18 30 48 / 0.38);
+
+  /* ── Layout ── */
+  --container-contenido: 100rem; /* ancho máximo del contenido en escritorio: 1600 px */
+  --container-formulario: 60rem; /* formularios y fichas sueltas: no se estiran en monitores grandes */
+  --spacing-menu: 16rem; /* ancho de la barra lateral */
+
+  /* ── Tipografía ── */
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 1rem;
 }
 
-html,
-body,
-#root {
-  height: 100%;
-}
-body {
-  background: var(--color-fondo);
-  color: var(--color-texto);
-  -webkit-font-smoothing: antialiased;
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body {
+    background: var(--color-fondo);
+    color: var(--color-texto);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Causa habitual de desbordes: los hijos de una grilla no se achican por debajo de su contenido mínimo. */
+  .grid > * {
+    min-width: 0;
+  }
+  /* El texto largo (nombres, notas, direcciones) se parte en vez de empujar el diseño. */
+  main {
+    overflow-wrap: break-word;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-marca-500);
+    outline-offset: 2px;
+  }
+
+  /* Inputs numéricos sin flechas (los importes se escriben) */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Barras de desplazamiento discretas en los paneles con scroll propio */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-slate-300) transparent;
+  }
 }
 
-/* Inputs numéricos sin flechas (los importes se escriben) */
-input[type='number']::-webkit-inner-spin-button,
-input[type='number']::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
+@layer components {
+  /* Tabla que, cuando no entra en el ancho disponible, se apila como una lista de tarjetas (ver TablaApilable en ui.tsx).
+     Las celdas reciben su etiqueta (data-label) de la cabecera correspondiente. Sólo en pantalla: al imprimir vuelve a ser tabla. */
+@media screen {
+  .tabla-apilada thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .tabla-apilada table,
+  .tabla-apilada tbody,
+  .tabla-apilada tfoot,
+  .tabla-apilada tr {
+    display: block;
+    width: 100%;
+  }
+  .tabla-apilada tr {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-borde);
+  }
+  .tabla-apilada tr:last-child {
+    border-bottom: 0;
+  }
+  /* Dentro de una tarjeta sin relleno las filas apiladas llevan su propio margen lateral. */
+  [data-sin-padding] .tabla-apilada tr {
+    padding-inline: 1rem;
+  }
+  .tabla-apilada td,
+  .tabla-apilada th {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    width: auto !important;
+    padding: 0.25rem 0 !important;
+    text-align: right !important;
+    white-space: normal !important;
+    border: 0 !important;
+  }
+  .tabla-apilada td[data-label]::before {
+    content: attr(data-label);
+    flex: none;
+    max-width: 45%;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-tenue);
+  }
+  .tabla-apilada td:empty,
+  .tabla-apilada td[data-vacia] {
+    display: none;
+  }
+}
+}
+
+/* Filtros de un listado: en celular cada control ocupa su parte de la fila en vez de quedar suelto. */
+@media (max-width: 639.98px) {
+  .filtros > select,
+  .filtros > input,
+  .filtros > label,
+  .filtros > div:not([class*='min-w-']) {
+    flex: 1 1 9rem;
+    width: auto;
+    min-width: 0;
+  }
 }
 
 @media print {

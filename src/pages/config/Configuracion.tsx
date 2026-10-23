@@ -5,7 +5,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fechaHora } from '@/lib/format';
-import { Aviso, Boton, Campo, Cargando, Check, Encabezado, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
+import { Aviso, Boton, BotonIcono, Campo, Cargando, Check, Encabezado, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { useMarcas } from '@/components/selectores';
 import { CONDICIONES_IVA, CONDICION_IVA_LABEL, MEDIO_PAGO_LABEL, MEDIOS_PAGO } from '@shared/dominio';
 import { ZONAS_HORARIAS } from '@shared/permisos';
@@ -45,7 +45,7 @@ function DatosTaller() {
     setC({ ...c, medios_pago: MEDIOS_PAGO.every((x) => actuales.has(x)) ? null : MEDIOS_PAGO.filter((x) => actuales.has(x)) });
   };
   return (
-    <div className="space-y-5">
+    <div className="max-w-formulario space-y-5">
       {ro && <Aviso>Solo el propietario o un administrador pueden modificar la configuración.</Aviso>}
       <Tarjeta titulo="Datos comerciales" subtitulo="Aparecen en presupuestos, órdenes, recibos y demás documentos impresos">
         <fieldset disabled={ro} className="grid gap-3 sm:grid-cols-2">
@@ -238,7 +238,7 @@ function Catalogos() {
               {marca.modelos.map((mo) => (
                 <li key={mo.id} className="flex items-center gap-1 rounded-full border border-borde bg-white py-0.5 pl-3 pr-1 text-sm">
                   {mo.nombre}
-                  <button type="button" className="rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Eliminar modelo" onClick={async () => { if (await confirmar('Eliminar modelo', `¿Eliminar ${mo.nombre}?`, true)) op(() => api.del(`/modelos/${mo.id}`), 'marcas'); }}><Trash2 className="size-3.5" /></button>
+                  <BotonIcono etiqueta="Eliminar modelo" peligro className="size-8 rounded-full" onClick={async () => { if (await confirmar('Eliminar modelo', `¿Eliminar ${mo.nombre}?`, true)) op(() => api.del(`/modelos/${mo.id}`), 'marcas'); }}><Trash2 className="size-3.5" /></BotonIcono>
                 </li>
               ))}
             </ul>

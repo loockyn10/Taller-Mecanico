@@ -33,7 +33,7 @@ export function Cuentas() {
         <Indicador titulo="61 a 90 días" valor={money(suma('v_60'))} tono="ambar" />
         <Indicador titulo="Más de 90 días" valor={money(suma('v_90'))} tono="rojo" />
       </div>
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-center gap-3">
         <Buscador value={q} onChange={setQ} placeholder="Cliente, documento o teléfono" className="min-w-56 flex-1" />
         <Select value={estado} onChange={(e) => setEstado(e.target.value)} className="w-auto" aria-label="Estado">
           <option value="con_deuda">Con deuda</option>

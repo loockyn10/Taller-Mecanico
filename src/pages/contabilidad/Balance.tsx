@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { api } from '@/lib/api';
 import { descargarCSV, exportarAutorizado, pesosCSV } from '@/lib/csv';
-import { Aviso, Boton, Cargando, ErrorCaja, Insignia, Tarjeta, Vacio, useToast } from '@/components/ui';
+import { Aviso, Boton, Cargando, ErrorCaja, Insignia, TablaApilable, Tarjeta, useToast, Vacio } from '@/components/ui';
 import { BotonImprimir, imp, nombreArchivo, Periodo } from './comun';
 
 const deudor = (n: number) => (n > 0 ? n : 0);
@@ -36,7 +36,7 @@ export function Balance({ desde, hasta }: { desde: string; hasta: string }) {
       <Aviso>Los saldos iniciales son lo acumulado antes del {desde.split('-').reverse().join('/')}. Si el taller tenía inventario, deudas o créditos antes de usar Fierro, no figuran hasta que se carguen con un asiento manual de apertura.</Aviso>
       <Tarjeta sinPadding titulo="Balance de sumas y saldos">
         {!b.cuentas.length ? <Vacio titulo="Sin movimientos" texto="No hay asientos hasta la fecha del período elegido." /> : (
-          <div className="overflow-x-auto">
+          <TablaApilable>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-borde bg-slate-50/70 text-xs font-semibold uppercase tracking-wide text-tenue">
@@ -69,7 +69,7 @@ export function Balance({ desde, hasta }: { desde: string; hasta: string }) {
                 </tr>
               </tfoot>
             </table>
-          </div>
+          </TablaApilable>
         )}
       </Tarjeta>
     </div>

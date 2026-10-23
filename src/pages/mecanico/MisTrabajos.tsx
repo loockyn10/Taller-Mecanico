@@ -29,7 +29,7 @@ function MiDia() {
         ['Cronometrado en OT', duracion(y.registrado_ot_seg)],
         ['Tareas terminadas', String(y.tareas_completadas)],
       ].map(([t, v]) => (
-        <div key={t} className="rounded-xl border border-borde bg-white px-2 py-2.5">
+        <div key={t} className="rounded-card border border-borde bg-white px-2 py-2.5">
           <p className="text-[11px] leading-tight text-tenue">{t}</p>
           <p className="text-base font-bold tabular-nums">{v}</p>
         </div>
@@ -59,7 +59,7 @@ export function MisTrabajos() {
             const avance = o.tareas_total ? Math.round((o.tareas_completadas / o.tareas_total) * 100) : 0;
             return (
               <li key={o.id}>
-                <Link to={`/mis-trabajos/${o.id}`} className="block rounded-2xl border border-borde bg-white p-4 shadow-sm active:bg-slate-50">
+                <Link to={`/mis-trabajos/${o.id}`} className="block rounded-card border border-borde bg-white p-4 shadow-card active:bg-slate-50">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-2xl font-extrabold tracking-wide">{o.patente}</p>
@@ -82,7 +82,7 @@ export function MisTrabajos() {
                   )}
                   <div className="mt-3 flex items-center justify-between text-xs text-tenue">
                     <span className="flex items-center gap-1">{o.fecha_prometida ? <><CalendarClock className="size-3.5" /> Prometida: {fecha(o.fecha_prometida)}</> : `Ingresó: ${fecha(o.fecha_ingreso)}`}</span>
-                    <ChevronRight className="size-5 text-slate-400" />
+                    <ChevronRight className="size-5 text-slate-500" />
                   </div>
                 </Link>
               </li>
@@ -221,7 +221,7 @@ export function MiTrabajo() {
       </div>
 
       {puedeEditar && (
-        <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 border-t border-borde bg-white/95 px-4 py-2.5 backdrop-blur lg:bottom-6 lg:left-auto lg:right-6 lg:w-auto lg:rounded-2xl lg:border lg:shadow-lg">
+        <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 border-t border-borde bg-white/95 px-4 py-2.5 backdrop-blur lg:bottom-6 lg:left-auto lg:right-6 lg:w-auto lg:rounded-card lg:border lg:shadow-lg">
           <Boton variante="primario" tam="lg" className="h-12 w-full lg:w-auto" icono={<PencilLine className="size-5" />} onClick={() => setNota(true)}>Observación rápida</Boton>
         </div>
       )}

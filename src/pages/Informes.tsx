@@ -7,7 +7,7 @@ import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { descargarCSV, pesosCSV } from '@/lib/csv';
 import { fecha, hoyISO, money, numero } from '@/lib/format';
-import { Aviso, Boton, Buscador, Campo, Cargando, Encabezado, ErrorCaja, Select, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
+import { Aviso, Boton, Buscador, Campo, Cargando, cn, Encabezado, ErrorCaja, Select, TablaApilable, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
 import { primerDiaMes, SelectorPeriodo } from '@/components/Periodo';
 import { ESTADO_OT_LABEL, ESTADOS_OT, MEDIO_PAGO_LABEL, type EstadoOT, type MedioPago } from '@shared/dominio';
 
@@ -112,22 +112,30 @@ export function Informes() {
     <>
       <Encabezado titulo="Informes" subtitulo="Reportes con datos reales, exportables a Excel (CSV) y a PDF" acciones={<>{puede('informes.exportar') && <Boton icono={<Download className="size-4" />} onClick={exportar} disabled={!data?.filas.length}>CSV (Excel)</Boton>}<Boton icono={<Printer className="size-4" />} onClick={() => window.print()} disabled={!data}>Imprimir / PDF</Boton></>} />
       <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
-        <nav className="no-print space-y-4 lg:sticky lg:top-4 lg:self-start">
-          {grupos.map((g) => (
-            <div key={g}>
-              <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{g}</div>
-              <ul className="flex flex-wrap gap-1 lg:block lg:space-y-0.5">
-                {disponibles.filter((i) => i.grupo === g).map((i) => (
-                  <li key={i.clave}><button type="button" onClick={() => cambiar(i.clave)} className={`w-full rounded-lg px-2.5 py-1.5 text-left text-sm font-medium ${i.clave === def.clave ? 'bg-marca-50 text-marca-700' : 'text-slate-600 hover:bg-slate-100'}`}>{i.titulo}</button></li>
-                ))}
-              </ul>
-            </div>
-          ))}
+        <nav className="no-print lg:sticky lg:top-4 lg:self-start" aria-label="Informes">
+          {/* Celular y tablet: un selector agrupado (la lista completa ocuparía varias pantallas). Escritorio: lista lateral. */}
+          <Campo label="Informe" className="lg:hidden">
+            <Select value={def.clave} onChange={(e) => cambiar(e.target.value)}>
+              {grupos.map((g) => <optgroup key={g} label={g}>{disponibles.filter((i) => i.grupo === g).map((i) => <option key={i.clave} value={i.clave}>{i.titulo}</option>)}</optgroup>)}
+            </Select>
+          </Campo>
+          <div className="hidden space-y-4 lg:block">
+            {grupos.map((g) => (
+              <div key={g}>
+                <div className="mb-1 px-2 text-micro font-semibold uppercase tracking-wider text-slate-500">{g}</div>
+                <ul className="space-y-0.5">
+                  {disponibles.filter((i) => i.grupo === g).map((i) => (
+                    <li key={i.clave}><button type="button" onClick={() => cambiar(i.clave)} aria-current={i.clave === def.clave ? 'true' : undefined} className={cn('w-full rounded-ctl px-2.5 py-1.5 text-left text-sm font-medium', i.clave === def.clave ? 'bg-marca-50 text-marca-800' : 'text-slate-600 hover:bg-slate-100')}>{i.titulo}</button></li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         </nav>
         <div className="min-w-0">
           <div className="no-print">
             {periodo && <SelectorPeriodo desde={desde} hasta={hasta} onCambio={(d, h) => { setDesde(d); setHasta(h); }} />}
-            <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div className="filtros mb-4 flex flex-wrap items-end gap-3">
               {quiere('agrupar') && def.agrupar && <Campo label="Agrupar"><Select className="w-auto" value={f.agrupar ?? def.agrupar[0][0]} onChange={(e) => set('agrupar', e.target.value)}>{def.agrupar.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</Select></Campo>}
               {quiere('estado_doc') && def.estados && <Campo label="Estado"><Select className="w-auto" value={f.estado_doc ?? ''} onChange={(e) => set('estado_doc', e.target.value)}><option value="">{def.estados[0][1]}</option>{def.estados.slice(1).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</Select></Campo>}
               {quiere('estado_ot') && <Campo label="Estado de la OT"><Select className="w-auto" value={f.estado_ot ?? ''} onChange={(e) => set('estado_ot', e.target.value)}><option value="">Todos</option>{ESTADOS_OT.map((e) => <option key={e} value={e}>{ESTADO_OT_LABEL[e]}</option>)}</Select></Campo>}
@@ -143,10 +151,10 @@ export function Informes() {
           {!valido ? <Aviso tono="ambar">Elegí un período válido.</Aviso> : isLoading ? <Cargando /> : error ? <ErrorCaja error={error} reintentar={refetch} /> : data && (
             <Tarjeta titulo={data.titulo} subtitulo={periodo ? `Del ${fecha(desde)} al ${fecha(hasta)}` : `Al ${fecha(hoyISO())}`} sinPadding>
               {data.filas.length === 0 ? <Vacio titulo="Sin datos" texto="No hay registros con esos filtros en el período." /> : (
-                <div className="overflow-x-auto">
+                <TablaApilable>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-borde bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wide text-tenue">
+                      <tr className="border-b border-borde bg-superficie-2 text-left text-xs font-semibold uppercase tracking-wide text-tenue">
                         {data.columnas.map((c: Col) => <th key={c.clave} className={`px-3 py-2.5 ${['moneda', 'numero', 'entero', 'pct'].includes(c.tipo) ? 'text-right' : ''}`}>{c.titulo}</th>)}
                       </tr>
                     </thead>
@@ -165,7 +173,7 @@ export function Informes() {
                       </tfoot>
                     )}
                   </table>
-                </div>
+                </TablaApilable>
               )}
             </Tarjeta>
           )}

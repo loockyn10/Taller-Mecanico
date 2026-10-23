@@ -85,7 +85,7 @@ export function RelojAdmin() {
         {codigo && (
           <div className="space-y-3 text-center">
             <p className="text-sm text-tenue">Ingresalo en <strong className="text-texto">{url}</strong> desde “{codigo.nombre}”.</p>
-            <p className="rounded-xl bg-slate-100 py-4 text-3xl font-bold tracking-[0.3em] tabular-nums">{codigo.codigo}</p>
+            <p className="rounded-card bg-slate-100 py-4 text-3xl font-bold tracking-[0.3em] tabular-nums">{codigo.codigo}</p>
             <Aviso tono="ambar" className="text-left">Se muestra una sola vez y vence en {codigo.vence_en_min} minutos. Si se pierde, registrá el dispositivo de nuevo.</Aviso>
           </div>
         )}

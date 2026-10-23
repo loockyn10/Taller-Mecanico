@@ -7,7 +7,7 @@ import { AlertTriangle, Bell, CheckCircle2, CircleHelp, Clock } from 'lucide-rea
 import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, km } from '@/lib/format';
-import { Buscador, Cargando, Encabezado, ErrorCaja, Indicador, Tabla, Tarjeta, useDebounce, Vacio } from '@/components/ui';
+import { Buscador, Cargando, Encabezado, ErrorCaja, Indicador, Select, Tabla, Tarjeta, useDebounce, Vacio } from '@/components/ui';
 import { AccionesMantenimiento, EstadoMantenimiento, proximoTexto, type MantenimientoApi } from '@/components/Mantenimientos';
 
 type Filtro = 'pendientes' | 'vencido' | 'proximo' | 'sin_registro' | 'al_dia';
@@ -33,13 +33,13 @@ export function Mantenimientos() {
       </div>
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
         <Buscador value={q} onChange={setQ} placeholder="Patente, cliente o mantenimiento" className="flex-1" />
-        <select aria-label="Estado" className="h-10 rounded-lg border border-borde bg-white px-3 text-sm sm:w-56" value={filtro} onChange={(e) => setFiltro(e.target.value as Filtro)}>
+        <Select aria-label="Estado" className="sm:w-56" value={filtro} onChange={(e) => setFiltro(e.target.value as Filtro)}>
           <option value="pendientes">Vencidos y próximos</option>
           <option value="vencido">Solo vencidos</option>
           <option value="proximo">Solo próximos</option>
           <option value="sin_registro">Sin registro</option>
           <option value="al_dia">Al día</option>
-        </select>
+        </Select>
       </div>
       {isLoading ? <Cargando /> : error ? <ErrorCaja error={error} reintentar={refetch} /> : (
         <Tarjeta sinPadding>

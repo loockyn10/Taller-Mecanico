@@ -62,34 +62,34 @@ export function Activar() {
 
   return (
     <div className="grid min-h-full lg:grid-cols-2">
-      <div className="hidden flex-col justify-between bg-marca-700 p-10 text-white lg:flex">
+      <div className="hidden flex-col justify-between bg-petroleo-900 p-10 text-white lg:flex">
         <div className="flex items-center gap-3">
-          <img src="/icon.svg" alt="" className="size-10 rounded-xl ring-2 ring-white/20" />
+          <img src="/icon.svg" alt="" className="size-10 rounded-card ring-2 ring-white/15" />
           <span className="text-xl font-extrabold">Fierro</span>
         </div>
         <div className="max-w-md">
           <h1 className="text-3xl font-bold leading-tight">Bienvenido a Fierro.</h1>
-          <p className="mt-3 text-marca-100">En unos minutos tu taller queda listo para trabajar: creás tu acceso, completás los datos del negocio y te acompañamos con la configuración inicial.</p>
-          <ul className="mt-6 space-y-2 text-sm text-marca-100">
+          <p className="mt-3 text-petroleo-200">En unos minutos tu taller queda listo para trabajar: creás tu acceso, completás los datos del negocio y te acompañamos con la configuración inicial.</p>
+          <ul className="mt-6 space-y-2 text-sm text-petroleo-200">
             {['Creás tu contraseña', 'Cargás los datos de tu taller', 'Configurás servicios y precios a tu ritmo', 'Importás tus clientes y repuestos desde Excel'].map((t) => (
               <li key={t} className="flex items-center gap-2"><CheckCircle2 className="size-4 shrink-0" />{t}</li>
             ))}
           </ul>
         </div>
-        <p className="flex items-center gap-2 text-sm text-marca-200"><Wrench className="size-4" /> Hecho para talleres mecánicos</p>
+        <p className="flex items-center gap-2 text-sm text-petroleo-300"><Wrench className="size-4" /> Hecho para talleres mecánicos</p>
       </div>
-      <div className="flex items-center justify-center p-6">
+      <div className="flex items-center justify-center p-4 sm:p-6">
         {cargando ? (
           <Cargando texto="Comprobando tu invitación…" />
         ) : problema || !info ? (
-          <div className="w-full max-w-sm space-y-4">
+          <div className="w-full max-w-sm space-y-4 rounded-card border border-borde bg-white p-5 shadow-card sm:p-7">
             <img src="/icon.svg" alt="" className="size-12" />
             <h2 className="text-2xl font-bold">No pudimos abrir tu invitación</h2>
             <Aviso tono="ambar">{problema ?? 'El enlace no es válido.'}</Aviso>
             <Boton onClick={() => nav('/', { replace: true })}>Ir al ingreso</Boton>
           </div>
         ) : (
-          <form className="w-full max-w-sm space-y-4" onSubmit={enviar}>
+          <form className="w-full max-w-sm space-y-4 rounded-card border border-borde bg-white p-5 shadow-card sm:p-7" onSubmit={enviar}>
             <div>
               <img src="/icon.svg" alt="" className="mb-4 size-12 lg:hidden" />
               <h2 className="text-2xl font-bold">Activá tu taller</h2>
@@ -104,7 +104,7 @@ export function Activar() {
             </Campo>
             <Campo label="Contraseña" requerido hint="Al menos 8 caracteres."><Input type="password" value={f.password} onChange={set('password')} required autoComplete="new-password" minLength={8} /></Campo>
             <Campo label="Repetir contraseña" requerido><Input type="password" value={f.repetir} onChange={set('repetir')} required autoComplete="new-password" /></Campo>
-            {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+            {error && <p className="rounded-ctl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
             <Boton type="submit" variante="primario" tam="lg" className="w-full" cargando={enviando}>Activar mi taller</Boton>
             <p className="flex items-center justify-center gap-1.5 text-center text-xs text-tenue"><ShieldCheck className="size-3.5" /> Tus datos son solo de tu taller: ningún otro negocio puede verlos.</p>
           </form>

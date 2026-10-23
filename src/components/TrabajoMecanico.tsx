@@ -94,7 +94,7 @@ function TareaTarjeta({ orden, t, puedeEditar, puedeAsignar, grande, personas }:
   const excede = t.tiempo_estimado_min ? real > t.tiempo_estimado_min * 60 : false;
 
   return (
-    <li className={cn('rounded-2xl border bg-white p-3.5 shadow-sm', t.estado === 'en_proceso' ? 'border-marca-300 ring-2 ring-marca-100' : 'border-borde', t.estado === 'completada' && 'bg-slate-50')}>
+    <li className={cn('rounded-card border bg-white p-3.5 shadow-card', t.estado === 'en_proceso' ? 'border-marca-300 ring-2 ring-marca-100' : 'border-borde', t.estado === 'completada' && 'bg-slate-50')}>
       <div className="flex items-start justify-between gap-2">
         <p className={cn('min-w-0 flex-1 text-[15px] font-medium leading-snug', t.estado === 'completada' && 'text-tenue line-through')}>{t.descripcion}</p>
         <Insignia tono={TONO_ESTADO[t.estado]}>{ESTADO_TAREA_LABEL[t.estado]}</Insignia>
@@ -109,7 +109,7 @@ function TareaTarjeta({ orden, t, puedeEditar, puedeAsignar, grande, personas }:
         )}
         {t.estado === 'completada' && t.hecha_at && <span>Terminada {fechaHora(t.hecha_at)}{t.hecha_por ? ` · ${t.hecha_por}` : ''}</span>}
       </div>
-      {t.observaciones && !nota && <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-sm whitespace-pre-wrap">{t.observaciones}</p>}
+      {t.observaciones && !nota && <p className="mt-2 rounded-ctl bg-slate-50 px-2.5 py-1.5 text-sm whitespace-pre-wrap">{t.observaciones}</p>}
 
       {puedeEditar && (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -318,7 +318,7 @@ export function NotasTecnicas({ orden, puedeEditar, grande = false }: { orden: a
         {orden.notas.length === 0 ? <p className="text-sm text-tenue">Sin observaciones.</p> : (
           <ul className="space-y-2">
             {orden.notas.map((n: any) => (
-              <li key={n.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <li key={n.id} className="rounded-ctl bg-slate-50 px-3 py-2 text-sm">
                 <p className="whitespace-pre-wrap">{n.texto}</p>
                 <p className="mt-0.5 text-xs text-tenue">{n.usuario ?? '—'} · {fechaHora(n.created_at)}</p>
               </li>
@@ -377,7 +377,7 @@ export function BarraCronometro() {
   });
   if (!data) return null;
   return (
-    <div className="sticky top-0 z-20 -mx-4 mb-3 flex items-center justify-between gap-3 border-b border-marca-200 bg-marca-50/95 px-4 py-2 backdrop-blur md:mx-0 md:rounded-xl md:border">
+    <div className="sticky top-0 z-20 -mx-4 mb-3 flex items-center justify-between gap-3 border-b border-marca-200 bg-marca-50/95 px-4 py-2 backdrop-blur md:mx-0 md:rounded-card md:border">
       <div className="min-w-0">
         <p className="flex items-center gap-1.5 text-lg font-bold tabular-nums text-marca-800"><Clock className="size-5" />{relojHMS(seg)}</p>
         <p className="truncate text-xs text-marca-800">OT #{String(data.orden_numero).padStart(4, '0')} · {data.patente}{data.tarea ? ` · ${data.tarea}` : ''}</p>

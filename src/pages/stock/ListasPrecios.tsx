@@ -7,7 +7,7 @@ import { api, qs } from '@/lib/api';
 import { money } from '@/lib/format';
 import { precioPorRegla } from '@shared/precios';
 import { REDONDEOS_PRECIO, REDONDEO_PRECIO_LABEL } from '@shared/dominio';
-import { Aviso, Boton, Buscador, Campo, Cargando, Check, Encabezado, ErrorCaja, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
+import { Aviso, Boton, Buscador, Campo, Cargando, Check, Encabezado, ErrorCaja, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, TablaApilable, Tarjeta, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
 
 const descripcionRegla = (l: { base: string; porcentaje: number }) =>
   l.base === 'costo'
@@ -63,7 +63,7 @@ function FormLista({ inicial, onCerrar }: { inicial?: any; onCerrar: () => void 
             <Check checked={f.es_default} onChange={(v) => setF({ ...f, es_default: v })} label="Predeterminada en presupuestos y ventas" />
             {inicial && <Check checked={f.activa} onChange={(v) => setF({ ...f, activa: v })} label="Activa" />}
           </div>
-          {valido && <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">Ejemplo: {f.base === 'costo' ? 'costo $10.000' : 'precio base $15.000'} → <strong>{money(ejemplo)}</strong></div>}
+          {valido && <div className="rounded-ctl bg-slate-50 px-3 py-2 text-sm">Ejemplo: {f.base === 'costo' ? 'costo $10.000' : 'precio base $15.000'} → <strong>{money(ejemplo)}</strong></div>}
         </div>
       </div>
     </Modal>
@@ -128,10 +128,10 @@ function AjusteMasivoArticulos() {
           <div className="mt-4 space-y-3">
             <Aviso tono={sim.afectados ? 'azul' : 'ambar'}>{sim.afectados ? <>Se modificarán <strong>{sim.afectados}</strong> artículo(s). Vista previa de los primeros:</> : 'Ningún artículo coincide con el filtro.'}</Aviso>
             {sim.muestra.length > 0 && (
-              <table className="w-full text-sm">
-                <thead><tr className="border-b border-borde text-left text-xs uppercase text-tenue"><th className="py-2">Artículo</th><th className="py-2 text-right">Antes</th><th className="py-2 text-right">Después</th></tr></thead>
+              <TablaApilable><table className="w-full text-sm">
+                <thead><tr className="border-b border-borde text-left text-xs font-semibold uppercase tracking-wide text-tenue"><th className="py-2">Artículo</th><th className="py-2 text-right">Antes</th><th className="py-2 text-right">Después</th></tr></thead>
                 <tbody>{sim.muestra.map((a: any) => <tr key={a.id} className="border-b border-borde last:border-0"><td className="py-2">{a.nombre}</td><td className="py-2 text-right tabular-nums">{money(a.antes)}</td><td className="py-2 text-right font-medium tabular-nums">{money(a.despues)}</td></tr>)}</tbody>
-              </table>
+              </table></TablaApilable>
             )}
             {sim.afectados > 0 && (
               <Boton variante="primario" cargando={aplicar.isPending} onClick={async () => { if (await confirmar('Aplicar actualización masiva', `Se modificará el ${f.aplicar_a === 'costo' ? 'costo' : 'precio de venta'} de ${sim.afectados} artículo(s). Los presupuestos, OT y comprobantes ya emitidos no cambian.`)) aplicar.mutate(); }}>
@@ -254,7 +254,7 @@ export function ListaPreciosDetalle() {
           </>
         }
       />
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="filtros mb-4 flex flex-wrap items-center gap-3">
         <Buscador value={q} onChange={(v) => { setQ(v); setPagina(0); }} placeholder="Buscar artículo, código o marca" className="min-w-52 flex-1" />
         <Select value={categoria} onChange={(e) => { setCategoria(e.target.value); setPagina(0); }} className="w-auto" aria-label="Categoría"><option value="">Todas las categorías</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</Select>
         <Check checked={soloFijos} onChange={(v) => { setSoloFijos(v); setPagina(0); }} label="Sólo precios fijos" />

@@ -37,7 +37,7 @@ export function Inicio() {
       />
 
       {puesta && puesta.pendientes > 0 && (
-        <Link to="/puesta-en-marcha" className="mb-4 block rounded-xl border border-marca-200 bg-marca-50/60 px-4 py-3 hover:bg-marca-50">
+        <Link to="/puesta-en-marcha" className="mb-4 block rounded-card border border-marca-200 bg-marca-50/60 px-4 py-3 hover:bg-marca-50">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-sm font-semibold text-marca-800">Configuración del taller: {puesta.completos} de {puesta.total} pasos completos</span>
             <span className="text-sm text-marca-700">Continuar →</span>

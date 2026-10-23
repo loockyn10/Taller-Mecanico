@@ -4,7 +4,7 @@ import { CheckCircle2, Info, AlertTriangle, XCircle, RefreshCw } from 'lucide-re
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fechaHora, money } from '@/lib/format';
-import { Aviso, Boton, Cargando, ErrorCaja, Tarjeta, useToast } from '@/components/ui';
+import { Aviso, Boton, Cargando, ErrorCaja, TablaApilable, Tarjeta, useToast } from '@/components/ui';
 
 const ESTADO = {
   ok: { icono: <CheckCircle2 className="size-5 text-emerald-600" />, borde: 'border-emerald-200' },
@@ -17,7 +17,7 @@ function Items({ c }: { c: any }) {
   if (!c.items?.length) return null;
   if (c.clave === 'cobertura')
     return (
-      <div className="mt-3 overflow-x-auto">
+      <TablaApilable>
         <table className="w-full text-xs">
           <thead><tr className="text-left text-tenue"><th className="py-1 pr-3">Operación</th><th className="px-2 text-right">Documentos</th><th className="px-2 text-right">Contabilizados</th><th className="px-2 text-right">Sin efecto</th><th className="px-2 text-right">Con error</th><th className="px-2 text-right">Pendientes</th></tr></thead>
           <tbody>
@@ -30,7 +30,7 @@ function Items({ c }: { c: any }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TablaApilable>
     );
   return (
     <ul className="mt-3 space-y-1 text-xs">
@@ -75,7 +75,7 @@ export function Controles() {
         {cs.map((c) => {
           const e = ESTADO[c.estado as keyof typeof ESTADO];
           return (
-            <div key={c.clave} className={`rounded-xl border p-4 ${e.borde} ${c.clave === 'cobertura' ? 'lg:col-span-2' : ''}`}>
+            <div key={c.clave} className={`rounded-card border p-4 ${e.borde} ${c.clave === 'cobertura' ? 'lg:col-span-2' : ''}`}>
               <div className="flex items-start gap-2.5">
                 <span className="mt-0.5 shrink-0">{e.icono}</span>
                 <div className="min-w-0 flex-1">

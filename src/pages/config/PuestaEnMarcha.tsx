@@ -74,8 +74,8 @@ function PanelNegocio({ estado }: { estado: string }) {
         <Campo label="Teléfono / WhatsApp"><Input value={t.telefono ?? ''} onChange={s('telefono')} inputMode="tel" /></Campo>
         <Campo label="Correo del negocio"><Input type="email" value={t.email ?? ''} onChange={s('email')} /></Campo>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-4 rounded-lg border border-borde p-3">
-        <div className="flex size-16 items-center justify-center overflow-hidden rounded-lg border border-borde bg-slate-50">
+      <div className="mt-4 flex flex-wrap items-center gap-4 rounded-ctl border border-borde p-3">
+        <div className="flex size-16 items-center justify-center overflow-hidden rounded-ctl border border-borde bg-slate-50">
           {data.config.tiene_logo ? <img src={`/api/taller/logo?v=${data.config.updated_at}`} alt="Logo" className="max-h-full max-w-full object-contain" /> : <ImageIcon className="size-6 text-slate-300" />}
         </div>
         <div className="min-w-0 flex-1 text-sm">
@@ -122,7 +122,7 @@ function PanelHorarios({ estado }: { estado: string }) {
       </Campo>
       <div className="mt-4 space-y-2">
         {h.dias.map((d, i) => (
-          <div key={d.dia} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-borde px-3 py-2">
+          <div key={d.dia} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-ctl border border-borde px-3 py-2">
             <div className="w-28"><Check checked={d.abierto} onChange={(v) => cambiar(i, (x) => ({ ...x, abierto: v, tramos: v && !x.tramos.length ? [{ desde: '08:00', hasta: '18:00' }] : x.tramos }))} label={DIAS_SEMANA[i]} /></div>
             {d.abierto ? (
               <>
@@ -196,12 +196,12 @@ function PanelCatalogo({ estado }: { estado: string }) {
     <>
       <Aviso tono="ambar" className="mb-3">{AVISO_TIEMPOS_ORIENTATIVOS} Las operaciones se cargan <b>sin precio</b>: el precio sale de tu valor de hora (paso siguiente). Nada de esto trae precios de otros talleres.</Aviso>
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-borde p-3">
+        <div className="rounded-ctl border border-borde p-3">
           <p className="font-medium">Operaciones de mano de obra (tempario)</p>
           <p className="mt-1 text-sm text-tenue">Service, frenos, distribución, suspensión, electricidad y más, con un tiempo orientativo que podés ajustar.</p>
           <Boton className="mt-3" tam="sm" variante="primario" onClick={() => tempario.mutate()} cargando={tempario.isPending} disabled={!puede('catalogo.editar')}>Cargar operaciones del tempario</Boton>
         </div>
-        <div className="rounded-lg border border-borde p-3">
+        <div className="rounded-ctl border border-borde p-3">
           <p className="font-medium">Categorías de repuestos, tipos de gastos y marcas</p>
           <p className="mt-1 text-sm text-tenue">Agrega las que falten de la lista general. No toca lo que ya tengas ni lo duplica.</p>
           <Boton className="mt-3" tam="sm" onClick={() => plantillas.mutate()} cargando={plantillas.isPending}>Agregar las que faltan</Boton>
@@ -326,7 +326,7 @@ function PanelImportacion({ estado }: { estado: string }) {
 // ───────────── Pantalla ─────────────
 function Icono({ estado }: { estado: string }) {
   if (estado === 'completo') return <CheckCircle2 className="size-6 text-emerald-600" />;
-  if (estado === 'omitido') return <MinusCircle className="size-6 text-slate-400" />;
+  if (estado === 'omitido') return <MinusCircle className="size-6 text-slate-500" />;
   return <Circle className="size-6 text-slate-300" />;
 }
 
@@ -368,44 +368,46 @@ export function PuestaEnMarcha() {
         subtitulo={`Configuración de ${me?.taller.nombre ?? 'tu taller'}`}
         acciones={data.asistente_pendiente ? <Boton variante="primario" icono={<Rocket className="size-4" />} onClick={() => cerrar.mutate()} cargando={cerrar.isPending}>Empezar a usar Fierro</Boton> : undefined}
       />
-      <Tarjeta className="mb-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-lg font-semibold">Configuración del taller: {data.completos} de {data.total} pasos completos{data.omitidos ? ` · ${data.omitidos} para después` : ''}</p>
-          <span className="text-sm text-tenue">{pct} %</span>
-        </div>
-        <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={data.completos} aria-valuemin={0} aria-valuemax={data.total}>
-          <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
-        </div>
-        <p className="mt-3 text-sm text-tenue">Ya podés usar Fierro: nada de esto bloquea el trabajo. Completá los pasos a tu ritmo, saltá los que no necesites y volvé cuando quieras desde <b>Administración › Puesta en marcha</b>.</p>
-      </Tarjeta>
-      <div className="space-y-2">
-        {data.pasos.map((p, i) => {
-          const info = INFO_PASOS[p.clave];
-          const abiertoEste = abierto === p.clave;
-          return (
-            <section key={p.clave} className={cn('rounded-xl border bg-white', abiertoEste ? 'border-marca-300 shadow-sm' : 'border-borde')}>
-              <button type="button" onClick={() => setAbierto(abiertoEste ? null : p.clave)} className="flex w-full items-center gap-3 px-4 py-3 text-left" aria-expanded={abiertoEste}>
-                <Icono estado={p.estado} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold">{i + 1}. {info.titulo}</span>
-                    {p.estado === 'completo' && <Insignia tono="verde">Completo</Insignia>}
-                    {p.estado === 'omitido' && <Insignia tono="gris">Para después</Insignia>}
-                    {p.estado === 'pendiente' && <Insignia tono={info.recomendado ? 'ambar' : 'gris'}>{info.recomendado ? 'Falta' : 'Opcional'}</Insignia>}
+      <div className="max-w-formulario">
+        <Tarjeta className="mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-lg font-semibold">Configuración del taller: {data.completos} de {data.total} pasos completos{data.omitidos ? ` · ${data.omitidos} para después` : ''}</p>
+            <span className="text-sm text-tenue">{pct} %</span>
+          </div>
+          <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={data.completos} aria-valuemin={0} aria-valuemax={data.total}>
+            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-3 text-sm text-tenue">Ya podés usar Fierro: nada de esto bloquea el trabajo. Completá los pasos a tu ritmo, saltá los que no necesites y volvé cuando quieras desde <b>Administración › Puesta en marcha</b>.</p>
+        </Tarjeta>
+        <div className="space-y-2">
+          {data.pasos.map((p, i) => {
+            const info = INFO_PASOS[p.clave];
+            const abiertoEste = abierto === p.clave;
+            return (
+              <section key={p.clave} className={cn('rounded-card border bg-white', abiertoEste ? 'border-marca-300 shadow-card' : 'border-borde')}>
+                <button type="button" onClick={() => setAbierto(abiertoEste ? null : p.clave)} className="flex w-full items-center gap-3 px-4 py-3 text-left" aria-expanded={abiertoEste}>
+                  <Icono estado={p.estado} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">{i + 1}. {info.titulo}</span>
+                      {p.estado === 'completo' && <Insignia tono="verde">Completo</Insignia>}
+                      {p.estado === 'omitido' && <Insignia tono="gris">Para después</Insignia>}
+                      {p.estado === 'pendiente' && <Insignia tono={info.recomendado ? 'ambar' : 'gris'}>{info.recomendado ? 'Falta' : 'Opcional'}</Insignia>}
+                    </div>
+                    <p className="text-sm text-tenue">{p.estado === 'pendiente' ? p.detalle : p.detalle || info.resumen}</p>
                   </div>
-                  <p className="truncate text-sm text-tenue">{p.estado === 'pendiente' ? p.detalle : p.detalle || info.resumen}</p>
-                </div>
-                {abiertoEste ? <ChevronDown className="size-5 text-tenue" /> : <ChevronRight className="size-5 text-tenue" />}
-              </button>
-              {abiertoEste && (
-                <div className="border-t border-borde px-4 py-4">
-                  <p className="mb-3 text-sm text-tenue">{info.resumen}</p>
-                  {paneles[p.clave]({ estado: p.estado, detalle: p.detalle })}
-                </div>
-              )}
-            </section>
-          );
-        })}
+                  {abiertoEste ? <ChevronDown className="size-5 text-tenue" /> : <ChevronRight className="size-5 text-tenue" />}
+                </button>
+                {abiertoEste && (
+                  <div className="border-t border-borde px-4 py-4">
+                    <p className="mb-3 text-sm text-tenue">{info.resumen}</p>
+                    {paneles[p.clave]({ estado: p.estado, detalle: p.detalle })}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
       </div>
     </>
   );
