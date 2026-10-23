@@ -838,3 +838,49 @@ Instancia local aislada (puertos 8790/5180, base temporal con el generador de de
 - Sólo código de interfaz: no hubo migraciones, respaldo ni cambios en la D1 remota ni en el Worker de la API.
 - **Publicación:** commit `4ca4992` en `main` (push directo; Workers Builds). Comprobado en https://taller-mecanico.estrubia455.workers.dev que la SPA publicada sirve exactamente el bundle del build local (`index-TsVhzpOR.js` y `index-DHxDee46.css`, que contiene los tokens nuevos) con `theme-color` #13252d, y que `/api/salud` responde `{"ok":true}`. El cambio apareció en pocos minutos.
 - **No verificado online:** no se inició sesión en producción (se usó sólo la instancia local); el aspecto autenticado en la URL pública se comprobó por equivalencia de bundle, no mirándolo.
+
+# Sprint 15 — Catálogo automotor argentino
+
+## 90. Qué se hizo
+Catálogo compartido marca → modelo → año → motorización → versión, con datos abiertos de la DNRPA (CC BY 4.0), sin APIs externas ni costos recurrentes. Detalle técnico, reglas y proceso en `docs/CATALOGO_AUTO.md`.
+- **Proceso local reproducible** (`npm run catalogo -- descargar|agregar|generar|validar|cargar|actualizar`, `scripts/catalogo-auto/`): bajó 9 ZIP/CSV (2018-01 a 2026-09, 105 meses, **4.327.311 inscripciones**), leyó sólo columnas del vehículo (nunca titulares) y generó `data/catalogo-auto/catalogo.json.gz` (0,27 MB). Los CSV quedan en `.cache/` (fuera de git).
+- **Resultado:** 211 marcas, 1.548 modelos, 5.674 versiones.
+- **D1** (migración `0014`, aditiva): tablas globales `cat_marcas`, `cat_modelos`, `cat_versiones`, `cat_meta` y `cat_fichas` (vacía, con fuente y fecha de verificación obligatorias); columnas opcionales en `marcas`, `modelos` y `vehiculos`.
+- **API:** `GET /api/catalogo-auto/{marcas, marcas/:id/modelos, modelos/:id, info}` (sólo lectura, con caché de una hora en el navegador). `POST/PUT /api/vehiculos` resuelve marca/modelo del taller en el servidor.
+- **Formulario de vehículo:** marca y modelo con búsqueda sin tildes ni mayúsculas (`vw` encuentra Volkswagen, `hrv` encuentra HR-V), año con atajos de los años del modelo, motorización y versión filtradas por año; todo se puede escribir a mano. La lista va en el flujo de la página (no flotante), sin desplazamiento horizontal a 375 px. Los vehículos existentes no se tocan: al editar sin cambiar marca/modelo/versión no se envía nada de eso.
+- Se agregó "Versión" a la ficha del vehículo.
+
+## 91. Decisiones y límites
+- **La fuente no trae versión ni motorización estructuradas**: el "modelo" de la DNRPA es una descripción comercial completa. Modelo = familia (primer término, con unas pocas familias de varias palabras declaradas en `reglas.json`); versión = el resto de la descripción; motorización sólo cuando la descripción la menciona literalmente (cilindrada, V6, TDI…). Nada se inventa ni se completa con IA.
+- **Alcance temporal:** sólo hay inscripciones iniciales desde 2018; modelos descontinuados antes (p. ej. Corsa) aparecen con muy pocos registros o sólo por vehículos importados/usados inscriptos después.
+- **Plantilla inicial de los talleres:** los talleres nuevos siguen recibiendo ~18 marcas y ~100 modelos de plantilla (`MARCAS_PLANTILLA`). No se quitó (varias pruebas dependen de ella); en el selector se deduplica contra el catálogo. Pendiente a propósito: dejar de sembrarla.
+- Ningún modelo ni marca previos de un taller se renombra ni se borra; sólo se completa su vínculo con el catálogo (`cat_*_id`) si estaba vacío.
+- Los respaldos por taller excluyen las tablas `cat_*` (son públicas y compartidas).
+
+## 92. Validación de vehículos frecuentes (realmente encontrados en la fuente)
+| Vehículo pedido | En el catálogo | Versiones | Años modelo | Inscripciones |
+|---|---|---|---|---|
+| Volkswagen Gol | Sí (`Gol`) | 5 | 1994–2022 | 35 |
+| Volkswagen Gol Trend | Sí (`Gol Trend`) | 12 | 2009–2022 | 70.593 |
+| Volkswagen Amarok | Sí | 127 | 2011–2026 | 168.221 |
+| Fiat Cronos | Sí | 11 | 2018–2026 | 241.055 |
+| Toyota Etios | Sí | 16 | 2014–2024 | 115.173 |
+| Toyota Hilux | Sí | 96 | 1993–2026 | 244.427 |
+| Ford Ranger | Sí | 55 | 2003–2027 | 156.319 |
+| Renault Kangoo | Sí | 44 | 2004–2026 | 104.920 |
+| Chevrolet Onix | Sí | 22 | 2013–2026 | 87.542 |
+| Peugeot 208 | Sí | 112 | 2012–2026 | 197.041 |
+| Chevrolet Corsa | Sí, muy poco (`Corsa`; además `Classic`, el Corsa Classic, 31 inscripciones) | 2 | 2006–2010 | 5 |
+
+Las 10 familias pedidas aparecen; ninguna se agregó a mano. `Gol` (35) es residual: casi todo el Gol de la época figura como Gol Trend.
+
+## 93. Pruebas y verificación
+- `npm run build` y `npm test`: **113 unitarias + 384 de integración, todas OK** (nuevas: `tests/unit/catalogo-auto.test.ts` —integridad del catálogo generado, sin campos personales, motorizaciones literales—, `tests/api/catalogo-auto.test.ts` —lectura, alta desde catálogo, reutilización sin renombrar, alta manual, validaciones, edición— y `0014` en `tests/api/migraciones.test.ts`).
+- Prueba manual en instancia local aislada (8790/5180, base temporal, catálogo real cargado): alta de un vehículo `vw` → Volkswagen → `ámar` → Amarok → 2022 → Highline V6 guarda marca, modelo, versión, motor y los vínculos al catálogo; edición con la lista de versiones abierta a 375 px sin desbordes.
+- **No comprobado:** dispositivos reales (sólo emulación de ancho); el alta autenticada en la URL pública (ver §94).
+
+## 94. Despliegue (2026-10-23)
+- Respaldo previo de la D1 remota: `respaldos/d1-antes-sprint15-20261023-1705.sql` (fuera de git; 98 tablas, 4.023 filas, integridad OK, SHA-256 `2eb6772b…f234`). Bookmark de Time Travel: `00000116-00000008-0000510d-d7ffa6587a25d70691ae779660922644`.
+- Ensayo de la migración sobre el respaldo (en memoria): filas existentes todas idénticas, integridad OK, 0 claves foráneas rotas.
+- `wrangler d1 migrations apply DB --remote` (0014) y luego `npm run catalogo -- cargar --remoto` (7.446 filas; 22.112 filas escritas contando índices): 211 marcas, 1.548 modelos, 5.674 versiones; los 37 vehículos existentes siguen intactos.
+- Código: commit directo a `main` (Workers Builds). Resultado de la verificación online más abajo.

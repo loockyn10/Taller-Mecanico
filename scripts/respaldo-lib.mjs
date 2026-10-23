@@ -31,6 +31,11 @@ export const TABLAS_EXCLUIDAS = new Map([
   ['eventos_seguridad', 'eventos de seguridad de la plataforma'],
   ['errores_worker', 'errores técnicos de la plataforma'],
   ['contab_cola', 'cola interna de contabilización (se regenera con la reconciliación)'],
+  ['cat_marcas', 'catálogo automotor público y compartido (no es de ningún taller; se recarga con npm run catalogo)'],
+  ['cat_modelos', 'catálogo automotor público y compartido'],
+  ['cat_versiones', 'catálogo automotor público y compartido'],
+  ['cat_fichas', 'catálogo automotor público y compartido'],
+  ['cat_meta', 'catálogo automotor público y compartido'],
 ]);
 
 /** Columnas que se quitan de las tablas que sí salen (credenciales). */

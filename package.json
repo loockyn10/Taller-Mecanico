@@ -20,7 +20,8 @@
     "platform": "node scripts/platform.mjs",
     "verificar:online": "node scripts/verificar-online.mjs",
     "respaldo": "node scripts/respaldo.mjs",
-    "carga": "node scripts/carga/carga.mjs"
+    "carga": "node scripts/carga/carga.mjs",
+    "catalogo": "node scripts/catalogo-auto/index.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.75.0",

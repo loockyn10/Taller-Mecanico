@@ -9,6 +9,7 @@ import { limpiarDocumento, limpiarMantenimiento } from '../lib/privacidad';
 import { estadoMantenimientos } from '../lib/mantenimiento';
 import { credito_cliente_sql, creditosDisponibles } from '../lib/creditos';
 import { CONDICIONES_IVA, normalizarPatente } from '../../shared/dominio';
+import { claveBusqueda } from '../../shared/catalogo-auto';
 
 export const maestros = new Hono<AppEnv>();
 
@@ -132,7 +133,72 @@ const zVehiculo = z.object({
   combustible: zTextoOpt(30),
   km_actual: z.number().int().min(0).max(5_000_000).default(0),
   notas: zTextoOpt(1000),
+  version: zTextoOpt(120),
+  // Catálogo automotor: la marca/modelo del taller se resuelve en el servidor (se reutiliza la que ya exista o se crea sólo la usada).
+  cat_marca_id: zId.nullish(),
+  cat_modelo_id: zId.nullish(),
+  cat_version_id: zId.nullish(),
+  marca_texto: zTextoOpt(60),
+  modelo_texto: zTextoOpt(80),
 });
+
+type DatosVehiculo = z.infer<typeof zVehiculo> | Partial<z.infer<typeof zVehiculo>>;
+
+/** Marca del taller con ese nombre (sin distinguir mayúsculas, tildes ni signos); si no existe la crea. Nunca modifica una existente. */
+async function asegurarMarca(db: D1Database, tallerId: string, nombre: string, catId: string | null): Promise<string> {
+  const buscar = async () => (await all<{ id: string; nombre: string; cat_marca_id: string | null }>(db, 'SELECT id, nombre, cat_marca_id FROM marcas WHERE taller_id = ?', tallerId)).find((m) => claveBusqueda(m.nombre) === claveBusqueda(nombre));
+  let m = await buscar();
+  if (!m) {
+    await run(db, 'INSERT OR IGNORE INTO marcas (id, taller_id, nombre, cat_marca_id) VALUES (?, ?, ?, ?)', uid(), tallerId, nombre, catId);
+    m = await buscar();
+    if (!m) throw badRequest('No se pudo registrar la marca');
+  }
+  if (catId && !m.cat_marca_id) await run(db, 'UPDATE marcas SET cat_marca_id = ? WHERE taller_id = ? AND id = ? AND cat_marca_id IS NULL', catId, tallerId, m.id);
+  return m.id;
+}
+
+async function asegurarModelo(db: D1Database, tallerId: string, marcaId: string, nombre: string, catId: string | null): Promise<string> {
+  const buscar = async () => (await all<{ id: string; nombre: string; cat_modelo_id: string | null }>(db, 'SELECT id, nombre, cat_modelo_id FROM modelos WHERE taller_id = ? AND marca_id = ?', tallerId, marcaId)).find((m) => claveBusqueda(m.nombre) === claveBusqueda(nombre));
+  let m = await buscar();
+  if (!m) {
+    await run(db, 'INSERT OR IGNORE INTO modelos (id, taller_id, marca_id, nombre, cat_modelo_id) VALUES (?, ?, ?, ?, ?)', uid(), tallerId, marcaId, nombre, catId);
+    m = await buscar();
+    if (!m) throw badRequest('No se pudo registrar el modelo');
+  }
+  if (catId && !m.cat_modelo_id) await run(db, 'UPDATE modelos SET cat_modelo_id = ? WHERE taller_id = ? AND id = ? AND cat_modelo_id IS NULL', catId, tallerId, m.id);
+  return m.id;
+}
+
+/**
+ * Si la solicitud trae datos del catálogo o marca/modelo escritos a mano (sin ids del taller), los resuelve a marca_id/modelo_id del taller.
+ * Devuelve null cuando no hay nada que resolver (se mantiene el comportamiento de siempre con marca_id/modelo_id).
+ */
+async function resolverCatalogo(db: D1Database, tallerId: string, d: DatosVehiculo) {
+  if (d.marca_id !== undefined || d.modelo_id !== undefined) return null;
+  if (d.cat_marca_id === undefined && d.cat_modelo_id === undefined && d.marca_texto === undefined && d.modelo_texto === undefined) return null;
+  const cm = d.cat_modelo_id ? await first<{ id: string; nombre: string; marca_id: string }>(db, 'SELECT id, nombre, marca_id FROM cat_modelos WHERE id = ?', d.cat_modelo_id) : null;
+  if (d.cat_modelo_id && !cm) throw badRequest('Modelo del catálogo inexistente');
+  const catMarcaId = cm?.marca_id ?? d.cat_marca_id ?? null;
+  const cma = catMarcaId ? await first<{ id: string; nombre: string }>(db, 'SELECT id, nombre FROM cat_marcas WHERE id = ?', catMarcaId) : null;
+  if (catMarcaId && !cma) throw badRequest('Marca del catálogo inexistente');
+  const cv = d.cat_version_id ? await first<{ id: string; modelo_id: string }>(db, 'SELECT id, modelo_id FROM cat_versiones WHERE id = ?', d.cat_version_id) : null;
+  if (d.cat_version_id && (!cv || (cm && cv.modelo_id !== cm.id))) throw badRequest('La versión no corresponde al modelo del catálogo');
+  const marcaNombre = cma?.nombre ?? d.marca_texto ?? null;
+  const modeloNombre = cm?.nombre ?? d.modelo_texto ?? null;
+  if (!marcaNombre && modeloNombre) throw badRequest('Elegí la marca antes del modelo');
+  const marca_id = marcaNombre ? await asegurarMarca(db, tallerId, marcaNombre, cma?.id ?? null) : null;
+  const modelo_id = marca_id && modeloNombre ? await asegurarModelo(db, tallerId, marca_id, modeloNombre, cm?.id ?? null) : null;
+  return { marca_id, modelo_id, cat_modelo_id: cm?.id ?? null, cat_version_id: cv?.id ?? null };
+}
+
+/** Con marca_id/modelo_id del taller en la solicitud, los ids del catálogo que la acompañen igual deben existir y ser coherentes. */
+async function validarIdsCatalogo(db: D1Database, d: DatosVehiculo) {
+  if (d.cat_modelo_id && !(await first(db, 'SELECT 1 FROM cat_modelos WHERE id = ?', d.cat_modelo_id))) throw badRequest('Modelo del catálogo inexistente');
+  if (d.cat_version_id) {
+    const v = await first<{ modelo_id: string }>(db, 'SELECT modelo_id FROM cat_versiones WHERE id = ?', d.cat_version_id);
+    if (!v || (d.cat_modelo_id && v.modelo_id !== d.cat_modelo_id)) throw badRequest('La versión no corresponde al modelo del catálogo');
+  }
+}
 
 async function validarMarcaModelo(db: D1Database, tallerId: string, marcaId?: string | null, modeloId?: string | null) {
   if (marcaId && !(await delTaller(db, 'marcas', tallerId, marcaId, 'id'))) throw badRequest('Marca inexistente');
@@ -143,7 +209,7 @@ async function validarMarcaModelo(db: D1Database, tallerId: string, marcaId?: st
   }
 }
 
-const SELECT_VEHICULO = `SELECT v.*, ma.nombre AS marca, mo.nombre AS modelo, c.nombre AS cliente, c.telefono AS cliente_telefono
+const SELECT_VEHICULO = `SELECT v.*, ma.nombre AS marca, mo.nombre AS modelo, ma.cat_marca_id AS marca_cat_id, mo.cat_modelo_id AS modelo_cat_id, c.nombre AS cliente, c.telefono AS cliente_telefono
   FROM vehiculos v
   JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
   LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id
@@ -194,7 +260,6 @@ maestros.post('/vehiculos', requirePerm('vehiculos.crear'), async (c) => {
   const patente = normalizarPatente(d.patente);
   if (patente.length < 5) throw badRequest('Patente inválida');
   if (!(await delTaller(c.env.DB, 'clientes', s.tallerId, d.cliente_id, 'id'))) throw badRequest('Cliente inexistente');
-  await validarMarcaModelo(c.env.DB, s.tallerId, d.marca_id, d.modelo_id);
   const ex = await first<{ id: string; cliente: string }>(
     c.env.DB,
     'SELECT v.id, c.nombre AS cliente FROM vehiculos v JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id WHERE v.taller_id = ? AND v.patente = ?',
@@ -202,11 +267,18 @@ maestros.post('/vehiculos', requirePerm('vehiculos.crear'), async (c) => {
     patente,
   );
   if (ex) throw conflict(`La patente ${patente} ya está registrada (cliente: ${ex.cliente})`, 'duplicado');
+  const cat = await resolverCatalogo(c.env.DB, s.tallerId, d);
+  if (!cat) {
+    await validarMarcaModelo(c.env.DB, s.tallerId, d.marca_id, d.modelo_id);
+    await validarIdsCatalogo(c.env.DB, d);
+  }
+  const marcaId = cat ? cat.marca_id : (d.marca_id ?? null);
+  const modeloId = cat ? cat.modelo_id : (d.modelo_id ?? null);
   const id = uid();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      'INSERT INTO vehiculos (id, taller_id, cliente_id, patente, marca_id, modelo_id, anio, color, vin, motor, combustible, km_actual, notas) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    ).bind(id, s.tallerId, d.cliente_id, patente, d.marca_id ?? null, d.modelo_id ?? null, d.anio ?? null, d.color, d.vin, d.motor, d.combustible, d.km_actual, d.notas),
+      'INSERT INTO vehiculos (id, taller_id, cliente_id, patente, marca_id, modelo_id, anio, color, vin, motor, combustible, km_actual, notas, version, cat_modelo_id, cat_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    ).bind(id, s.tallerId, d.cliente_id, patente, marcaId, modeloId, d.anio ?? null, d.color, d.vin, d.motor, d.combustible, d.km_actual, d.notas, d.version ?? null, cat ? cat.cat_modelo_id : (d.cat_modelo_id ?? null), cat ? cat.cat_version_id : (d.cat_version_id ?? null)),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'vehiculo', id, 'crear', { patente }),
   ]);
   return c.json(limpiarDocumento(s, (await first(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id))!), 201);
@@ -219,11 +291,16 @@ maestros.put('/vehiculos/:id', requirePerm('vehiculos.editar'), async (c) => {
   const v = await delTaller<{ km_actual: number }>(c.env.DB, 'vehiculos', s.tallerId, id, 'km_actual');
   if (!v) throw notFound('Vehículo');
   if (d.cliente_id && !(await delTaller(c.env.DB, 'clientes', s.tallerId, d.cliente_id, 'id'))) throw badRequest('Cliente inexistente');
-  await validarMarcaModelo(c.env.DB, s.tallerId, d.marca_id, d.modelo_id);
+  const cat = await resolverCatalogo(c.env.DB, s.tallerId, d);
+  if (!cat) {
+    await validarMarcaModelo(c.env.DB, s.tallerId, d.marca_id, d.modelo_id);
+    await validarIdsCatalogo(c.env.DB, d);
+  }
   const datos: Record<string, unknown> = { ...d };
+  if (cat) Object.assign(datos, cat);
   if (d.patente) datos.patente = normalizarPatente(d.patente);
   if (d.km_actual !== undefined && d.km_actual < v.km_actual) throw badRequest(`El kilometraje no puede ser menor al registrado (${v.km_actual} km)`);
-  const st = updateParcial(c.env.DB, 'vehiculos', s.tallerId, id, datos, ['cliente_id', 'patente', 'marca_id', 'modelo_id', 'anio', 'color', 'vin', 'motor', 'combustible', 'km_actual', 'notas']);
+  const st = updateParcial(c.env.DB, 'vehiculos', s.tallerId, id, datos, ['cliente_id', 'patente', 'marca_id', 'modelo_id', 'anio', 'color', 'vin', 'motor', 'combustible', 'km_actual', 'notas', 'version', 'cat_modelo_id', 'cat_version_id']);
   if (st) await c.env.DB.batch([st, auditar(c.env.DB, s.tallerId, s.usuarioId, 'vehiculo', id, 'modificar')]);
   return c.json(limpiarDocumento(s, (await first(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id))!));
 });

@@ -99,6 +99,7 @@ export function VehiculoDetalle() {
               <Dato etiqueta="Teléfono">{v.cliente_telefono}</Dato>
               <Dato etiqueta="Kilometraje">{km(v.km_actual)}</Dato>
               <Dato etiqueta="Combustible">{v.combustible}</Dato>
+              <Dato etiqueta="Versión">{v.version}</Dato>
               <Dato etiqueta="Motor">{v.motor}</Dato>
               <Dato etiqueta="Chasis">{v.vin}</Dato>
               <Dato etiqueta="Notas" className="col-span-2">{v.notas}</Dato>

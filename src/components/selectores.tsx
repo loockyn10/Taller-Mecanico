@@ -1,10 +1,12 @@
 // Selectores de entidades con alta rápida (cliente, vehículo) y formularios compartidos.
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Car, Plus, UserRound, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { AccionesForm, Boton, Buscador, Campo, cn, Input, Modal, Select, Textarea, useDebounce, useToast } from './ui';
 import { CONDICIONES_IVA, CONDICION_IVA_LABEL } from '@shared/dominio';
+import { claveBusqueda, type CatVersion } from '@shared/catalogo-auto';
+import { Combobox, rangoAnios, useCatMarcas, useCatModelo, useCatModelos, type Opcion } from './CatalogoAuto';
 
 export interface ClienteMin {
   id: string;
@@ -93,11 +95,13 @@ export function useMarcas() {
 export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { clienteId: string; inicial?: any; onGuardado: (v: any) => void; onCancelar: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
-  const { data: marcas = [] } = useMarcas();
+  const { data: marcasTaller = [] } = useMarcas();
+  const { data: catMarcas = [], isLoading: cargandoMarcas } = useCatMarcas();
   const [f, setF] = useState({
     patente: inicial?.patente ?? '',
-    marca_id: inicial?.marca_id ?? '',
-    modelo_id: inicial?.modelo_id ?? '',
+    marca: inicial?.marca ?? '',
+    modelo: inicial?.modelo ?? '',
+    version: inicial?.version ?? '',
     anio: inicial?.anio ? String(inicial.anio) : '',
     color: inicial?.color ?? '',
     km_actual: inicial?.km_actual ? String(inicial.km_actual) : '',
@@ -106,22 +110,63 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
     vin: inicial?.vin ?? '',
     notas: inicial?.notas ?? '',
   });
-  const [nuevoModelo, setNuevoModelo] = useState('');
-  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value, ...(k === 'marca_id' ? { modelo_id: '' } : {}) });
-  const modelos = marcas.find((m) => m.id === f.marca_id)?.modelos ?? [];
+  // Si el usuario no toca marca, modelo ni versión, no se envían: el vehículo conserva tal cual lo que ya tenía.
+  const [tocado, setTocado] = useState(false);
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const cambiar = (parcial: Partial<typeof f>) => {
+    setF((a) => ({ ...a, ...parcial }));
+    setTocado(true);
+  };
+
+  // El vínculo con el catálogo se deduce del texto: el nombre canónico elegido (o escrito igual) lo identifica.
+  const claveMarca = claveBusqueda(f.marca);
+  const catMarca = claveMarca ? catMarcas.find((m) => m.clave === claveMarca) ?? null : null;
+  const { data: catModelos = [], isLoading: cargandoModelos } = useCatModelos(catMarca?.id ?? null);
+  const claveModelo = claveBusqueda(f.modelo);
+  const catModelo = claveModelo ? catModelos.find((m) => m.clave === claveModelo) ?? null : null;
+  const { data: detalle, isLoading: cargandoVersiones } = useCatModelo(catModelo?.id ?? null);
+  const anioNum = Number(f.anio);
+
+  const opcionesMarca = useMemo<Opcion[]>(() => {
+    const delCatalogo = new Set(catMarcas.map((m) => m.clave));
+    return [
+      ...catMarcas.map((m) => ({ id: m.id, nombre: m.nombre, clave: m.clave, busqueda: m.busqueda })),
+      ...marcasTaller.filter((m) => !delCatalogo.has(claveBusqueda(m.nombre))).map((m) => ({ id: `t:${m.id}`, nombre: m.nombre, clave: claveBusqueda(m.nombre), detalle: 'del taller' })),
+    ];
+  }, [catMarcas, marcasTaller]);
+  const opcionesModelo = useMemo<Opcion[]>(() => {
+    const delCatalogo = new Set(catModelos.map((m) => m.clave));
+    const propios = marcasTaller.find((m) => claveBusqueda(m.nombre) === claveMarca)?.modelos ?? [];
+    return [
+      ...catModelos.map((m) => ({ id: m.id, nombre: m.nombre, clave: m.clave, detalle: rangoAnios(m.anios) })),
+      ...propios.filter((m) => !delCatalogo.has(claveBusqueda(m.nombre))).map((m) => ({ id: `t:${m.id}`, nombre: m.nombre, clave: claveBusqueda(m.nombre), detalle: 'del taller' })),
+    ];
+  }, [catModelos, marcasTaller, claveMarca]);
+
+  const versiones = detalle?.versiones ?? [];
+  const delAnio = anioNum ? versiones.filter((v) => v.anios.includes(anioNum)) : versiones;
+  const candidatas = delAnio.length ? delAnio : versiones; // si el año no figura para ese modelo, se muestran todas
+  const opcionesMotor = useMemo<Opcion[]>(() => {
+    const m = new Map<string, number>();
+    for (const v of candidatas) if (v.motorizacion) m.set(v.motorizacion, (m.get(v.motorizacion) ?? 0) + v.n);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([nombre]) => ({ id: nombre, nombre, clave: claveBusqueda(nombre) }));
+  }, [candidatas]);
+  const claveMotor = claveBusqueda(f.motor);
+  const motorElegido = opcionesMotor.some((o) => o.clave === claveMotor);
+  const deMotor = motorElegido ? candidatas.filter((v) => claveBusqueda(v.motorizacion ?? '') === claveMotor) : candidatas;
+  const textoVersion = (v: CatVersion) => v.version ?? v.descripcion;
+  const opcionesVersion = useMemo<Opcion[]>(
+    () => deMotor.map((v) => ({ id: v.id, nombre: textoVersion(v), clave: claveBusqueda(textoVersion(v)), detalle: [v.motorizacion, rangoAnios(v.anios)].filter(Boolean).join(' · ') || undefined })),
+    [deMotor],
+  );
+  const catVersion = f.version ? versiones.find((v) => claveBusqueda(textoVersion(v)) === claveBusqueda(f.version)) ?? null : null;
+  const aniosSugeridos = catModelo ? [...catModelo.anios].reverse().slice(0, 14) : [];
+
   const m = useMutation({
     mutationFn: async () => {
-      let modeloId = f.modelo_id || null;
-      if (f.marca_id && nuevoModelo.trim()) {
-        const r = await api.post('/modelos', { marca_id: f.marca_id, nombre: nuevoModelo.trim() });
-        modeloId = r.id;
-        qc.invalidateQueries({ queryKey: ['marcas'] });
-      }
-      const datos = {
+      const datos: Record<string, unknown> = {
         cliente_id: clienteId,
         patente: f.patente,
-        marca_id: f.marca_id || null,
-        modelo_id: modeloId,
         anio: f.anio ? Number(f.anio) : null,
         color: f.color,
         km_actual: f.km_actual ? Number(f.km_actual) : 0,
@@ -130,9 +175,21 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
         vin: f.vin,
         notas: f.notas,
       };
+      if (tocado || !inicial?.id) {
+        // El servidor reutiliza la marca/modelo que el taller ya tenga con ese nombre (nunca la renombra) y crea sólo la que se usa.
+        Object.assign(datos, {
+          marca_texto: f.marca.trim() || null,
+          modelo_texto: f.marca.trim() ? f.modelo.trim() || null : null,
+          cat_marca_id: catMarca?.id ?? null,
+          cat_modelo_id: catModelo?.id ?? null,
+          cat_version_id: catVersion?.id ?? null,
+          version: f.version.trim() || null,
+        });
+      }
       return inicial?.id ? api.put(`/vehiculos/${inicial.id}`, datos) : api.post('/vehiculos', datos);
     },
     onSuccess: (v) => {
+      qc.invalidateQueries({ queryKey: ['marcas'] });
       qc.invalidateQueries({ queryKey: ['vehiculos'] });
       qc.invalidateQueries({ queryKey: ['vehiculo'] });
       qc.invalidateQueries({ queryKey: ['cliente'] });
@@ -155,21 +212,57 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
       <Campo label="Kilometraje actual">
         <Input value={f.km_actual} onChange={set('km_actual')} inputMode="numeric" placeholder="0" />
       </Campo>
-      <Campo label="Marca">
-        <Select value={f.marca_id} onChange={set('marca_id')}>
-          <option value="">— Elegir —</option>
-          {marcas.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-        </Select>
+      <Campo label="Marca" hint={catMarca ? undefined : 'Elegí de la lista o escribila si no está'}>
+        <Combobox
+          valor={f.marca}
+          placeholder="Ej.: Volkswagen"
+          cargando={cargandoMarcas}
+          opciones={opcionesMarca}
+          onTexto={(t) => cambiar({ marca: t, ...(claveBusqueda(t) === claveMarca ? {} : { modelo: '', version: '' }) })}
+          onElegir={(o) => cambiar({ marca: o.nombre, ...(o.clave === claveMarca ? {} : { modelo: '', version: '' }) })}
+        />
       </Campo>
-      <Campo label="Modelo" hint={f.marca_id ? 'Si no está en la lista, escribilo abajo' : undefined}>
-        <Select value={f.modelo_id} onChange={set('modelo_id')} disabled={!f.marca_id}>
-          <option value="">— Elegir —</option>
-          {modelos.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-        </Select>
-        {f.marca_id && !f.modelo_id && <Input value={nuevoModelo} onChange={(e) => setNuevoModelo(e.target.value)} placeholder="Nuevo modelo (opcional)" className="mt-1.5" />}
+      <Campo label="Modelo" hint={f.marca.trim() ? (catModelo ? undefined : 'Elegí de la lista o escribilo si no está') : 'Primero la marca'}>
+        <Combobox
+          valor={f.modelo}
+          placeholder="Ej.: Amarok"
+          disabled={!f.marca.trim()}
+          cargando={!!catMarca && cargandoModelos}
+          opciones={opcionesModelo}
+          vacio={catMarca ? 'Escribí el modelo a mano.' : 'Marca fuera del catálogo: escribí el modelo a mano.'}
+          onTexto={(t) => cambiar({ modelo: t, ...(claveBusqueda(t) === claveModelo ? {} : { version: '' }) })}
+          onElegir={(o) => cambiar({ modelo: o.nombre, ...(o.clave === claveModelo ? {} : { version: '' }) })}
+        />
       </Campo>
-      <Campo label="Año">
-        <Input value={f.anio} onChange={set('anio')} inputMode="numeric" maxLength={4} />
+      <Campo label="Año" hint={aniosSugeridos.length ? 'Años con registros de este modelo' : undefined}>
+        <Input value={f.anio} onChange={set('anio')} inputMode="numeric" maxLength={4} placeholder="2020" />
+        {aniosSugeridos.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {aniosSugeridos.map((a) => (
+              <button key={a} type="button" onClick={() => setF({ ...f, anio: String(a) })} className={cn('h-8 rounded-ctl border px-2 text-xs', String(a) === f.anio ? 'border-marca-400 bg-marca-50 text-marca-700' : 'border-borde bg-white text-slate-600 hover:bg-slate-50')}>
+                {a}
+              </button>
+            ))}
+          </div>
+        )}
+      </Campo>
+      <Campo label="Motorización" hint={opcionesMotor.length ? 'Según las descripciones del registro automotor' : 'Escribila a mano, por ejemplo 1.6 16v'}>
+        <Combobox valor={f.motor} placeholder="1.6" opciones={opcionesMotor} onTexto={(t) => cambiar({ motor: t })} onElegir={(o) => cambiar({ motor: o.nombre })} vacio="Escribila a mano." />
+      </Campo>
+      <Campo label="Versión" className="sm:col-span-2" hint={catModelo ? undefined : 'Opcional'}>
+        <Combobox
+          valor={f.version}
+          placeholder="Ej.: Highline V6 4x4"
+          disabled={!f.modelo.trim()}
+          cargando={!!catModelo && cargandoVersiones}
+          opciones={opcionesVersion}
+          vacio="Escribila a mano."
+          onTexto={(t) => cambiar({ version: t })}
+          onElegir={(o) => {
+            const v = versiones.find((x) => x.id === o.id);
+            cambiar({ version: o.nombre, ...(v?.motorizacion && !f.motor.trim() ? { motor: v.motorizacion } : {}), ...(v?.combustible && !f.combustible ? { combustible: v.combustible } : {}) });
+          }}
+        />
       </Campo>
       <Campo label="Color">
         <Input value={f.color} onChange={set('color')} />
@@ -180,15 +273,13 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
           {['Nafta', 'Diésel', 'GNC', 'Nafta/GNC', 'Híbrido', 'Eléctrico'].map((c) => <option key={c}>{c}</option>)}
         </Select>
       </Campo>
-      <Campo label="Motor">
-        <Input value={f.motor} onChange={set('motor')} placeholder="1.6 16v" />
-      </Campo>
       <Campo label="N° de chasis (VIN)" className="sm:col-span-2">
         <Input value={f.vin} onChange={set('vin')} className="uppercase" />
       </Campo>
       <Campo label="Notas" className="sm:col-span-2">
         <Textarea value={f.notas} onChange={set('notas')} rows={2} />
       </Campo>
+      <p className="text-xs text-tenue sm:col-span-2">Catálogo: DNRPA, inscripciones iniciales de autos (CC BY 4.0). Cualquier dato que falte se puede escribir a mano.</p>
       <AccionesForm className="sm:col-span-2">
         <Boton onClick={onCancelar}>Cancelar</Boton>
         <Boton type="submit" variante="primario" cargando={m.isPending}>Guardar</Boton>

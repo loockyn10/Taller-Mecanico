@@ -484,4 +484,29 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(todos('PRAGMA foreign_key_check')).toEqual([]);
     db.close();
   });
+
+  it('0014 no toca vehículos, marcas ni modelos de los talleres y deja las tablas del catálogo vacías y listas', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    for (const m of fs.readdirSync(path.join(RAIZ, 'migrations')).sort().filter((x) => x < '0014')) db.exec(leer('migrations', m));
+    db.exec(leer('tests', 'fixtures', 'datos-previos-0002.sql'));
+    db.exec("INSERT INTO marcas (id, taller_id, nombre) VALUES ('ma1', 't1', 'VW viejo')");
+    db.exec("INSERT INTO modelos (id, taller_id, marca_id, nombre) VALUES ('mo1', 't1', 'ma1', 'Gol a mano')");
+    db.exec("INSERT INTO vehiculos (id, taller_id, cliente_id, patente, marca_id, modelo_id, anio, motor, km_actual) VALUES ('v1', 't1', 'c1', 'AB123CD', 'ma1', 'mo1', 2015, '1.6 16v', 90000)");
+    const antes = db.prepare('SELECT * FROM vehiculos').all().map((r: any) => ({ ...r }));
+    db.exec(leer('migrations', '0014_catalogo_automotor.sql'));
+    const despues = db.prepare('SELECT * FROM vehiculos').all().map((r: any) => ({ ...r }));
+    expect(despues).toEqual(antes.map((r: any) => ({ ...r, cat_modelo_id: null, cat_version_id: null, version: null })));
+    expect(db.prepare("SELECT nombre FROM marcas WHERE id = 'ma1'").get()).toMatchObject({ nombre: 'VW viejo' });
+    expect(db.prepare("SELECT nombre, cat_modelo_id FROM modelos WHERE id = 'mo1'").get()).toMatchObject({ nombre: 'Gol a mano', cat_modelo_id: null });
+    for (const t of ['cat_marcas', 'cat_modelos', 'cat_versiones', 'cat_fichas']) expect((db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as any).n).toBe(0);
+    // Una ficha técnica no se puede cargar sin fuente ni fecha de verificación
+    db.exec("INSERT INTO cat_marcas (id, nombre, clave, codigos) VALUES ('ma_x', 'X', 'x', '[]')");
+    db.exec("INSERT INTO cat_modelos (id, marca_id, nombre, clave, anios) VALUES ('mo_x', 'ma_x', 'Y', 'y', '2020')");
+    expect(() => db.exec("INSERT INTO cat_fichas (id, modelo_id, aceite_recomendado, fuente, fecha_verificacion) VALUES ('f1', 'mo_x', '5W30', '', '2026-10-23')")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO cat_fichas (id, modelo_id, aceite_recomendado, fuente) VALUES ('f1', 'mo_x', '5W30', 'Manual del fabricante')")).toThrow(/NOT NULL/);
+    db.exec("INSERT INTO cat_fichas (id, modelo_id, aceite_recomendado, fuente, fecha_verificacion) VALUES ('f1', 'mo_x', '5W30', 'Manual del fabricante', '2026-10-23')");
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    db.close();
+  });
 });
