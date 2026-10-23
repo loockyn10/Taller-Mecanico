@@ -43,6 +43,13 @@ export function fechaHora(iso?: string | null): string {
   return new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+/** Tamaño legible de un archivo o de un consumo de almacenamiento (MB / GB, base 1024). */
+export function tamano(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2).replace(/\.?0+$/, '').replace('.', ',')} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.max(0, Math.round(bytes / 1024))} KB`;
+}
+
 export function hoyISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

@@ -7,6 +7,8 @@ import { platform } from './modules/platform';
 import { taller } from './modules/taller';
 import { maestros } from './modules/maestros';
 import { catalogoAuto } from './modules/catalogo-auto';
+import { fotos } from './modules/fotos';
+import { limpiarFotos } from './lib/fotos';
 import { catalogo } from './modules/catalogo';
 import { presupuestos } from './modules/presupuestos';
 import { ordenes } from './modules/ordenes';
@@ -49,7 +51,7 @@ const app = new Hono<AppEnv>();
 
 app.use('/api/*', async (c, next) => {
   await next();
-  c.header('Cache-Control', 'no-store');
+  if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');
   c.header('X-Content-Type-Options', 'nosniff');
 });
 app.use('/api/*', requireJson);
@@ -126,6 +128,7 @@ api.route('/asistencia', asistencia);
 api.route('/asistencia', relojAdmin);
 api.route('/', maestros);
 api.route('/', catalogoAuto);
+api.route('/', fotos);
 api.route('/', historial);
 api.route('/', mantenimientos);
 api.route('/tempario', tempario);
@@ -182,5 +185,6 @@ export default {
   // Cron Trigger (wrangler.jsonc › triggers.crons): drena las colas de contabilización pendientes, avanza reconciliaciones y deja un latido.
   async scheduled(_evento: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(ejecutarMantenimiento(env, mantenimientoContable));
+    ctx.waitUntil(limpiarFotos(env.DB, env.FIERRO_FOTOS).catch(() => undefined));
   },
 } satisfies ExportedHandler<Env>;

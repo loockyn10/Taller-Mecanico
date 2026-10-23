@@ -11,6 +11,7 @@ import { ejecutarMantenimiento, informeSalud } from '../lib/observabilidad';
 import { mantenimientoContable } from '../lib/contab/sync';
 import { huellaCorta, registrarEvento } from '../lib/seguridad';
 import { sentenciasAltaTaller } from './provision';
+import { claveFoto, claveMiniatura, limpiarFotos, usoFotos } from '../lib/fotos';
 
 export const platform = new Hono<AppEnv>();
 
@@ -135,3 +136,79 @@ platform.post('/invitaciones/:id/revocar', async (c) => {
   if (!r.meta.changes) throw notFound('Invitación pendiente');
   return c.json({ ok: true });
 });
+
+// ───────────── Fotografías: cupo, exportación y auditoría del bucket R2 ─────────────
+// Un respaldo de D1 NO trae las imágenes (están en R2). Estos endpoints, protegidos con el token de plataforma, permiten exportarlas con un manifiesto
+// verificable (sha256 de cada archivo) y comparar R2 contra D1. El procedimiento está en docs/FOTOGRAFIAS.md y en `npm run respaldo -- fotos`.
+platform.get('/almacenamiento', async (c) => {
+  const talleres = await all<{ id: string; nombre: string }>(c.env.DB, 'SELECT id, nombre FROM talleres ORDER BY created_at');
+  const out = [];
+  for (const t of talleres) out.push({ taller_id: t.id, nombre: t.nombre, ...(await usoFotos(c.env.DB, t.id)) });
+  return c.json({ habilitado: !!c.env.FIERRO_FOTOS, talleres: out });
+});
+
+platform.patch('/talleres/:id/almacenamiento', async (c) => {
+  const id = c.req.param('id');
+  const d = await body(c, z.object({ fotos_limite_mb: z.number().int().min(1).max(10_485_760) }));
+  if (!(await first(c.env.DB, 'SELECT 1 FROM talleres WHERE id = ?', id))) throw notFound('Taller');
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO taller_almacenamiento (taller_id, fotos_limite_bytes) VALUES (?, ?)
+       ON CONFLICT(taller_id) DO UPDATE SET fotos_limite_bytes = excluded.fotos_limite_bytes, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+    ).bind(id, d.fotos_limite_mb * 1024 * 1024),
+    c.env.DB.prepare('INSERT INTO licencia_eventos (id, taller_id, tipo, detalle) VALUES (?, ?, ?, ?)').bind(uid(), id, 'modificacion', JSON.stringify({ fotos_limite_mb: d.fotos_limite_mb })),
+  ]);
+  return c.json({ taller_id: id, ...(await usoFotos(c.env.DB, id)) });
+});
+
+/** Manifiesto de las fotos "lista" (todas o de un taller), paginado por id. Es lo que se compara con lo exportado de R2. */
+platform.get('/fotos/manifiesto', async (c) => {
+  const taller = c.req.query('taller') ?? null;
+  const despues = c.req.query('despues') ?? '';
+  const filas = await all<{ id: string; taller_id: string; vehiculo_id: string; orden_id: string | null; etapa: string | null; mime: string; bytes: number; miniatura_bytes: number; sha256: string; miniatura_sha256: string; created_at: string }>(
+    c.env.DB,
+    `SELECT id, taller_id, vehiculo_id, orden_id, etapa, mime, bytes, miniatura_bytes, sha256, miniatura_sha256, created_at FROM fotos
+      WHERE estado = 'lista' AND id > ? ${taller ? 'AND taller_id = ?' : ''} ORDER BY id LIMIT 500`,
+    despues,
+    ...(taller ? [taller] : []),
+  );
+  return c.json({ fotos: filas.map((f) => ({ ...f, clave: claveFoto(f.taller_id, f.id), clave_miniatura: claveMiniatura(f.taller_id, f.id) })), siguiente: filas.length === 500 ? filas[filas.length - 1].id : null });
+});
+
+platform.get('/fotos/:id/archivo', async (c) => {
+  if (!c.env.FIERRO_FOTOS) throw new ApiError(503, 'fotos_no_habilitadas', 'El almacenamiento de fotografías no está habilitado');
+  const f = await first<{ id: string; taller_id: string; mime: string }>(c.env.DB, "SELECT id, taller_id, mime FROM fotos WHERE id = ? AND estado = 'lista'", c.req.param('id'));
+  if (!f) throw notFound('Fotografía');
+  const mini = c.req.query('variante') === 'miniatura';
+  const o = await c.env.FIERRO_FOTOS.get(mini ? claveMiniatura(f.taller_id, f.id) : claveFoto(f.taller_id, f.id));
+  if (!o) throw notFound('Objeto en R2');
+  return new Response(o.body, { headers: { 'Content-Type': f.mime, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+});
+
+/** Compara R2 con D1: objetos sin fila (huérfanos) y filas "lista" sin objeto. Sólo lectura. */
+platform.get('/fotos/auditoria', async (c) => {
+  const r2 = c.env.FIERRO_FOTOS;
+  if (!r2) throw new ApiError(503, 'fotos_no_habilitadas', 'El almacenamiento de fotografías no está habilitado');
+  const taller = c.req.query('taller');
+  const prefijo = taller ? `fotos/${taller}/` : 'fotos/';
+  const enR2 = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const l = await r2.list({ prefix: prefijo, cursor, limit: 1000 });
+    for (const o of l.objects) enR2.add(o.key);
+    cursor = l.truncated ? l.cursor : undefined;
+  } while (cursor);
+  const filas = await all<{ id: string; taller_id: string; estado: string }>(c.env.DB, `SELECT id, taller_id, estado FROM fotos ${taller ? 'WHERE taller_id = ?' : ''}`, ...(taller ? [taller] : []));
+  const esperadas = new Set<string>();
+  const faltantes: string[] = [];
+  for (const f of filas) {
+    for (const k of [claveFoto(f.taller_id, f.id), claveMiniatura(f.taller_id, f.id)]) {
+      esperadas.add(k);
+      if (f.estado === 'lista' && !enR2.has(k)) faltantes.push(k);
+    }
+  }
+  const huerfanos = [...enR2].filter((k) => !esperadas.has(k));
+  return c.json({ objetos_en_r2: enR2.size, filas_en_d1: filas.length, huerfanos: huerfanos.slice(0, 200), huerfanos_total: huerfanos.length, faltantes: faltantes.slice(0, 200), faltantes_total: faltantes.length });
+});
+
+platform.post('/fotos/limpiar', async (c) => c.json(await limpiarFotos(c.env.DB, c.env.FIERRO_FOTOS)));

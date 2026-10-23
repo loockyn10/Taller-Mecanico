@@ -2,6 +2,8 @@ import type { Nivel, Permiso, Rol } from '../shared/permisos';
 
 export interface Env {
   DB: D1Database;
+  /** Bucket PRIVADO de R2 con las fotografías (vehículos y órdenes). Si falta, las fotos quedan deshabilitadas y el resto de Fierro sigue igual. */
+  FIERRO_FOTOS?: R2Bucket;
   ASSETS?: Fetcher;
   PLATFORM_ADMIN_TOKEN?: string;
   PBKDF2_ITERATIONS?: string;

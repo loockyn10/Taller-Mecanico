@@ -4,7 +4,8 @@ import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { fechaHora } from '@/lib/format';
+import { fechaHora, tamano } from '@/lib/format';
+import { useEstadoFotos } from '@/components/Fotos';
 import { Aviso, Boton, BotonIcono, Campo, Cargando, Check, Encabezado, Input, InputMoneda, Insignia, Modal, Pestanas, Select, Tabla, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { useMarcas } from '@/components/selectores';
 import { CONDICIONES_IVA, CONDICION_IVA_LABEL, MEDIO_PAGO_LABEL, MEDIOS_PAGO } from '@shared/dominio';
@@ -146,10 +147,27 @@ function MiCuenta() {
   );
 }
 
+function AlmacenamientoFotos() {
+  const { data } = useEstadoFotos();
+  if (!data) return null;
+  const pct = Math.min(100, Math.round((data.usado_bytes / data.limite_bytes) * 100));
+  return (
+    <Tarjeta titulo="Almacenamiento de fotografías" subtitulo="Fotos de vehículos y órdenes de trabajo">
+      <p className="text-lg font-semibold">Fotografías: {tamano(data.usado_bytes)} de {tamano(data.limite_bytes)} utilizados</p>
+      <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className={`h-full ${pct >= 90 ? 'bg-peligro-500' : pct >= 75 ? 'bg-aviso-500' : 'bg-marca-500'}`} style={{ width: `${Math.max(pct, data.usado_bytes ? 2 : 0)}%` }} />
+      </div>
+      <p className="mt-2 text-sm text-tenue">{data.cantidad} {data.cantidad === 1 ? 'fotografía' : 'fotografías'} · {pct}% del espacio asignado.{!data.habilitado && ' El almacenamiento de fotografías todavía no está habilitado en este servidor.'}</p>
+      <p className="mt-1 text-sm text-tenue">El límite lo define la administración de la plataforma. Para ampliarlo comunicate con el proveedor del sistema.</p>
+    </Tarjeta>
+  );
+}
+
 function Licencia() {
   const { data, isLoading } = useQuery({ queryKey: ['licencia'], queryFn: () => api.get('/taller/licencia') });
   if (isLoading) return <Cargando />;
   return (
+    <div className="space-y-5">
     <Tarjeta titulo="Licencia">
       <dl className="grid gap-4 sm:grid-cols-4">
         <div><dt className="text-xs text-tenue">Estado</dt><dd><Insignia tono={data.estado === 'activa' ? 'verde' : 'rojo'}>{data.estado === 'activa' ? 'Activa' : 'Suspendida'}</Insignia></dd></div>
@@ -159,6 +177,8 @@ function Licencia() {
       </dl>
       <p className="mt-4 text-sm text-tenue">Para contratar usuarios adicionales comunicate con el proveedor del sistema.</p>
     </Tarjeta>
+    <AlmacenamientoFotos />
+    </div>
   );
 }
 

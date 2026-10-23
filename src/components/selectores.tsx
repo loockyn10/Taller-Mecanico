@@ -3,9 +3,10 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Car, Plus, UserRound, X } from 'lucide-react';
 import { api } from '@/lib/api';
-import { AccionesForm, Boton, Buscador, Campo, cn, Input, Modal, Select, Textarea, useDebounce, useToast } from './ui';
+import { AccionesForm, Aviso, Boton, Buscador, Campo, cn, Input, Modal, Select, Textarea, useDebounce, useToast } from './ui';
 import { CONDICIONES_IVA, CONDICION_IVA_LABEL } from '@shared/dominio';
 import { claveBusqueda, type CatVersion } from '@shared/catalogo-auto';
+import { BotonesCamara, GaleriaFotos, ListaLocal, useEstadoFotos, useFotosLocales, usePermisosFotos } from './Fotos';
 import { Combobox, rangoAnios, useCatMarcas, useCatModelo, useCatModelos, type Opcion } from './CatalogoAuto';
 
 export interface ClienteMin {
@@ -112,6 +113,12 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
   });
   // Si el usuario no toca marca, modelo ni versión, no se envían: el vehículo conserva tal cual lo que ya tenía.
   const [tocado, setTocado] = useState(false);
+  // Fotos: en el alta se eligen antes de guardar y se suben cuando el vehículo ya existe; en la edición se suben al instante.
+  const fotos = useFotosLocales();
+  const permisosFotos = usePermisosFotos();
+  const estadoFotos = useEstadoFotos(permisosFotos.ver);
+  const fotosOk = estadoFotos.data?.habilitado !== false;
+  const [creado, setCreado] = useState<any>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const cambiar = (parcial: Partial<typeof f>) => {
     setF((a) => ({ ...a, ...parcial }));
@@ -186,18 +193,51 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
           version: f.version.trim() || null,
         });
       }
-      return inicial?.id ? api.put(`/vehiculos/${inicial.id}`, datos) : api.post('/vehiculos', datos);
+      if (inicial?.id) return { v: await api.put(`/vehiculos/${inicial.id}`, datos), fallos: 0 };
+      const v = await api.post('/vehiculos', datos);
+      // El vehículo ya está guardado: ahora se suben las fotos elegidas (con clave de reintento: repetir no las duplica).
+      return { v, fallos: fotos.items.length ? await fotos.subirTodas({ vehiculo_id: v.id }) : 0 };
     },
-    onSuccess: (v) => {
+    onSuccess: ({ v, fallos }) => {
+      qc.invalidateQueries({ queryKey: ['fotos'] });
       qc.invalidateQueries({ queryKey: ['marcas'] });
       qc.invalidateQueries({ queryKey: ['vehiculos'] });
       qc.invalidateQueries({ queryKey: ['vehiculo'] });
       qc.invalidateQueries({ queryKey: ['cliente'] });
+      if (fallos > 0) {
+        // No se cierra: la persona puede reintentar las fotos que fallaron sin crear el vehículo de nuevo.
+        setCreado(v);
+        toast.ok('Vehículo registrado. Faltan subir algunas fotos.');
+        return;
+      }
       toast.ok(inicial?.id ? 'Vehículo actualizado' : 'Vehículo registrado');
       onGuardado(v);
     },
     onError: toast.error,
   });
+  const [reintentando, setReintentando] = useState(false);
+  if (creado) {
+    const faltan = fotos.items.filter((i) => i.estado !== 'subida').length;
+    const reintentar = async () => {
+      setReintentando(true);
+      const fallos = await fotos.subirTodas({ vehiculo_id: creado.id });
+      setReintentando(false);
+      qc.invalidateQueries({ queryKey: ['fotos'] });
+      if (fallos === 0) onGuardado(creado);
+    };
+    return (
+      <div className="space-y-3">
+        <Aviso tono={faltan ? 'ambar' : 'verde'}>
+          El vehículo <b>{creado.patente}</b> quedó registrado. {faltan ? `No se pudieron subir ${faltan} foto${faltan > 1 ? 's' : ''}: reintentá (no se duplican las que ya se guardaron).` : 'Todas las fotos se guardaron.'}
+        </Aviso>
+        <ListaLocal items={fotos.items} onDescripcion={fotos.descripcion} onQuitar={fotos.quitar} onReintentar={reintentar} bloqueada={reintentando} />
+        <AccionesForm>
+          <Boton onClick={() => onGuardado(creado)} disabled={reintentando}>Cerrar sin esas fotos</Boton>
+          <Boton variante="primario" tam="lg" cargando={reintentando} disabled={!faltan} onClick={reintentar}>Reintentar</Boton>
+        </AccionesForm>
+      </div>
+    );
+  }
   return (
     <form
       onSubmit={(e) => {
@@ -279,10 +319,24 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
       <Campo label="Notas" className="sm:col-span-2">
         <Textarea value={f.notas} onChange={set('notas')} rows={2} />
       </Campo>
+      {fotosOk && permisosFotos.ver && (inicial?.id || permisosFotos.subir) && (
+        <div className="space-y-2 sm:col-span-2">
+          <p className="text-[13px] font-medium text-slate-700">Fotografías</p>
+          {inicial?.id ? (
+            <GaleriaFotos vehiculoId={inicial.id} puedeSubir={permisosFotos.subir} puedeEliminar={permisosFotos.eliminar} filtros />
+          ) : (
+            <>
+              <BotonesCamara onArchivos={fotos.agregar} deshabilitado={m.isPending || fotos.items.length >= 12} />
+              <ListaLocal items={fotos.items} onDescripcion={fotos.descripcion} onQuitar={fotos.quitar} bloqueada={m.isPending} />
+              {fotos.items.length > 0 && <p className="text-xs text-tenue">Se suben al guardar el vehículo.</p>}
+            </>
+          )}
+        </div>
+      )}
       <p className="text-xs text-tenue sm:col-span-2">Catálogo: DNRPA, inscripciones iniciales de autos (CC BY 4.0). Cualquier dato que falte se puede escribir a mano.</p>
       <AccionesForm className="sm:col-span-2">
         <Boton onClick={onCancelar}>Cancelar</Boton>
-        <Boton type="submit" variante="primario" cargando={m.isPending}>Guardar</Boton>
+        <Boton type="submit" variante="primario" cargando={m.isPending} disabled={fotos.ocupado && !m.isPending}>Guardar</Boton>
       </AccionesForm>
     </form>
   );

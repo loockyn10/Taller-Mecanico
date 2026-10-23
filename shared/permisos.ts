@@ -21,6 +21,10 @@ export const PERMISOS = [
   'ordenes.asignar', // asignar el mecánico responsable, los participantes y las tareas de las órdenes (sin tocar importes)
   'turnos.ver',
   'turnos.gestionar',
+  // ── Fotografías de vehículos y órdenes de trabajo
+  'fotos.ver',
+  'fotos.subir',
+  'fotos.eliminar',
   // ── Mantenimientos programados
   'mantenimientos.ver',
   'mantenimientos.gestionar', // planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro
@@ -87,6 +91,8 @@ export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
   'vehiculos.crear': ['vehiculos.ver'],
   'vehiculos.editar': ['vehiculos.ver'],
   'presupuestos.gestionar': ['presupuestos.ver'],
+  'fotos.subir': ['fotos.ver'],
+  'fotos.eliminar': ['fotos.ver'],
   'ordenes.crear': ['ordenes.ver'],
   'ordenes.modificar': ['ordenes.ver'],
   'ordenes.asignar': ['ordenes.ver'],
@@ -128,8 +134,9 @@ const RECEPCION: Permiso[] = [
   'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
   'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar',
+  'fotos.ver', 'fotos.subir',
 ];
-const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'mantenimientos.ver', 'asistencia.fichar'];
+const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'mantenimientos.ver', 'asistencia.fichar', 'fotos.ver', 'fotos.subir'];
 const DEPOSITO: Permiso[] = [
   'catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'compras.ver', 'compras.gestionar', 'precios.venta.ver', 'precios.costo.ver',
   'ordenes.ver', 'vehiculos.ver', 'asistencia.fichar',
@@ -143,7 +150,7 @@ const EMPLEADO: Permiso[] = [
   'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
   'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar',
-  'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar',
+  'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar', 'fotos.ver', 'fotos.subir',
 ];
 
 export interface Plantilla {
@@ -260,6 +267,9 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'ordenes.modificar': { etiqueta: 'Modificar órdenes de trabajo', ayuda: 'Editar ítems, estados y check-list. La edición de ítems requiere ver precios y presupuestos valorizados' },
   'turnos.ver': { etiqueta: 'Ver agenda de turnos' },
   'turnos.gestionar': { etiqueta: 'Gestionar turnos' },
+  'fotos.ver': { etiqueta: 'Ver fotografías', ayuda: 'De los vehículos y de las órdenes a las que tiene acceso' },
+  'fotos.subir': { etiqueta: 'Subir fotografías', ayuda: 'Sacar o elegir fotos para un vehículo o una orden a la que tiene acceso' },
+  'fotos.eliminar': { etiqueta: 'Eliminar fotografías', ayuda: 'Queda registrado quién y cuándo' },
   'mantenimientos.ver': { etiqueta: 'Ver mantenimientos programados', ayuda: 'Vencimientos por kilometraje y tiempo de cada vehículo' },
   'mantenimientos.gestionar': { etiqueta: 'Gestionar mantenimientos', ayuda: 'Planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro' },
   'precios.venta.ver': { etiqueta: 'Ver precios de venta' },
@@ -309,6 +319,7 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
 export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Clientes y vehículos', permisos: ['clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar'] },
   { titulo: 'Presupuestos, órdenes, agenda y mantenimientos', permisos: ['presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar', 'mantenimientos.ver', 'mantenimientos.gestionar'] },
+  { titulo: 'Fotografías', permisos: ['fotos.ver', 'fotos.subir', 'fotos.eliminar'] },
   { titulo: 'Precios y márgenes', permisos: ['precios.venta.ver', 'precios.costo.ver', 'margenes.ver', 'presupuestos.valorizados.ver', 'precios.gestionar'] },
   { titulo: 'Catálogo e inventario', permisos: ['catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'stock.valorizar'] },
   { titulo: 'Ventas y cobranzas', permisos: ['ventas.ver', 'ventas.emitir', 'ventas.anular', 'cobros.registrar', 'cobros.anular'] },

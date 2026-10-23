@@ -23,14 +23,14 @@ export const ordenes = new Hono<AppEnv>();
 ordenes.use('*', requireAny('ordenes.ver', 'ordenes.asignadas'));
 
 // Una orden es "mía" si soy el mecánico responsable, figuro entre los participantes o tengo alguna tarea a mi cargo.
-const ASIGNADA_A_MI = `(o.mecanico_id IN (SELECT m.id FROM mecanicos m WHERE m.taller_id = o.taller_id AND m.usuario_id = ?)
+export const ASIGNADA_A_MI = `(o.mecanico_id IN (SELECT m.id FROM mecanicos m WHERE m.taller_id = o.taller_id AND m.usuario_id = ?)
     OR EXISTS (SELECT 1 FROM orden_participantes pa WHERE pa.taller_id = o.taller_id AND pa.orden_id = o.id AND pa.usuario_id = ?)
     OR EXISTS (SELECT 1 FROM orden_tareas ta WHERE ta.taller_id = o.taller_id AND ta.orden_id = o.id AND ta.responsable_id = ?))`;
 /** Condición SQL de acceso a las OT según el alcance de la sesión (todas o solo las asignadas). */
 function alcance(s: Sesion): { cond: string[]; params: unknown[] } {
   return tiene(s, 'ordenes.ver') ? { cond: [], params: [] } : { cond: [ASIGNADA_A_MI], params: [s.usuarioId, s.usuarioId, s.usuarioId] };
 }
-async function esAsignadaAMi(db: D1Database, s: Sesion, ordenId: string): Promise<boolean> {
+export async function esAsignadaAMi(db: D1Database, s: Sesion, ordenId: string): Promise<boolean> {
   return !!(await first(db, `SELECT 1 FROM ordenes o WHERE o.taller_id = ? AND o.id = ? AND ${ASIGNADA_A_MI}`, s.tallerId, ordenId, s.usuarioId, s.usuarioId, s.usuarioId));
 }
 /** Asignar el responsable, los participantes y las tareas: lo hace quien administra las órdenes o tiene el permiso específico (sin tocar importes). */

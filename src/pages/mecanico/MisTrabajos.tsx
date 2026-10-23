@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth';
 import { duracion, fecha, hoyISO, km, numero } from '@/lib/format';
 import { Aviso, Boton, Cargando, Chip, Encabezado, ErrorCaja, Insignia, Modal, Tarjeta, Textarea, useToast, Vacio } from '@/components/ui';
 import { EstadoOTBadge } from '@/components/estados';
+import { FotosOrden } from '@/components/Fotos';
 import { BarraCronometro, Cronometro, EquipoOrden, NotasTecnicas, Tareas, useRefrescarOrden } from '@/components/TrabajoMecanico';
 import { ESTADO_OT_LABEL, type EstadoOT } from '@shared/dominio';
 import { formatearMinutos } from '@shared/tempario';
@@ -171,6 +172,11 @@ export function MiTrabajo() {
           <Tarjeta titulo="Tareas" subtitulo="Empezá una tarea para que corra el cronómetro; terminala cuando esté lista">
             <Tareas orden={o} puedeEditar={puedeEditar} grande />
           </Tarjeta>
+          {puede('fotos.ver') && (
+            <Tarjeta titulo="Fotografías" subtitulo="Sacá la foto, confirmá y queda guardada para todo el taller">
+              <FotosOrden ordenId={o.id} vehiculoId={o.vehiculo_id} estadoOrden={o.estado} asignadaAMi={!!o.asignada_a_mi} />
+            </Tarjeta>
+          )}
           <Tarjeta titulo="Diagnóstico, resultado y observaciones"><NotasTecnicas orden={o} puedeEditar={puedeEditar} grande /></Tarjeta>
         </div>
         <div className="space-y-4 lg:col-span-2">

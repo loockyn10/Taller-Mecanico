@@ -9,6 +9,7 @@ import { Boton, Buscador, Cargando, Dato, Encabezado, ErrorCaja, Modal, Tabla, T
 import { HistorialTecnico } from '@/components/HistorialTecnico';
 import { AccionesMantenimiento, EstadoMantenimiento, FormPlanMantenimiento, proximoTexto, type MantenimientoApi } from '@/components/Mantenimientos';
 import { FormVehiculo } from '@/components/selectores';
+import { GaleriaFotos, usePermisosFotos } from '@/components/Fotos';
 
 export function Vehiculos() {
   const nav = useNavigate();
@@ -74,6 +75,7 @@ export function VehiculoDetalle() {
   const { puede } = useAuth();
   const nav = useNavigate();
   const [editar, setEditar] = useState(false);
+  const permisosFotos = usePermisosFotos();
   const { data: v, isLoading, error, refetch } = useQuery({ queryKey: ['vehiculo', id], queryFn: () => api.get(`/vehiculos/${id}`) });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
@@ -91,7 +93,14 @@ export function VehiculoDetalle() {
         }
       />
       <div className="grid gap-5 lg:grid-cols-3">
-        <HistorialTecnico vehiculoId={v.id} className="lg:col-span-2" />
+        <div className="space-y-5 lg:col-span-2">
+          {permisosFotos.ver && (
+            <Tarjeta titulo="Fotografías" subtitulo="Del vehículo y de sus órdenes de trabajo (cada foto se guarda una sola vez)">
+              <GaleriaFotos vehiculoId={v.id} puedeSubir={permisosFotos.subir} puedeEliminar={permisosFotos.eliminar} filtros />
+            </Tarjeta>
+          )}
+          <HistorialTecnico vehiculoId={v.id} />
+        </div>
         <div className="space-y-5">
           <Tarjeta titulo="Ficha">
             <dl className="grid grid-cols-2 gap-4">

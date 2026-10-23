@@ -121,7 +121,9 @@ export function requireRW(lectura: Permiso, escritura: Permiso): MiddlewareHandl
 export const requireJson: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
     const ct = c.req.header('content-type') ?? '';
-    if (!ct.includes('application/json')) throw new ApiError(415, 'tipo_contenido', 'Las solicitudes deben enviarse como application/json');
+    // Única excepción: la subida de fotos (multipart). Esa ruta exige además un encabezado propio y la sesión SameSite=Lax.
+    const subidaDeFoto = c.req.method === 'POST' && c.req.path === '/api/fotos' && ct.startsWith('multipart/form-data') && c.req.header('x-fierro-subida') === '1';
+    if (!ct.includes('application/json') && !subidaDeFoto) throw new ApiError(415, 'tipo_contenido', 'Las solicitudes deben enviarse como application/json');
   }
   await next();
 };

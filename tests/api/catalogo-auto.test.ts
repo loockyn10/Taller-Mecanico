@@ -35,6 +35,10 @@ describe('catálogo automotor', () => {
     expect(det.body.versiones.map((v: any) => v.id)).toEqual(['ve_t_1', 've_t_2']);
     expect(det.body.fichas).toBe(0);
     expect((await api.get('/api/catalogo-auto/modelos/no-existe')).status).toBe(404);
+    // El caché de una hora es sólo del catálogo: los datos del taller nunca se guardan en el navegador
+    const cab = async (ruta: string) => (await fetch(`http://127.0.0.1:8799${ruta}`, { headers: { cookie: api.cookie, 'cf-connecting-ip': api.ip } })).headers.get('cache-control');
+    expect(await cab('/api/catalogo-auto/marcas')).toContain('max-age=3600');
+    for (const ruta of ['/api/clientes', '/api/marcas', '/api/vehiculos', '/api/fotos/estado']) expect(await cab(ruta), ruta).toBe('no-store');
     expect((await api.get('/api/catalogo-auto/info')).body.licencia).toContain('CC BY 4.0');
     expect((await api.post('/api/catalogo-auto/marcas', { nombre: 'X' })).status).toBe(404);
     const anonimo = await (await fetch(`http://127.0.0.1:8799/api/catalogo-auto/marcas`)).status;

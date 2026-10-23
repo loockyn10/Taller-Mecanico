@@ -885,3 +885,41 @@ Las 10 familias pedidas aparecen; ninguna se agregó a mano. `Gol` (35) es resid
 - `wrangler d1 migrations apply DB --remote` (0014) y luego `npm run catalogo -- cargar --remoto` (7.446 filas; 22.112 filas escritas contando índices): 211 marcas, 1.548 modelos, 5.674 versiones; los 37 vehículos existentes siguen intactos.
 - Código: commit directo a `main` (Workers Builds). Resultado de la verificación online más abajo.
 - **Verificación online:** commit `d2d35b7` en `main`; en https://taller-mecanico.estrubia455.workers.dev la SPA publicada sirve el bundle `index-BAymvuGP.js`, idéntico al build local y con el código del catálogo; `/api/salud` responde 200 y `/api/catalogo-auto/*` existe y exige sesión (401 sin ella). El contenido del catálogo en D1 remota se comprobó con `wrangler d1 execute` (211/1.548/5.674). **No se inició sesión en producción** (no se usan credenciales reales): el alta autenticada con el catálogo se probó en la instancia local equivalente, no mirándola en la URL pública.
+
+# Sprint 16 — Fotografías de vehículos y órdenes de trabajo
+
+Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activación de R2) en `docs/FOTOGRAFIAS.md`.
+
+## 95. Estado de R2
+- **R2 no está habilitado en la cuenta de Cloudflare** (`wrangler r2 bucket list` → `10042 Please enable R2 through the Cloudflare Dashboard`). Habilitarlo es una acción del titular en el panel y puede requerir medio de pago: **no se hizo ni se aceptó ningún costo**. Se detuvo sólo ese paso.
+- Por eso **no existe el bucket `fierro-fotos`** y el binding `FIERRO_FOTOS` está **comentado en `wrangler.jsonc`** (un binding a un bucket inexistente rompería el despliegue de Workers Builds). El código está desplegado y **degrada sin romper nada**: sin binding, `/api/fotos/estado` → `habilitado: false`, la app muestra un aviso en vez de los botones y subir/bajar da `503 fotos_no_habilitadas` (comprobado levantando el Worker sin binding). Los listados y el resto de Fierro funcionan igual.
+- Pasos para activarlo (4, en `docs/FOTOGRAFIAS.md`): habilitar R2 en el panel → `npx wrangler r2 bucket create fierro-fotos` → descomentar el binding → push a `main`. Que Workers Builds conserve el binding se confirma después de ese push (el binding vive en el archivo de configuración, no en el panel); **no se pudo comprobar en producción**.
+- En local y en las pruebas el bucket se **simula en disco** (Miniflare): `scripts/lib.mjs › configLocal()` genera `wrangler.local.generado.jsonc` (ignorado por git) con el binding y `wrangler dev` lo usa.
+
+## 96. Fotografías implementadas
+- **Vehículo:** galería en alta (selección previa; se suben tras crear el vehículo, con clave de reintento; si falla alguna el vehículo queda creado y se puede reintentar sin duplicar), edición y ficha, con filtros por origen/etapa. **OT:** pestaña *Fotografías* con Recepción/Reparación/Entrega; también en *Mis trabajos*. Cada foto guarda taller, vehículo, OT, etapa, usuario, fecha/hora y descripción; la foto de una OT se ve en la ficha del vehículo sin duplicar el archivo.
+- **Cámara:** *Sacar foto* (`capture="environment"`, cámara trasera) y *Elegir de galería* (múltiple), botones de 56 px; flujo OT → Sacar foto → Guardar. Visor con anterior/siguiente, descripción editable y eliminación con confirmación. Progreso real de subida (XHR) y errores comprensibles con *Reintentar*.
+- **Optimización:** en el navegador ≤ 2000 px, JPEG con calidad decreciente hasta ~800 KB, miniatura de 480 px, sin EXIF/GPS (el redibujo en canvas lo descarta). En el servidor se valida el contenido real (JPEG/WebP por firma y estructura, ≤ 3,5 MB, ≤ 4096 px) y **se reescribe el archivo quitando EXIF/XMP/ICC**. Medido en el navegador integrado: PNG sintético de 2,2 MB (3000×2000) → 298 KB (2000×1333); JPEG 1,1 MB (4000×3000) → 341 KB (2000×1500). Con fotos reales de celular el peso depende del contenido: no se midió con cámara real.
+- Listados sólo con miniaturas (`loading=lazy`); la foto completa se baja al ampliar; caché privada inmutable y `ETag`/304.
+
+## 97. Consumo y límites
+- Tabla `taller_almacenamiento` (límite por taller, **2 GB por defecto, provisorio**, sólo lo ajusta la plataforma: `npm run fotos -- limite <taller> <MB>` o `PATCH /api/platform/talleres/:id/almacenamiento`). Usado = originales + miniaturas (incluye las que se están guardando). Se valida antes de guardar y otra vez dentro de la transacción que reserva el cupo. Se muestra en *Administración → Licencia*: "Fotografías: X MB de 2 GB utilizados" con barra; `npm run fotos -- uso` lista todos los talleres. No toca las licencias por usuario.
+
+## 98. Permisos
+- Nuevos: `fotos.ver`, `fotos.subir`, `fotos.eliminar` (los dos últimos requieren ver). Por defecto: propietario y administrador todos; recepción, mecánico y empleado (heredado) ver y subir; depósito y caja ninguno. Alcance por OT/vehículo igual que el resto: el mecánico sólo ve y sube en sus órdenes asignadas (y ve las del vehículo y las de sus órdenes). Todo se verifica en el backend; aislamiento entre talleres probado (404 con ids ajenos o alterados). Eliminar queda en `auditoria` (usuario y fecha) y no deja objetos huérfanos (reserva `pendiente` → R2 → `lista`; `eliminada` → R2 → borrado; el Cron de 5 min termina lo que quede a medias).
+
+## 99. Migración 0015 (aditiva)
+- Tablas `fotos` (CHECK: etapa obligatoria con OT y prohibida sin OT, sólo `image/jpeg|webp`, estados `pendiente|lista|eliminada`; FK compuestas a vehículo y OT del mismo taller; `UNIQUE(taller_id, idem_key)`) y `taller_almacenamiento`. No toca datos existentes (ensayo sobre el respaldo: 103 tablas / 11.469 filas idénticas, integridad OK). Prueba propia en `tests/api/migraciones.test.ts`.
+
+## 100. Pruebas realizadas
+- `npm run build` y `npm test`: **116 unitarias + 395 de integración, todas OK** (nuevas: `tests/api/fotos.test.ts` —10 pruebas: subida, EXIF quitado, reintento sin duplicar, contenido inválido/gigante, etapas de OT, aislamiento entre talleres, permisos del mecánico, eliminación, cupo, exportación/auditoría—; `tests/unit/fotos-export.test.ts`; migración 0015; cabeceras de caché).
+- En una instancia local aislada con R2 simulado: alta de un vehículo con 2 fotos elegidas (comprimidas y subidas al guardar), OT con foto de recepción desde una vista de 375 px (botones, confirmación, "Fotografía guardada", visor), ficha del vehículo con la foto de la OT marcada "OT #6 · Recepción", sin desbordes horizontales.
+- **Hallazgo corregido durante la prueba:** el filtro de caché del catálogo (Sprint 15) estaba montado en `/` y, al dejar de pisarse con `no-store`, habría dejado **toda la API GET cacheada una hora en el navegador**; ahora es sólo para `/api/catalogo-auto/*` y hay una prueba que lo exige. (En producción nunca ocurrió: el filtro global lo sobrescribía.)
+- **No comprobado:** cámara física de un celular real (se inyectaron archivos en el `<input>`), Safari/iOS, HEIC (los navegadores que no lo decodifican muestran un mensaje), R2 real.
+
+## 101. Respaldo de las imágenes
+- **Un respaldo de D1 no incluye las imágenes y los respaldos actuales NO las protegen** (sólo conservan filas y sha256). Se agregó `npm run fotos -- exportar | verificar | restaurar | auditar | uso | limite | limpiar` (`scripts/fotos.mjs`, `scripts/fotos-lib.mjs`) y endpoints de plataforma (`/api/platform/fotos/manifiesto`, `/:id/archivo`, `/auditoria`, `/limpiar`, `/almacenamiento`). La exportación genera `manifiesto.json` con la relación con D1 (foto, taller, vehículo, OT, etapa) y el sha256 de cada archivo y miniatura, comprobado contra D1 al bajar. Las carpetas van en `respaldos/` (ignorado por git).
+- **Probado en local:** exportar → verificar → borrar el R2 simulado → `auditar` (6 faltantes) → `restaurar` → `auditar` (0 diferencias) → re-exportar con hashes idénticos. **Pendiente:** probarlo contra R2 real y automatizarlo en GitHub Actions como el respaldo cifrado de D1.
+
+## 102. Despliegue (2026-10-23)
+- Respaldo previo de la D1 remota `respaldos/d1-antes-sprint16-20261023-1810.sql` (fuera de git; 103 tablas, 11.469 filas, integridad OK, SHA-256 `635dbe40…aba`). Bookmark de Time Travel: `0000011e-00000000-0000510d-213f46991d5f391b0f9fba688f859742`. Ensayo de la migración sobre el respaldo y `wrangler d1 migrations apply DB --remote` (0015) aplicados antes de publicar el código.

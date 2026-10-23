@@ -7,10 +7,11 @@ import { all, first } from '../lib/db';
 
 export const catalogoAuto = new Hono<AppEnv>();
 
-// El catálogo cambia sólo cuando se recarga: el navegador puede reutilizar la respuesta un rato.
+// El catálogo cambia sólo cuando se recarga: el navegador puede reutilizar la respuesta un rato. SOLO sus rutas: este módulo se monta en '/', así que un
+// use('*') sin filtrar alcanzaría a toda la API (y los datos de los talleres quedarían en la caché del navegador).
 catalogoAuto.use('*', async (c, next) => {
   await next();
-  if (c.req.method === 'GET' && c.res.status === 200) c.header('Cache-Control', 'private, max-age=3600');
+  if (c.req.method === 'GET' && c.res.status === 200 && c.req.path.startsWith('/api/catalogo-auto/')) c.header('Cache-Control', 'private, max-age=3600');
 });
 
 const anios = (t: string) => (t ? t.split(',').map(Number) : []);

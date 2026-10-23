@@ -5,6 +5,7 @@ import { ArrowRight, ClipboardCheck, MessageCircle, Pencil, Printer, Receipt, Wa
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { duracion, fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
+import { FotosOrden } from '@/components/Fotos';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, ResumenTotales, type ItemUI, type ParamsUI } from '@/components/EditorItems';
@@ -166,7 +167,7 @@ export function OrdenDetalle() {
   const { confirmar, dialogo } = useConfirmar();
   const { data: o, isLoading, error, refetch } = useQuery({ queryKey: ['orden', id], queryFn: () => api.get(`/ordenes/${id}`) });
   const { data: mecanicos = [] } = useMecanicos();
-  const [tab, setTab] = useState<'trabajo' | 'tareas' | 'checklist' | 'historial' | 'cobro'>('trabajo');
+  const [tab, setTab] = useState<'trabajo' | 'tareas' | 'fotos' | 'checklist' | 'historial' | 'cobro'>('trabajo');
   const [editando, setEditando] = useState(false);
   const [estadoModal, setEstadoModal] = useState(false);
   const [cobro, setCobro] = useState(false);
@@ -289,6 +290,7 @@ export function OrdenDetalle() {
             items={[
               { clave: 'trabajo', titulo: 'Trabajo' },
               { clave: 'tareas', titulo: 'Equipo, tareas y tiempos', contador: o.tareas.length || undefined },
+              ...(puede('fotos.ver') ? [{ clave: 'fotos' as const, titulo: 'Fotografías' }] : []),
               { clave: 'checklist', titulo: 'Check-list de ingreso' },
               ...(puede('ventas.ver') ? [{ clave: 'cobro' as const, titulo: 'Comprobante y cobro' }] : []),
               { clave: 'historial', titulo: 'Historial', contador: o.eventos.length },
@@ -342,6 +344,11 @@ export function OrdenDetalle() {
               <Tarjeta titulo="Diagnóstico, resultado y observaciones técnicas"><NotasTecnicas orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
               <Tarjeta titulo="Tiempo dedicado a la reparación" subtitulo="Aparte de las horas de asistencia al taller"><Cronometro orden={o} puedeEditar={puedeTrabajar} /></Tarjeta>
             </div>
+          )}
+          {tab === 'fotos' && (
+            <Tarjeta titulo="Fotografías" subtitulo="Recepción, reparación y entrega: quedan disponibles para el resto del taller y en la ficha del vehículo">
+              <FotosOrden ordenId={o.id} vehiculoId={o.vehiculo_id} estadoOrden={o.estado} asignadaAMi={!!o.asignada_a_mi} />
+            </Tarjeta>
           )}
           {tab === 'checklist' && <Tarjeta titulo="Check-list de ingreso"><Checklist orden={o} /></Tarjeta>}
           {tab === 'historial' && (

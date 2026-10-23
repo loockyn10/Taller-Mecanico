@@ -485,6 +485,33 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     db.close();
   });
 
+  it('0015 no toca ningún dato y la base protege las fotografías (etapa de OT, cupo y estados)', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    for (const m of fs.readdirSync(path.join(RAIZ, 'migrations')).sort().filter((x) => x < '0015')) db.exec(leer('migrations', m));
+    db.exec(leer('tests', 'fixtures', 'datos-previos-0002.sql'));
+    db.exec("INSERT INTO vehiculos (id, taller_id, cliente_id, patente, km_actual) VALUES ('v1', 't1', 'c1', 'AB123CD', 1000)");
+    const antes = db.prepare('SELECT * FROM vehiculos').all().map((r: any) => ({ ...r }));
+    db.exec(leer('migrations', '0015_fotografias.sql'));
+    expect(db.prepare('SELECT * FROM vehiculos').all().map((r: any) => ({ ...r }))).toEqual(antes);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM fotos').get() as any).n).toBe(0);
+    const foto = (extra: string) => `INSERT INTO fotos (id, taller_id, vehiculo_id, idem_key, mime, ancho, alto, bytes, miniatura_bytes, sha256, miniatura_sha256${extra.split('|')[0]}) VALUES ('f1', 't1', 'v1', 'k1', 'image/jpeg', 800, 600, 1000, 100, 'a', 'b'${extra.split('|')[1] ?? ''})`;
+    db.exec(foto('|'));
+    expect((db.prepare("SELECT estado FROM fotos WHERE id = 'f1'").get() as any).estado).toBe('pendiente');
+    // Una foto de otro taller no puede colgarse de un vehículo ajeno, ni repetirse la clave de reintento dentro del taller
+    expect(() => db.exec("INSERT INTO fotos (id, taller_id, vehiculo_id, idem_key, mime, ancho, alto, bytes, miniatura_bytes, sha256, miniatura_sha256) VALUES ('f2', 't2', 'v1', 'kx', 'image/jpeg', 1, 1, 1, 1, 'a', 'b')")).toThrow(/FOREIGN/);
+    expect(() => db.exec("INSERT INTO fotos (id, taller_id, vehiculo_id, idem_key, mime, ancho, alto, bytes, miniatura_bytes, sha256, miniatura_sha256) VALUES ('f3', 't1', 'v1', 'k1', 'image/jpeg', 1, 1, 1, 1, 'a', 'b')")).toThrow(/UNIQUE/);
+    // Etapa: obligatoria con OT y prohibida sin OT; sólo formatos admitidos; sólo estados válidos
+    expect(() => db.exec("INSERT INTO fotos (id, taller_id, vehiculo_id, etapa, idem_key, mime, ancho, alto, bytes, miniatura_bytes, sha256, miniatura_sha256) VALUES ('f4', 't1', 'v1', 'entrega', 'k4', 'image/jpeg', 1, 1, 1, 1, 'a', 'b')")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO fotos (id, taller_id, vehiculo_id, idem_key, mime, ancho, alto, bytes, miniatura_bytes, sha256, miniatura_sha256) VALUES ('f5', 't1', 'v1', 'k5', 'image/svg+xml', 1, 1, 1, 1, 'a', 'b')")).toThrow(/CHECK/);
+    expect(() => db.exec("UPDATE fotos SET estado = 'rara' WHERE id = 'f1'")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO taller_almacenamiento (taller_id, fotos_limite_bytes) VALUES ('t1', 0)")).toThrow(/CHECK/);
+    db.exec("INSERT INTO taller_almacenamiento (taller_id) VALUES ('t1')");
+    expect((db.prepare("SELECT fotos_limite_bytes AS l FROM taller_almacenamiento WHERE taller_id = 't1'").get() as any).l).toBe(2 * 1024 ** 3);
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    db.close();
+  });
+
   it('0014 no toca vehículos, marcas ni modelos de los talleres y deja las tablas del catálogo vacías y listas', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');

@@ -1,5 +1,6 @@
 // Utilidades compartidas por los scripts de desarrollo y pruebas.
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
@@ -17,7 +18,37 @@ export function carpetaEstado(nombre = 'dev') {
   return path.join(os.tmpdir(), `fierro-${nombre}-${process.pid}`);
 }
 
+/** Quita comentarios // y /* *\/ de un JSONC respetando las cadenas, y las comas finales. */
+function jsoncAJson(t) {
+  let out = '';
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (t[j] !== '"') j += t[j] === '\\' ? 2 : 1;
+      out += t.slice(i, j + 1);
+      i = j;
+    } else if (c === '/' && t[i + 1] === '/') while (i < t.length && t[i] !== '\n') i++;
+    else if (c === '/' && t[i + 1] === '*') i = t.indexOf('*/', i + 2) + 1;
+    else out += c;
+  }
+  return out.replace(/,(\s*[}\]])/g, '$1');
+}
+
+/**
+ * Configuración de Wrangler SÓLO para correr el Worker en local (dev y pruebas): la misma de wrangler.jsonc más el bucket R2 de fotos simulado en
+ * disco (Miniflare). El bucket real se declara en wrangler.jsonc recién cuando existe en la cuenta; mientras tanto la producción no lo referencia.
+ */
+export function configLocal() {
+  const cfg = JSON.parse(jsoncAJson(fs.readFileSync(path.join(ROOT, 'wrangler.jsonc'), 'utf8')));
+  if (!(cfg.r2_buckets ?? []).some((b) => b.binding === 'FIERRO_FOTOS')) cfg.r2_buckets = [...(cfg.r2_buckets ?? []), { binding: 'FIERRO_FOTOS', bucket_name: 'fierro-fotos' }];
+  const destino = path.join(ROOT, 'wrangler.local.generado.jsonc');
+  fs.writeFileSync(destino, JSON.stringify(cfg, null, 2));
+  return destino;
+}
+
 export function wrangler(args, opts = {}) {
+  if (args[0] === 'dev' && !args.includes('-c') && !args.includes('--config')) args = [...args, '-c', configLocal()];
   return spawn(process.execPath, [WRANGLER, ...args], { cwd: ROOT, stdio: opts.stdio ?? 'inherit', env: { ...process.env, ...opts.env } });
 }
 
