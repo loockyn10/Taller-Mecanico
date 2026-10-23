@@ -923,3 +923,4 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
 
 ## 102. Despliegue (2026-10-23)
 - Respaldo previo de la D1 remota `respaldos/d1-antes-sprint16-20261023-1810.sql` (fuera de git; 103 tablas, 11.469 filas, integridad OK, SHA-256 `635dbe40…aba`). Bookmark de Time Travel: `0000011e-00000000-0000510d-213f46991d5f391b0f9fba688f859742`. Ensayo de la migración sobre el respaldo y `wrangler d1 migrations apply DB --remote` (0015) aplicados antes de publicar el código.
+- **Verificación online:** commit `b27e3f8` en `main`; en https://taller-mecanico.estrubia455.workers.dev la SPA publicada sirve el bundle `index-CRUbOq1k.js` (idéntico al build local y con el código de fotografías), `/api/salud` responde 200 y `/api/fotos/estado` y `/api/platform/almacenamiento` existen y exigen sesión/token. **Fotografías deshabilitadas en producción hasta habilitar R2** (§95). No se inició sesión en producción.
