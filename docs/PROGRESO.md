@@ -835,4 +835,6 @@ Instancia local aislada (puertos 8790/5180, base temporal con el generador de de
 - Hallazgo del arnés: la primera versión de `TablaApilable` aplicaba la clase de apilado desde otro efecto y a veces medía la tabla ya apilada; ahora la clase la maneja React en el mismo render (probado con 12 navegaciones seguidas).
 
 ## 89. Despliegue
-(se completa tras publicar)
+- Sólo código de interfaz: no hubo migraciones, respaldo ni cambios en la D1 remota ni en el Worker de la API.
+- **Publicación:** commit `4ca4992` en `main` (push directo; Workers Builds). Comprobado en https://taller-mecanico.estrubia455.workers.dev que la SPA publicada sirve exactamente el bundle del build local (`index-TsVhzpOR.js` y `index-DHxDee46.css`, que contiene los tokens nuevos) con `theme-color` #13252d, y que `/api/salud` responde `{"ok":true}`. El cambio apareció en pocos minutos.
+- **No verificado online:** no se inició sesión en producción (se usó sólo la instancia local); el aspecto autenticado en la URL pública se comprobó por equivalencia de bundle, no mirándolo.
