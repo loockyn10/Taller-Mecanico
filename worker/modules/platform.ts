@@ -11,7 +11,7 @@ import { ejecutarMantenimiento, informeSalud } from '../lib/observabilidad';
 import { mantenimientoContable } from '../lib/contab/sync';
 import { huellaCorta, registrarEvento } from '../lib/seguridad';
 import { sentenciasAltaTaller } from './provision';
-import { claveFoto, claveMiniatura, limpiarFotos, usoFotos } from '../lib/fotos';
+import { archivoParaExportar, claveFoto, claveMiniatura, limpiarFotos, manifiestoFotos, usoFotos } from '../lib/fotos';
 
 export const platform = new Hono<AppEnv>();
 
@@ -162,28 +162,9 @@ platform.patch('/talleres/:id/almacenamiento', async (c) => {
 });
 
 /** Manifiesto de las fotos "lista" (todas o de un taller), paginado por id. Es lo que se compara con lo exportado de R2. */
-platform.get('/fotos/manifiesto', async (c) => {
-  const taller = c.req.query('taller') ?? null;
-  const despues = c.req.query('despues') ?? '';
-  const filas = await all<{ id: string; taller_id: string; vehiculo_id: string; orden_id: string | null; etapa: string | null; mime: string; bytes: number; miniatura_bytes: number; sha256: string; miniatura_sha256: string; created_at: string }>(
-    c.env.DB,
-    `SELECT id, taller_id, vehiculo_id, orden_id, etapa, mime, bytes, miniatura_bytes, sha256, miniatura_sha256, created_at FROM fotos
-      WHERE estado = 'lista' AND id > ? ${taller ? 'AND taller_id = ?' : ''} ORDER BY id LIMIT 500`,
-    despues,
-    ...(taller ? [taller] : []),
-  );
-  return c.json({ fotos: filas.map((f) => ({ ...f, clave: claveFoto(f.taller_id, f.id), clave_miniatura: claveMiniatura(f.taller_id, f.id) })), siguiente: filas.length === 500 ? filas[filas.length - 1].id : null });
-});
+platform.get('/fotos/manifiesto', async (c) => c.json(await manifiestoFotos(c.env.DB, c.req.query('taller') ?? null, c.req.query('despues') ?? '')));
 
-platform.get('/fotos/:id/archivo', async (c) => {
-  if (!c.env.FIERRO_FOTOS) throw new ApiError(503, 'fotos_no_habilitadas', 'El almacenamiento de fotografías no está habilitado');
-  const f = await first<{ id: string; taller_id: string; mime: string }>(c.env.DB, "SELECT id, taller_id, mime FROM fotos WHERE id = ? AND estado = 'lista'", c.req.param('id'));
-  if (!f) throw notFound('Fotografía');
-  const mini = c.req.query('variante') === 'miniatura';
-  const o = await c.env.FIERRO_FOTOS.get(mini ? claveMiniatura(f.taller_id, f.id) : claveFoto(f.taller_id, f.id));
-  if (!o) throw notFound('Objeto en R2');
-  return new Response(o.body, { headers: { 'Content-Type': f.mime, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
-});
+platform.get('/fotos/:id/archivo', (c) => archivoParaExportar(c.env.DB, c.env.FIERRO_FOTOS, c.req.param('id'), c.req.query('variante') === 'miniatura'));
 
 /** Compara R2 con D1: objetos sin fila (huérfanos) y filas "lista" sin objeto. Sólo lectura. */
 platform.get('/fotos/auditoria', async (c) => {

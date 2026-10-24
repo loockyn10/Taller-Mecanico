@@ -1,6 +1,6 @@
 # Progreso del desarrollo · Fierro v0.1.0
 
-Última actualización: 2026-10-23 (ver las secciones 84 a 89: Sprint 14, evolución visual y responsive integral). Documento para retomar el trabajo en nuevas sesiones.
+Última actualización: 2026-10-24 (Sprint 18: checklist de recepción y entrega, secciones 109 a 117; **pendiente prioritario: hoja de OT del cliente piloto, §115**). Documento para retomar el trabajo en nuevas sesiones.
 
 ## 1. Arquitectura implementada
 - **Un único Worker** (`worker/index.ts`, Hono) sirve la API en `/api/*` y la SPA compilada (assets estáticos). En desarrollo, Vite sirve la SPA y redirige `/api` a `wrangler dev`.
@@ -32,7 +32,8 @@
 | Presupuestos (estados, vencimiento, edición, conversión única a OT) | ✅ | ✅ | ✅ concurrencia |
 | Órdenes de trabajo (estados, tablero Kanban, edición con control de versión) | ✅ | ✅ | ✅ |
 | Descuento y reposición de stock por OT (una sola vez, idempotente) | ✅ | ✅ | ✅ concurrencia |
-| Check-list de ingreso | ✅ | ✅ | ✅ |
+| Check-list de ingreso (simple, anterior) | ✅ | ✅ | ✅ |
+| Recepción y entrega con daños, fotografías y firma del cliente (Sprint 18, `docs/CHECKLIST.md`) | ✅ | ✅ tablet/celular | ✅ |
 | Historial de reparaciones y recordatorios de service (km/meses) | ✅ | ✅ | ✅ |
 | Agenda de turnos (vinculada a presupuesto y OT) | ✅ | ✅ semanal | ✅ |
 | Artículos, categorías, stock inicial | ✅ | ✅ | ✅ |
@@ -961,3 +962,56 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
 - Sin migraciones ni cambios de datos; commit directo a `main` (Workers Builds). Resultado de la verificación online al final de esta sección.
 - Pendiente a propósito: **carga masiva de especificaciones** (cada ficha exige fuente y fecha), documentos reales con licencia verificada, y vínculo versión↔ficha por motorización cuando existan fichas.
 - **Verificación online (2026-10-24):** commit `ef36a0a` en `main`; en https://taller-mecanico.estrubia455.workers.dev la SPA publicada sirve `index-DiQDXGQr.js` (idéntico al build local, con la ruta `/catalogo-automotor` y el módulo `CatalogoAutomotor-CgwCcjyi.js`), `/api/salud` responde 200 y `/api/catalogo-auto/buscar` y `/modelos/:id/fichas` existen y exigen sesión (401). **No se inició sesión en producción** (no se usan credenciales reales): la pantalla autenticada se probó en la instancia local equivalente con el catálogo real, no mirándola en la URL pública.
+
+# Sprint 18 — Checklist de recepción y entrega de vehículos + respaldo de fotografías
+
+> **PENDIENTE PRIORITARIO ANTES DE LA ENTREGA COMERCIAL → §115: hoja A4 de la orden de trabajo con renglones para el mecánico y copia para administración (requerimiento confirmado del cliente piloto; el formato todavía NO está definido y NO se implementó).**
+
+## 109. Qué se hizo
+- **Etapa 1 · Respaldo de fotografías** (preparado, sin ejecución real: ver §110). `npm run fotos -- respaldo` (copia incremental cifrada y verificada de punta a punta) y `respaldo-restaurar` (cadena completa + incrementales → carpeta verificada → `restaurar` → `auditar`); `.github/workflows/respaldo-fotos.yml`; endpoint de **sólo lectura** con credencial propia `FOTOS_BACKUP_TOKEN` (`/api/plataforma/fotos-respaldo/manifiesto|:id/archivo`, `worker/modules/respaldo-fotos.ts`) para no cargar el token de plataforma en GitHub. Reutiliza el manifiesto de D1, `verificarCarpeta` y el cifrado híbrido del respaldo de D1; `manifiestoFotos`/`archivoParaExportar` ahora se comparten en `worker/lib/fotos.ts` con la API de plataforma.
+- **Etapas 2 a 5 · Checklist de recepción y entrega** (`docs/CHECKLIST.md`): ingreso (fecha y hora, responsable, vehículo, cliente, km, combustible, llaves, observaciones), 32 puntos de control con *Correcto / Con observaciones / No revisado / No corresponde* y observación por punto (ninguno obligatorio), **esquema del vehículo** para marcar daños (frente, trasera, laterales, techo, interior) con descripción y fotografías, **firma manuscrita en pantalla táctil** (trazos vectoriales; nombre, fecha y hora del servidor, responsable, versión del checklist y huella del contenido aceptado; «no presente» / «no desea firmar»), inmutabilidad (borrador → confirmado → correcciones como **revisiones**) y entrega enlazada a la recepción sin pisarla, con **comparación ingreso/salida**.
+- **Etapa 6 · Fotografías:** reutiliza el Sprint 16 sin cambiar su almacenamiento: las etapas *recepción / reparación / entrega* ya existían; el checklist abre la cámara (`capture="environment"`) desde la sección de fotos y desde cada daño, o elige fotos ya tomadas de la OT (un solo archivo, una sola fila en `fotos`). Cambios mínimos en `Fotos.tsx` (`ConfirmarSubida` exportado con `onGuardadas`, ids de lo subido). Una foto incluida en un registro confirmado **no se puede eliminar** (API 409 + disparador).
+- **Etapa 7 · Móvil/tablet:** pantalla completa con encabezado fijo (progreso «12 de 32 puntos», estado del guardado, atajos a cada sección), secciones plegables, botones de 44 a 56 px, borrador guardado solo en el servidor (control de versión), confirmación final con resumen y avisos blandos (sin km, sin combustible…), firma táctil a lo ancho. Sistema visual del Sprint 14 (tokens, `Modal`, `Pestanas`, `Insignia`, `Aviso`). **Es opcional:** nada bloquea la OT. Sin scroll horizontal (verificado a 375 y 768 px).
+- **Etapa 8 · Historial:** en la OT (pestaña *Recepción y entrega*: tarjetas, comparación, historial con motivo y «qué cambió») y en la ficha del vehículo (*Recepciones y entregas* de todas sus OT, con enlace a cada una; `?tab=checklist`). El check-list simple anterior se conserva.
+- **Etapa 9 · Permisos y privacidad:** 5 permisos nuevos (§113), validados en el servidor; ninguna respuesta incluye precios ni costos (prueba automática sobre las claves de las respuestas); `taller_id` siempre de la sesión.
+- **Etapa 10 · Hoja de OT:** sólo se registra el requerimiento (§115). No se tocó la impresión de la OT ni se mezcló con el checklist.
+- Sin cambios en ARCA, licencias, contabilidad ni en el almacenamiento de fotografías.
+
+## 110. Estado real de los respaldos (verificado el 2026-10-24)
+- **D1 · Time Travel:** activo (único respaldo automático real; misma cuenta de Cloudflare).
+- **D1 · respaldo programado cifrado en GitHub Actions: NO operativo.** El workflow `Respaldo D1` se ejecutó solo dos veces (2026-10-23 11:34 UTC y 2026-10-24 10:54 UTC, según la API pública de GitHub) y **las dos fallaron en «Comprobar configuración»**: faltan secretos o variables que sólo puede cargar el titular (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `FIERRO_RESPALDO_CLAVE_PUBLICA`). No existe ningún artefacto de respaldo en GitHub.
+- **Fotografías: sin copia automática.** Lo preparado (§109) **no se ejecutó nunca en GitHub**: faltan `FOTOS_BACKUP_TOKEN` (en el Worker y en GitHub), la variable `FIERRO_RESPALDO_CLAVE_PUBLICA` y `FIERRO_URL`. La D1 de producción ya registra **2 fotografías «lista» (2026-10-24 15:16 UTC)**: hoy no tienen copia; para protegerlas ya mismo, `npm run fotos -- exportar` (token de plataforma, carpeta fuera de git).
+- **Lo que sí se probó:** la cadena completo → incremental → restauración con el Worker de pruebas (`tests/api/fotos.test.ts`, R2 simulado) y 11 pruebas unitarias del paquete, el plan incremental, la restauración con clave equivocada, paquete alterado o cadena incompleta y la limpieza de la carpeta temporal (`tests/unit/fotos-respaldo.test.ts`). Con R2 real sólo se probó antes la exportación y restauración manual (Sprint 16).
+- **No se afirma que existan respaldos automáticos operativos:** hace falta que el titular cargue la configuración (`docs/RESPALDOS.md` §7 y §9), una ejecución real termine en verde y se pruebe abrir su resultado.
+- **Qué debe hacer el titular de la plataforma:** (1) completar §7 (respaldo de D1); (2) generar un valor aleatorio de 32 o más caracteres y cargarlo como `FOTOS_BACKUP_TOKEN` con `wrangler secret put FOTOS_BACKUP_TOKEN --name taller-mecanico` y como secreto de GitHub; (3) cargar las variables `FIERRO_RESPALDO_CLAVE_PUBLICA` y `FIERRO_URL`; (4) ejecutar a mano *Respaldo D1* y *Respaldo fotos* y probar abrir los artefactos con la clave privada; (5) decidir un destino con más espacio antes de que las fotos pasen de unos cientos (cupo gratuito de artefactos). No se contrató ningún servicio ni se cargó ningún secreto en nombre del titular.
+
+## 111. Integración con fotografías (resumen)
+- Mismo bucket, mismas filas, mismas claves (`fotos/<taller>/<id>`); el checklist guarda **referencias** (`ck_fotos`, ids en los daños) y el sha256 de cada foto dentro del contenido que se firma.
+- Etapas: la recepción incluye las fotos de etapa *Recepción* de la OT y las asociadas a daños; la entrega, las de etapa *Entrega*. Las de *Reparación* no entran.
+- Permisos de fotos intactos: sacar, ver y eliminar siguen con `fotos.subir`, `fotos.ver` y `fotos.eliminar` y el alcance por OT. El cupo de 2 GB por taller sigue valiendo.
+
+## 112. Migración 0016 (aditiva)
+- `ck_registros`, `ck_firmas`, `ck_fotos` + índices + 7 disparadores de inmutabilidad (registros confirmados, firmas, vínculos a fotos, firma sólo sobre el contenido confirmado) y `trg_fotos_en_checklist` sobre `fotos`. No modifica ni borra datos. La tabla `checklists` anterior no se toca.
+- **Procedimiento:** respaldo remoto previo `respaldos/d1-antes-sprint18-20261024-1656.sql` (fuera de git; 105 tablas, 11.478 filas, integridad OK, 0 claves foráneas rotas, SHA-256 `d3c7ed5b…0b8f`, bookmark de Time Travel `00000229-00000012-0000510e-6fb83805318cd81aff9d4f70ab9da32c`) → **ensayo sobre ese respaldo** (`respaldo -- ensayar-migraciones`: 105 tablas y 11.478 filas comparadas, **todas idénticas**; +3 tablas) → `wrangler d1 migrations apply DB --remote` **antes** de publicar el código → respaldo posterior `respaldos/d1-despues-sprint18-20261024-1657.sql` (108 tablas, 11.479 filas —la fila nueva es el registro de la migración—, integridad OK, 0 claves foráneas rotas, migraciones al día) y verificación en remoto de las 3 tablas, 6 índices y 8 disparadores.
+
+## 113. Permisos
+`checklists.ver`, `checklists.recepcion`, `checklists.entrega`, `checklists.corregir`, `checklists.firmas` (el propietario los asigna en Personal → Permisos, grupo «Recepción y entrega de vehículos»). Recepción y empleado (heredado): ver, recepción, entrega y firmas; mecánico: ver (sólo sus OT); administrador y propietario: todo. Depósito y caja: ninguno. Escribir exige ver. Sin `checklists.firmas` se ve que está firmado, no el dibujo ni el nombre.
+
+## 114. Pruebas
+- `npm run build` (tsc de la app y del Worker + Vite) y `npm test`: **133 unitarias + 422 de integración, todas OK** (nuevas: 21 de integración del checklist en `tests/api/checklists.test.ts`, 2 de respaldo de fotos contra el Worker de pruebas en `tests/api/fotos.test.ts`, 1 de migración 0016 en `tests/api/migraciones.test.ts`, 11 de respaldo en `tests/unit/fotos-respaldo.test.ts` y 6 del modelo compartido en `tests/unit/checklist.test.ts`).
+- Cubierto: borrador idempotente y control de versión, validación estricta del contenido, fotos de otra OT o de otro taller rechazadas, confirmación con hash y contexto, **inmutabilidad también por SQL directo**, firmas (válidas, vacías, cortas, fuera de lienzo, doble firma, firma sobre otro hash), revisión con motivo y permiso, firma de una revisión vencida rechazada, entrega enlazada y sin pisar la recepción, firma posterior a un «no presente», protección de fotos incluidas, permisos (mecánico sólo sus OT; sin permiso 403; el cambio de permisos rige de inmediato), **dos talleres** (404 en todo), ausencia de precios en las respuestas, auditoría.
+- A mano (instancia aislada 8790/5180, Taller Demo): recepción completa en tablet (768) y celular (375): datos de ingreso, puntos con observación, daño tocando el esquema con **foto subida por el flujo real de cámara y galería**, resumen, confirmación, firma táctil (eventos de puntero), entrega con comparación (km, combustible, cambios, elementos), historial en la ficha del vehículo, sin scroll horizontal. Hallazgos corregidos en el camino: un daño nuevo se mostraba como «registrado» con botón «Quitar»; el estado del guardado ocultaba el título en celular.
+- **No comprobado:** cámara física, Safari/iOS, lápiz táctil real ni Android real (sólo emulación de ancho y eventos de puntero simulados); no se inició sesión en producción (ver §116).
+
+## 115. PENDIENTE PRIORITARIO antes de la entrega comercial: hoja A4 de la OT con renglones y copia para administración
+- **Requerimiento confirmado del cliente piloto:** al generar una orden de trabajo, imprimir una hoja **A4** con los datos de la OT y **renglones para anotaciones manuscritas del mecánico, aproximadamente desde la mitad de la hoja hacia abajo**; y **una copia para administración**.
+- **Sin definir (hay que confirmar con el cliente antes de implementar):** cómo se diferencian las dos copias (¿rótulo «Original/Copia»?, ¿una versión con precios y otra sin?, ¿una sola hoja o dos?, ¿firmas?, ¿datos que sólo ve administración?). **No se implementó ni se asumió ningún formato.**
+- **Estado actual:** la OT ya se imprime con *Imprimir* (`/imprimir/orden/:id`, con importes) y *Hoja taller* (`/imprimir/orden-taller/:id`, sin precios), ambas en `src/pages/Imprimir.tsx`; la segunda es la base natural, pero no tiene renglones de anotaciones ni copia. **Debe mantenerse separada del checklist de recepción** (el checklist no se imprime en esa hoja ni la hoja reemplaza al checklist).
+
+## 116. Despliegue
+- (se completa al publicar)
+
+## 117. Lo que no se hizo / límites
+- Firma digital certificada, PDF o impresión del checklist y la hoja de OT (§115).
+- Reclasificar la etapa de una foto ya subida; modo sin conexión; aviso a la plataforma cuando el respaldo de fotos deja de llegar.
+- Verificación en dispositivos reales y verificación autenticada en producción.

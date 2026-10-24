@@ -171,3 +171,43 @@ export async function limpiarFotos(db: D1Database, bucket: R2Bucket | undefined)
   }
   return { limpiadas };
 }
+
+// ───────────── Exportación (respaldo de las imágenes) ─────────────
+// Lo comparten la API de plataforma y el endpoint de sólo lectura del respaldo programado, para que ambos entreguen exactamente lo mismo.
+export interface FotoManifiesto {
+  id: string;
+  taller_id: string;
+  vehiculo_id: string;
+  orden_id: string | null;
+  etapa: string | null;
+  mime: string;
+  bytes: number;
+  miniatura_bytes: number;
+  sha256: string;
+  miniatura_sha256: string;
+  created_at: string;
+  clave: string;
+  clave_miniatura: string;
+}
+
+/** Manifiesto de las fotos "lista" (todas o de un taller), paginado por id de a 500. */
+export async function manifiestoFotos(db: D1Database, taller: string | null, despues: string): Promise<{ fotos: FotoManifiesto[]; siguiente: string | null }> {
+  const filas = await all<Omit<FotoManifiesto, 'clave' | 'clave_miniatura'>>(
+    db,
+    `SELECT id, taller_id, vehiculo_id, orden_id, etapa, mime, bytes, miniatura_bytes, sha256, miniatura_sha256, created_at FROM fotos
+      WHERE estado = 'lista' AND id > ? ${taller ? 'AND taller_id = ?' : ''} ORDER BY id LIMIT 500`,
+    despues,
+    ...(taller ? [taller] : []),
+  );
+  return { fotos: filas.map((f) => ({ ...f, clave: claveFoto(f.taller_id, f.id), clave_miniatura: claveMiniatura(f.taller_id, f.id) })), siguiente: filas.length === 500 ? filas[filas.length - 1].id : null };
+}
+
+/** Archivo (o miniatura) de una foto "lista" para exportarlo. Sin sesión de taller: sólo lo llaman los endpoints de plataforma. */
+export async function archivoParaExportar(db: D1Database, bucket: R2Bucket | undefined, id: string, miniatura: boolean): Promise<Response> {
+  if (!bucket) throw new ApiError(503, 'fotos_no_habilitadas', 'El almacenamiento de fotografías no está habilitado');
+  const f = await first<{ id: string; taller_id: string; mime: string }>(db, "SELECT id, taller_id, mime FROM fotos WHERE id = ? AND estado = 'lista'", id);
+  if (!f) throw new ApiError(404, 'no_encontrado', 'Fotografía inexistente');
+  const o = await bucket.get(miniatura ? claveMiniatura(f.taller_id, f.id) : claveFoto(f.taller_id, f.id));
+  if (!o) throw new ApiError(404, 'no_encontrado', 'Objeto inexistente en R2');
+  return new Response(o.body, { headers: { 'Content-Type': f.mime, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+}

@@ -25,6 +25,12 @@ export const PERMISOS = [
   'fotos.ver',
   'fotos.subir',
   'fotos.eliminar',
+  // ── Recepción y entrega de vehículos (checklist con daños y firma)
+  'checklists.ver', // consultar las recepciones y entregas de las órdenes a las que tiene acceso
+  'checklists.recepcion', // crear la recepción, registrar daños y obtener la conformidad del cliente
+  'checklists.entrega', // registrar la entrega del vehículo
+  'checklists.corregir', // corregir un registro ya confirmado (queda una revisión; el original se conserva)
+  'checklists.firmas', // ver las firmas capturadas y los datos de quien firmó
   // ── Mantenimientos programados
   'mantenimientos.ver',
   'mantenimientos.gestionar', // planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro
@@ -93,6 +99,10 @@ export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
   'presupuestos.gestionar': ['presupuestos.ver'],
   'fotos.subir': ['fotos.ver'],
   'fotos.eliminar': ['fotos.ver'],
+  'checklists.recepcion': ['checklists.ver'],
+  'checklists.entrega': ['checklists.ver'],
+  'checklists.corregir': ['checklists.ver'],
+  'checklists.firmas': ['checklists.ver'],
   'ordenes.crear': ['ordenes.ver'],
   'ordenes.modificar': ['ordenes.ver'],
   'ordenes.asignar': ['ordenes.ver'],
@@ -134,9 +144,9 @@ const RECEPCION: Permiso[] = [
   'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
   'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar',
-  'fotos.ver', 'fotos.subir',
+  'fotos.ver', 'fotos.subir', 'checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.firmas',
 ];
-const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'mantenimientos.ver', 'asistencia.fichar', 'fotos.ver', 'fotos.subir'];
+const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'mantenimientos.ver', 'asistencia.fichar', 'fotos.ver', 'fotos.subir', 'checklists.ver'];
 const DEPOSITO: Permiso[] = [
   'catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'compras.ver', 'compras.gestionar', 'precios.venta.ver', 'precios.costo.ver',
   'ordenes.ver', 'vehiculos.ver', 'asistencia.fichar',
@@ -150,7 +160,7 @@ const EMPLEADO: Permiso[] = [
   'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
   'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar',
-  'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar', 'fotos.ver', 'fotos.subir',
+  'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar', 'fotos.ver', 'fotos.subir', 'checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.firmas',
 ];
 
 export interface Plantilla {
@@ -269,7 +279,12 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'turnos.gestionar': { etiqueta: 'Gestionar turnos' },
   'fotos.ver': { etiqueta: 'Ver fotografías', ayuda: 'De los vehículos y de las órdenes a las que tiene acceso' },
   'fotos.subir': { etiqueta: 'Subir fotografías', ayuda: 'Sacar o elegir fotos para un vehículo o una orden a la que tiene acceso' },
-  'fotos.eliminar': { etiqueta: 'Eliminar fotografías', ayuda: 'Queda registrado quién y cuándo' },
+  'fotos.eliminar': { etiqueta: 'Eliminar fotografías', ayuda: 'Queda registrado quién y cuándo. Las fotos incluidas en una recepción o entrega confirmada no se pueden eliminar' },
+  'checklists.ver': { etiqueta: 'Consultar recepciones y entregas', ayuda: 'Checklist de ingreso y de salida de las órdenes a las que tiene acceso. No incluye precios' },
+  'checklists.recepcion': { etiqueta: 'Registrar recepciones', ayuda: 'Estado de ingreso, daños y conformidad del cliente' },
+  'checklists.entrega': { etiqueta: 'Registrar entregas', ayuda: 'Estado de salida, trabajos realizados y conformidad del cliente' },
+  'checklists.corregir': { etiqueta: 'Corregir recepciones y entregas confirmadas', ayuda: 'No se pisa el original: se crea una revisión con el motivo y queda todo el historial' },
+  'checklists.firmas': { etiqueta: 'Consultar firmas', ayuda: 'Ver la firma capturada y el nombre de quien firmó' },
   'mantenimientos.ver': { etiqueta: 'Ver mantenimientos programados', ayuda: 'Vencimientos por kilometraje y tiempo de cada vehículo' },
   'mantenimientos.gestionar': { etiqueta: 'Gestionar mantenimientos', ayuda: 'Planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro' },
   'precios.venta.ver': { etiqueta: 'Ver precios de venta' },
@@ -320,6 +335,7 @@ export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Clientes y vehículos', permisos: ['clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar'] },
   { titulo: 'Presupuestos, órdenes, agenda y mantenimientos', permisos: ['presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar', 'mantenimientos.ver', 'mantenimientos.gestionar'] },
   { titulo: 'Fotografías', permisos: ['fotos.ver', 'fotos.subir', 'fotos.eliminar'] },
+  { titulo: 'Recepción y entrega de vehículos', permisos: ['checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.corregir', 'checklists.firmas'] },
   { titulo: 'Precios y márgenes', permisos: ['precios.venta.ver', 'precios.costo.ver', 'margenes.ver', 'presupuestos.valorizados.ver', 'precios.gestionar'] },
   { titulo: 'Catálogo e inventario', permisos: ['catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'stock.valorizar'] },
   { titulo: 'Ventas y cobranzas', permisos: ['ventas.ver', 'ventas.emitir', 'ventas.anular', 'cobros.registrar', 'cobros.anular'] },

@@ -229,6 +229,8 @@ fotos.patch('/fotos/:id', requirePerm('fotos.subir'), async (c) => {
 fotos.delete('/fotos/:id', requirePerm('fotos.eliminar'), async (c) => {
   const { s, f } = await cargarAutorizada(c);
   const r2 = bucket(c);
+  // Una fotografía incluida en una recepción o entrega confirmada es parte de la evidencia: no se elimina (la base también lo impide).
+  if (await first(c.env.DB, 'SELECT 1 FROM ck_fotos WHERE taller_id = ? AND foto_id = ?', s.tallerId, f.id)) throw conflict('Esta fotografía forma parte de una recepción o entrega confirmada y no se puede eliminar', 'foto_en_checklist');
   // 1) Se oculta y se deja constancia (usuario y fecha) en una sola transacción.
   await c.env.DB.batch([
     c.env.DB.prepare("UPDATE fotos SET estado = 'eliminada', eliminada_at = ?, eliminada_por = ? WHERE taller_id = ? AND id = ? AND estado = 'lista'").bind(ahora(), s.usuarioId, s.tallerId, f.id),

@@ -10,6 +10,7 @@ import { HistorialTecnico } from '@/components/HistorialTecnico';
 import { AccionesMantenimiento, EstadoMantenimiento, FormPlanMantenimiento, proximoTexto, type MantenimientoApi } from '@/components/Mantenimientos';
 import { FormVehiculo } from '@/components/selectores';
 import { GaleriaFotos, usePermisosFotos } from '@/components/Fotos';
+import { ChecklistsVehiculo } from '@/components/checklist/Checklist';
 
 export function Vehiculos() {
   const nav = useNavigate();
@@ -99,6 +100,7 @@ export function VehiculoDetalle() {
               <GaleriaFotos vehiculoId={v.id} puedeSubir={permisosFotos.subir} puedeEliminar={permisosFotos.eliminar} filtros />
             </Tarjeta>
           )}
+          {puede('checklists.ver') && <ChecklistsVehiculo vehiculoId={v.id} />}
           <HistorialTecnico vehiculoId={v.id} />
         </div>
         <div className="space-y-5">

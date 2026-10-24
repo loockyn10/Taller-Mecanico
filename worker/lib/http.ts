@@ -65,6 +65,9 @@ export function traducirErrorDb(e: unknown): ApiError | null {
     if (msg.includes('nombre')) return conflict('Ya existe un registro con ese nombre', 'duplicado');
     return conflict('Registro duplicado', 'duplicado');
   }
+  if (msg.includes('ck_registro_confirmado_inmutable') || msg.includes('ck_firma_inmutable') || msg.includes('ck_foto_inmutable')) return conflict('El registro está confirmado y no se puede modificar: creá una corrección (revisión) para conservar el original', 'confirmado');
+  if (msg.includes('ck_firma_contenido_distinto')) return conflict('La firma no corresponde al contenido confirmado del registro', 'firma_contenido');
+  if (msg.includes('foto_en_checklist')) return conflict('Esta fotografía forma parte de una recepción o entrega confirmada y no se puede eliminar', 'foto_en_checklist');
   if (msg.includes('FOREIGN KEY constraint failed')) {
     return conflict('El registro está relacionado con datos inexistentes o de otro taller, o tiene registros que dependen de él', 'referencia_invalida');
   }

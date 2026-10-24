@@ -485,6 +485,55 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     db.close();
   });
 
+  it('0016 no toca ningún dato, conserva el check-list simple y la base protege lo confirmado, las firmas y las fotografías incluidas', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    for (const m of fs.readdirSync(path.join(RAIZ, 'migrations')).sort().filter((x) => x < '0016')) db.exec(leer('migrations', m));
+    db.exec(leer('tests', 'fixtures', 'datos-previos-0002.sql'));
+    db.exec("INSERT INTO vehiculos (id, taller_id, cliente_id, patente, km_actual) VALUES ('v1', 't1', 'c1', 'AB123CD', 1000)");
+    db.exec("INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, fecha_ingreso) VALUES ('o1', 't1', 1, 'c1', 'v1', '2026-10-24')");
+    db.exec("INSERT INTO checklists (id, taller_id, orden_id, combustible, km, datos) VALUES ('k1', 't1', 'o1', '1/2', 1000, '{\"danos\":[\"Rayones\"]}')");
+    db.exec("INSERT INTO fotos (id, taller_id, vehiculo_id, orden_id, etapa, idem_key, mime, ancho, alto, bytes, miniatura_bytes, sha256, miniatura_sha256, estado) VALUES ('f1', 't1', 'v1', 'o1', 'recepcion', 'k1', 'image/jpeg', 800, 600, 1000, 100, 'a', 'b', 'lista')");
+    const tablas = ['clientes', 'vehiculos', 'ordenes', 'checklists', 'fotos', 'ventas', 'cobros'];
+    const antes = tablas.map((t) => db.prepare(`SELECT * FROM ${t}`).all().map((r: any) => ({ ...r })));
+    db.exec(leer('migrations', '0016_checklist_recepcion_entrega.sql'));
+    expect(tablas.map((t) => db.prepare(`SELECT * FROM ${t}`).all().map((r: any) => ({ ...r })))).toEqual(antes);
+    for (const t of ['ck_registros', 'ck_firmas', 'ck_fotos']) expect((db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as any).n).toBe(0);
+
+    const registro = (id: string, extra = '') => `INSERT INTO ck_registros (id, taller_id, orden_id, vehiculo_id, cliente_id, tipo, checklist_version, datos, fecha_hora, responsable_nombre${extra.split('|')[0]}) VALUES ('${id}', 't1', 'o1', 'v1', 'c1', 'recepcion', 1, '{}', '2026-10-24T10:00:00Z', 'Ana'${extra.split('|')[1] ?? ''})`;
+    db.exec(registro('r1'));
+    expect((db.prepare("SELECT estado, revision FROM ck_registros WHERE id = 'r1'").get() as any)).toMatchObject({ estado: 'borrador', revision: 0 });
+    // Un solo borrador por OT y tipo; a otro taller no se le puede colgar una orden ajena
+    expect(() => db.exec(registro('r2'))).toThrow(/UNIQUE/);
+    expect(() => db.exec("INSERT INTO ck_registros (id, taller_id, orden_id, vehiculo_id, cliente_id, tipo, checklist_version, datos, fecha_hora, responsable_nombre) VALUES ('rx', 't2', 'o1', 'v1', 'c1', 'entrega', 1, '{}', '2026-10-24T10:00:00Z', 'x')")).toThrow(/FOREIGN/);
+    // El borrador se edita y se descarta; confirmarlo exige la huella y el contexto
+    db.exec("UPDATE ck_registros SET km = 1200, updated_at = '2026-10-24T11:00:00Z' WHERE id = 'r1'");
+    expect(() => db.exec("UPDATE ck_registros SET estado = 'confirmado' WHERE id = 'r1'")).toThrow(/CHECK/);
+    db.exec("UPDATE ck_registros SET estado = 'confirmado', contexto = '{}', contenido_sha256 = 'h1', confirmado_at = '2026-10-24T12:00:00Z' WHERE id = 'r1'");
+    // Confirmado: inmutable (la corrección es una revisión nueva) y sin posibilidad de borrarse
+    expect(() => db.exec("UPDATE ck_registros SET km = 5 WHERE id = 'r1'")).toThrow(/inmutable/);
+    expect(() => db.exec("DELETE FROM ck_registros WHERE id = 'r1'")).toThrow(/inmutable/);
+    expect(() => db.exec(registro('r3', ', revision, previo_id|, 1, NULL'))).toThrow(/CHECK/); // una revisión necesita su original y su motivo
+    db.exec(registro('r3', ', revision, previo_id, motivo|, 1, \'r1\', \'Corrección\''));
+    // Firmas: sólo sobre contenido confirmado y con el mismo hash; no se modifican ni se borran; una sola firma efectiva
+    const firma = (id: string, resultado: string, hash = 'h1', extra = '') => `INSERT INTO ck_firmas (id, taller_id, registro_id, resultado, nombre_firmante, aclaracion, firma, firma_sha256, contenido_sha256, checklist_version, texto_conformidad, texto_version, registrado_por_nombre${extra}) VALUES ('${id}', 't1', 'r1', '${resultado}', 'Ana', ${resultado === 'firmada' ? 'NULL' : "'Aclaración'"}, ${resultado === 'firmada' ? "'{}'" : 'NULL'}, ${resultado === 'firmada' ? "'s'" : 'NULL'}, '${hash}', 1, 'texto', 1, 'Empleado')`;
+    expect(() => db.exec(firma('fi0', 'firmada', 'otro-hash'))).toThrow(/contenido_distinto/);
+    expect(() => db.exec("INSERT INTO ck_firmas (id, taller_id, registro_id, resultado, contenido_sha256, checklist_version, texto_conformidad, texto_version, registrado_por_nombre) VALUES ('fi1', 't1', 'r3', 'no_presente', 'x', 1, 't', 1, 'E')")).toThrow(/contenido_distinto|CHECK/); // r3 es un borrador
+    db.exec(firma('fi2', 'no_presente'));
+    db.exec(firma('fi3', 'firmada'));
+    expect(() => db.exec(firma('fi4', 'firmada'))).toThrow(/UNIQUE/);
+    expect(() => db.exec("UPDATE ck_firmas SET nombre_firmante = 'Otro' WHERE id = 'fi3'")).toThrow(/inmutable/);
+    expect(() => db.exec("DELETE FROM ck_firmas WHERE id = 'fi3'")).toThrow(/inmutable/);
+    // Fotografías incluidas: vínculo de sólo agregar y la foto no puede pasar a "eliminada"
+    db.exec("INSERT INTO ck_fotos (taller_id, registro_id, foto_id, dano_id) VALUES ('t1', 'r1', 'f1', NULL)");
+    expect(() => db.exec("UPDATE fotos SET estado = 'eliminada' WHERE id = 'f1'")).toThrow(/foto_en_checklist/);
+    expect(() => db.exec("DELETE FROM fotos WHERE id = 'f1'")).toThrow(/FOREIGN/);
+    expect(() => db.exec("DELETE FROM ck_fotos WHERE foto_id = 'f1'")).toThrow(/inmutable/);
+    db.exec("UPDATE fotos SET descripcion = 'sigue editable' WHERE id = 'f1'");
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    db.close();
+  });
+
   it('0015 no toca ningún dato y la base protege las fotografías (etapa de OT, cupo y estados)', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');

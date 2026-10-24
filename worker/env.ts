@@ -14,6 +14,8 @@ export interface Env {
   MEDIR_D1?: string;
   /** Secreto del aviso de respaldo externo (GitHub Actions → /api/plataforma/respaldo-latido). Distinto del token de plataforma, que puede mucho más. */
   BACKUP_REPORT_TOKEN?: string;
+  /** Secreto de sólo lectura del respaldo programado de las fotografías (GitHub Actions). Sólo exporta manifiesto y archivos; no es el token de plataforma. */
+  FOTOS_BACKUP_TOKEN?: string;
 }
 
 export interface Sesion {

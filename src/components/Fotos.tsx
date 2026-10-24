@@ -62,11 +62,14 @@ export interface ItemFoto {
   vista?: string;
   preparada?: FotoPreparada;
   descripcion: string;
+  /** Id de la fotografía ya guardada en el servidor (para asociarla a un daño del checklist). */
+  fotoId?: string;
 }
 
 export function useFotosLocales() {
   const [items, setItems] = useState<ItemFoto[]>([]);
   const ref = useRef<ItemFoto[]>([]);
+  const guardadas = useRef<string[]>([]);
   ref.current = items;
   const parchar = (clave: string, p: Partial<ItemFoto>) => setItems((a) => a.map((i) => (i.clave === clave ? { ...i, ...p } : i)));
   useEffect(() => () => ref.current.forEach((i) => i.vista && URL.revokeObjectURL(i.vista)), []);
@@ -96,8 +99,9 @@ export function useFotosLocales() {
     for (const it of cola) {
       parchar(it.clave, { estado: 'subiendo', progreso: 0, error: undefined });
       try {
-        await subirFoto({ ...campos, descripcion: it.descripcion.trim() || undefined, idem_key: it.clave }, it.preparada!, (p) => parchar(it.clave, { progreso: p }));
-        parchar(it.clave, { estado: 'subida', progreso: 100 });
+        const guardada = await subirFoto({ ...campos, descripcion: it.descripcion.trim() || undefined, idem_key: it.clave }, it.preparada!, (p) => parchar(it.clave, { progreso: p }));
+        parchar(it.clave, { estado: 'subida', progreso: 100, fotoId: guardada?.id });
+        if (guardada?.id) guardadas.current.push(guardada.id);
         subidas++;
       } catch (e) {
         parchar(it.clave, { estado: 'error', error: e instanceof Error ? e.message : 'No se pudo subir' });
@@ -109,7 +113,9 @@ export function useFotosLocales() {
     return cola.length - subidas;
   };
   const pendientes = items.filter((i) => i.estado !== 'subida').length;
-  return { items, agregar, quitar, descripcion, subirTodas, pendientes, ocupado: items.some((i) => i.estado === 'preparando' || i.estado === 'subiendo') };
+  /** Ids de las fotos que ya quedaron guardadas (se lleva aparte del estado de React, que se actualiza recién en el próximo render). */
+  const idsSubidas = () => [...guardadas.current];
+  return { items, agregar, quitar, descripcion, subirTodas, pendientes, idsSubidas, ocupado: items.some((i) => i.estado === 'preparando' || i.estado === 'subiendo') };
 }
 
 // ───────────── Botones de cámara y galería ─────────────
@@ -178,7 +184,8 @@ export function ListaLocal({ items, onDescripcion, onQuitar, onReintentar, bloqu
 }
 
 // ───────────── Confirmar y guardar (Sacar foto → Confirmar → guardada) ─────────────
-function ConfirmarSubida({ archivos, campos, titulo, onCerrar }: { archivos: File[]; campos: Omit<CamposSubida, 'idem_key' | 'descripcion'>; titulo: string; onCerrar: () => void }) {
+/** `onGuardadas` recibe los ids de las fotos nuevas apenas se guardan (el checklist las asocia a un daño); se llama una sola vez por foto. */
+export function ConfirmarSubida({ archivos, campos, titulo, onCerrar, onGuardadas }: { archivos: File[]; campos: Omit<CamposSubida, 'idem_key' | 'descripcion'>; titulo: string; onCerrar: () => void; onGuardadas?: (ids: string[]) => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const l = useFotosLocales();
@@ -189,11 +196,15 @@ function ConfirmarSubida({ archivos, campos, titulo, onCerrar }: { archivos: Fil
     l.agregar(archivos);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [subiendo, setSubiendo] = useState(false);
+  const avisadas = useRef(new Set<string>());
   const guardar = async () => {
     setSubiendo(true);
     const fallos = await l.subirTodas(campos);
     setSubiendo(false);
     qc.invalidateQueries({ queryKey: ['fotos'] });
+    const nuevas = l.idsSubidas().filter((id) => !avisadas.current.has(id));
+    nuevas.forEach((id) => avisadas.current.add(id));
+    if (nuevas.length) onGuardadas?.(nuevas);
     if (fallos === 0) {
       toast.ok(l.items.length > 1 ? 'Fotografías guardadas' : 'Fotografía guardada');
       onCerrar();

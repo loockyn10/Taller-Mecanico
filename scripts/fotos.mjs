@@ -9,6 +9,11 @@
 //   npm run fotos -- uso                                           Consumo de fotos por taller.
 //   npm run fotos -- limite <taller_id> <MB>                       Ajusta el límite de fotografías de un taller (por defecto 2048 MB).
 //   npm run fotos -- limpiar                                       Termina de borrar fotos eliminadas o a medias.
+//   npm run fotos -- respaldo --salida carpeta [--base indice.json] [--completo] [--plataforma]
+//                                                                  Respaldo PROGRAMADO: copia sólo las fotos nuevas, las cifra con la clave pública y las verifica de punta a punta.
+//                                                                  Lo ejecuta GitHub Actions (.github/workflows/respaldo-fotos.yml). Con FOTOS_BACKUP_TOKEN (sólo lectura); --plataforma usa el token de plataforma.
+//   npm run fotos -- respaldo-restaurar <paquete.fbk>... --indice indice.json --clave-privada PRIVADA.pem --salida carpeta
+//                                                                  Deshace la cadena de paquetes (el completo primero) y arma la carpeta que entienden `verificar` y `restaurar`.
 //
 // Variables: FIERRO_API (por defecto http://127.0.0.1:8787; producción: https://taller-mecanico.estrubia455.workers.dev) y PLATFORM_ADMIN_TOKEN
 // (por defecto se lee de .dev.vars, que sólo sirve en local: en producción es un secreto del Worker y hay que exportarlo en el entorno).
@@ -17,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, esperarProceso, wrangler } from './lib.mjs';
 import { extension, rutasDe, sha256, verificarCarpeta } from './fotos-lib.mjs';
+import { respaldarFotos, restaurarCadena } from './fotos-respaldo-lib.mjs';
 
 const API = (process.env.FIERRO_API ?? 'http://127.0.0.1:8787').replace(/\/$/, '');
 const BUCKET = 'fierro-fotos';
@@ -144,6 +150,42 @@ async function auditar(o) {
   if (a.huerfanos_total || a.faltantes_total) process.exitCode = 1;
 }
 
+async function respaldo(o) {
+  const pem = process.env.FIERRO_RESPALDO_CLAVE_PUBLICA || (o['clave-publica'] ? fs.readFileSync(o['clave-publica'], 'utf8') : null);
+  if (!pem) throw new Error('Falta la clave pública: variable FIERRO_RESPALDO_CLAVE_PUBLICA (o --clave-publica archivo.pem)');
+  const plataforma = !!o.plataforma;
+  const tokenResp = plataforma ? token() : process.env.FOTOS_BACKUP_TOKEN;
+  if (!tokenResp) throw new Error('Falta FOTOS_BACKUP_TOKEN (el secreto de sólo lectura del respaldo de fotos)');
+  const indiceBase = typeof o.base === 'string' && fs.existsSync(o.base) ? JSON.parse(fs.readFileSync(o.base, 'utf8')) : null;
+  if (typeof o.base === 'string' && !indiceBase) console.log('Sin índice anterior: se hace una copia completa.');
+  const dias = Number(o['completo-cada']);
+  const indice = await respaldarFotos({
+    api: API,
+    token: tokenResp,
+    modo: plataforma ? 'plataforma' : 'respaldo',
+    clavePublicaPem: pem,
+    salida: path.resolve(typeof o.salida === 'string' ? o.salida : path.join(ROOT, 'respaldos', 'fotos-programado')),
+    indiceBase,
+    completo: !!o.completo,
+    completoCadaDias: dias > 0 ? dias : 30,
+    log: console.log,
+  });
+  console.log(`Respaldo de fotos terminado (${indice.tipo}): ${indice.fotos_total} fotos vigentes · ${indice.copiadas} copiadas ahora · cadena de ${indice.cadena.length} paquete(s).`);
+}
+
+async function respaldoRestaurar(o) {
+  const paquetes = o._.slice(1).map((p) => path.resolve(p));
+  if (!paquetes.length || typeof o.indice !== 'string' || typeof o['clave-privada'] !== 'string' || typeof o.salida !== 'string') throw new Error('Uso: respaldo-restaurar <paquete.fbk>... --indice indice.json --clave-privada PRIVADA.pem --salida carpetaNueva');
+  const r = await restaurarCadena({
+    paquetes,
+    clavePrivadaPem: fs.readFileSync(o['clave-privada'], 'utf8'),
+    indice: JSON.parse(fs.readFileSync(o.indice, 'utf8')),
+    salida: path.resolve(o.salida),
+  });
+  console.log(`Carpeta reconstruida y verificada: ${r.fotos} fotos${r.descartadas ? ` (${r.descartadas} eliminadas después de ese paquete, descartadas)` : ''}.`);
+  console.log('Siguiente: npm run fotos -- restaurar <carpeta> --remoto   y después   npm run fotos -- auditar');
+}
+
 async function uso() {
   const u = await api('GET', '/almacenamiento');
   console.log(`Almacenamiento de fotos ${u.habilitado ? 'habilitado' : 'NO habilitado (falta el bucket R2)'}`);
@@ -158,6 +200,8 @@ try {
   else if (comando === 'verificar') verificar(o);
   else if (comando === 'restaurar') await restaurar(o);
   else if (comando === 'auditar') await auditar(o);
+  else if (comando === 'respaldo') await respaldo(o);
+  else if (comando === 'respaldo-restaurar') await respaldoRestaurar(o);
   else if (comando === 'uso') await uso();
   else if (comando === 'limite') {
     const [, id, mb] = o._;
@@ -165,7 +209,7 @@ try {
     const r = await api('PATCH', `/talleres/${id}/almacenamiento`, { fotos_limite_mb: Number(mb) });
     console.log(`Límite de fotografías: ${(r.limite_bytes / 1024 ** 2).toFixed(0)} MB (usados ${(r.usado_bytes / 1024 ** 2).toFixed(1)} MB)`);
   } else if (comando === 'limpiar') console.log(await api('POST', '/fotos/limpiar', {}));
-  else console.log('Uso: npm run fotos -- exportar | verificar <carpeta> | restaurar <carpeta> --local|--remoto | auditar | uso | limite <taller> <MB> | limpiar');
+  else console.log('Uso: npm run fotos -- exportar | verificar <carpeta> | restaurar <carpeta> --local|--remoto | auditar | uso | limite <taller> <MB> | limpiar | respaldo | respaldo-restaurar');
 } catch (e) {
   console.error(`Error: ${e.message ?? e}`);
   process.exitCode = 1;

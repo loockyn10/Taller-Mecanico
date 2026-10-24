@@ -3,7 +3,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import crypto from 'node:crypto';
 import { Api, nuevoPersonal, nuevoTaller, platformHeaders, plataforma } from './cliente';
-import { PUERTO } from './global-setup';
+import { FOTOS_BACKUP_TOKEN, PUERTO } from './global-setup';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+// @ts-expect-error módulo JS de scripts
+import { respaldarFotos, restaurarCadena } from '../../scripts/fotos-respaldo-lib.mjs';
 
 const BASE = `http://127.0.0.1:${PUERTO}`;
 
@@ -247,5 +252,52 @@ describe('fotografías', () => {
     const aud = (await plataforma.req('GET', `/api/platform/fotos/auditoria?taller=${T.a.tallerId}`, undefined, platformHeaders)).body;
     expect(aud).toMatchObject({ huerfanos_total: 0, faltantes_total: 0 });
     expect(aud.objetos_en_r2).toBe(m.fotos.length * 2);
+  });
+});
+
+describe('respaldo programado de fotografías contra el Worker real', () => {
+  const total = async () => (await plataforma.req('GET', '/api/platform/fotos/manifiesto', undefined, platformHeaders)).body.fotos.length as number;
+
+  it('el token de respaldo sólo lee: sin token o con el de plataforma no entra, y no puede modificar nada', async () => {
+    const ruta = `${BASE}/api/plataforma/fotos-respaldo/manifiesto`;
+    expect((await fetch(ruta)).status).toBe(401);
+    expect((await fetch(ruta, { headers: platformHeaders })).status).toBe(401); // el token de plataforma NO sirve acá (y viceversa)
+    expect((await fetch(`${BASE}/api/platform/fotos/manifiesto`, { headers: { authorization: `Bearer ${FOTOS_BACKUP_TOKEN}` } })).status).toBe(401);
+    const ok = await fetch(ruta, { headers: { authorization: `Bearer ${FOTOS_BACKUP_TOKEN}` } });
+    expect(ok.status).toBe(200);
+    const m = await ok.json();
+    expect(m.fotos.length).toBe(await total());
+    expect((await fetch(`${BASE}/api/plataforma/fotos-respaldo/manifiesto`, { method: 'POST', headers: { authorization: `Bearer ${FOTOS_BACKUP_TOKEN}`, 'content-type': 'application/json' }, body: '{}' })).status).toBeGreaterThanOrEqual(401); // no hay ninguna ruta de escritura con este token
+    expect((await fetch(`${BASE}/api/plataforma/fotos-respaldo/${m.fotos[0].id}/archivo`, { headers: { authorization: `Bearer ${FOTOS_BACKUP_TOKEN}` } })).status).toBe(200);
+    expect((await fetch(`${BASE}/api/plataforma/fotos-respaldo/no-existe/archivo`, { headers: { authorization: `Bearer ${FOTOS_BACKUP_TOKEN}` } })).status).toBe(404);
+  });
+
+  it('copia completa → incremental → restauración de la cadena, con las fotos reales del Worker', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fierro-test-resp-api-'));
+    try {
+      const par = crypto.generateKeyPairSync('rsa', { modulusLength: 3072, publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
+      const base = { api: BASE, token: FOTOS_BACKUP_TOKEN, modo: 'respaldo', clavePublicaPem: par.publicKey };
+      const n0 = await total();
+      expect(n0).toBeGreaterThanOrEqual(5);
+      const i1 = await respaldarFotos({ ...base, salida: path.join(dir, '1'), indiceBase: null });
+      expect(i1).toMatchObject({ tipo: 'completo', fotos_total: n0, copiadas: n0 });
+      // Una foto nueva → el incremental copia sólo esa
+      const cli = (await T.a.api.post('/api/clientes', { nombre: 'Cliente respaldo' })).body;
+      const veh = (await T.a.api.post('/api/vehiculos', { cliente_id: cli.id, patente: 'RES001' })).body;
+      expect((await subir(T.a.api, { vehiculo_id: veh.id })).status).toBe(201);
+      const i2 = await respaldarFotos({ ...base, salida: path.join(dir, '2'), indiceBase: JSON.parse(fs.readFileSync(path.join(dir, '1', 'indice.json'), 'utf8')) });
+      expect(i2).toMatchObject({ tipo: 'incremental', fotos_total: n0 + 1, copiadas: 1 });
+      const paquetes = [...i2.cadena.map((p: any) => path.join(dir, p.tipo === 'completo' ? '1' : '2', p.nombre))];
+      const r = await restaurarCadena({ paquetes, clavePrivadaPem: par.privateKey, indice: i2, salida: path.join(dir, 'restaurada') });
+      expect(r.fotos).toBe(n0 + 1);
+      // Cada foto restaurada es idéntica a la que sirve el Worker (mismo sha256 que D1)
+      const m = JSON.parse(fs.readFileSync(path.join(dir, 'restaurada', 'manifiesto.json'), 'utf8'));
+      for (const f of m.fotos.slice(0, 4)) {
+        const r2 = await fetch(`${BASE}/api/platform/fotos/${f.id}/archivo`, { headers: platformHeaders });
+        expect(crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, 'restaurada', f.archivo))).digest('hex')).toBe(crypto.createHash('sha256').update(Buffer.from(await r2.arrayBuffer())).digest('hex'));
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

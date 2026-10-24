@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowRight, ClipboardCheck, MessageCircle, Pencil, Printer, Receipt, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { duracion, fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
 import { FotosOrden } from '@/components/Fotos';
+import { ChecklistOrden } from '@/components/checklist/Checklist';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi, itemsParaApi, ResumenTotales, type ItemUI, type ParamsUI } from '@/components/EditorItems';
@@ -103,7 +104,6 @@ function Checklist({ orden }: { orden: any }) {
       <div className="flex justify-end">
         <Boton variante="primario" icono={<ClipboardCheck className="size-4" />} cargando={m.isPending} onClick={() => m.mutate()}>Guardar check-list</Boton>
       </div>
-      <p className="text-xs text-tenue">Fotos y firma del cliente: pendiente para una próxima versión.</p>
     </div>
   );
 }
@@ -167,7 +167,8 @@ export function OrdenDetalle() {
   const { confirmar, dialogo } = useConfirmar();
   const { data: o, isLoading, error, refetch } = useQuery({ queryKey: ['orden', id], queryFn: () => api.get(`/ordenes/${id}`) });
   const { data: mecanicos = [] } = useMecanicos();
-  const [tab, setTab] = useState<'trabajo' | 'tareas' | 'fotos' | 'checklist' | 'historial' | 'cobro'>('trabajo');
+  const [params0] = useSearchParams();
+  const [tab, setTab] = useState<'trabajo' | 'tareas' | 'fotos' | 'checklist' | 'historial' | 'cobro'>(() => (['tareas', 'fotos', 'checklist', 'historial'].includes(params0.get('tab') ?? '') ? (params0.get('tab') as 'checklist') : 'trabajo'));
   const [editando, setEditando] = useState(false);
   const [estadoModal, setEstadoModal] = useState(false);
   const [cobro, setCobro] = useState(false);
@@ -291,7 +292,7 @@ export function OrdenDetalle() {
               { clave: 'trabajo', titulo: 'Trabajo' },
               { clave: 'tareas', titulo: 'Equipo, tareas y tiempos', contador: o.tareas.length || undefined },
               ...(puede('fotos.ver') ? [{ clave: 'fotos' as const, titulo: 'Fotografías' }] : []),
-              { clave: 'checklist', titulo: 'Check-list de ingreso' },
+              { clave: 'checklist', titulo: puede('checklists.ver') ? 'Recepción y entrega' : 'Check-list de ingreso' },
               ...(puede('ventas.ver') ? [{ clave: 'cobro' as const, titulo: 'Comprobante y cobro' }] : []),
               { clave: 'historial', titulo: 'Historial', contador: o.eventos.length },
             ]}
@@ -350,7 +351,22 @@ export function OrdenDetalle() {
               <FotosOrden ordenId={o.id} vehiculoId={o.vehiculo_id} estadoOrden={o.estado} asignadaAMi={!!o.asignada_a_mi} />
             </Tarjeta>
           )}
-          {tab === 'checklist' && <Tarjeta titulo="Check-list de ingreso"><Checklist orden={o} /></Tarjeta>}
+          {tab === 'checklist' && (
+            <div className="space-y-4">
+              {puede('checklists.ver') && <ChecklistOrden orden={o} />}
+              {/* El check-list simple anterior se conserva: se muestra sólo si ya tiene datos (o si la persona no tiene acceso al nuevo). */}
+              {puede('checklists.ver') ? (
+                o.checklist && (
+                  <details className="rounded-card border border-borde bg-white shadow-card">
+                    <summary className="min-h-12 cursor-pointer px-4 py-3 text-sm font-semibold">Check-list simple de ingreso (formato anterior)</summary>
+                    <div className="border-t border-borde-suave p-4"><Checklist orden={o} /></div>
+                  </details>
+                )
+              ) : (
+                <Tarjeta titulo="Check-list de ingreso"><Checklist orden={o} /></Tarjeta>
+              )}
+            </div>
+          )}
           {tab === 'historial' && (
             <Tarjeta titulo="Historial de la OT">
               <ol className="relative space-y-4 border-l border-borde pl-5">

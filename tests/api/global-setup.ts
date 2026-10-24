@@ -7,6 +7,7 @@ import { carpetaEstado, esperarServidor, migrar, wrangler } from '../../scripts/
 export const PUERTO = 8799;
 export const PLATFORM_TOKEN = 'token-de-pruebas-de-plataforma-123';
 export const BACKUP_TOKEN = 'token-de-pruebas-del-aviso-de-respaldo-123';
+export const FOTOS_BACKUP_TOKEN = 'token-de-pruebas-de-respaldo-de-fotos-123456';
 
 let proc: ChildProcess | undefined;
 let estado: string;
@@ -20,7 +21,7 @@ export async function setup() {
   // Las pruebas que necesitan alterar el reloj de los datos (vencimientos) abren esta base local de ensayo; nunca una remota.
   process.env.FIERRO_TEST_ESTADO = estado;
   proc = wrangler(
-    ['dev', '--port', String(PUERTO), '--persist-to', estado, '--var', `PLATFORM_ADMIN_TOKEN:${PLATFORM_TOKEN}`, '--var', 'PBKDF2_ITERATIONS:20000', '--var', 'CONTAB_SYNC:esperar', '--var', `BACKUP_REPORT_TOKEN:${BACKUP_TOKEN}`, '--show-interactive-dev-session=false'],
+    ['dev', '--port', String(PUERTO), '--persist-to', estado, '--var', `PLATFORM_ADMIN_TOKEN:${PLATFORM_TOKEN}`, '--var', 'PBKDF2_ITERATIONS:20000', '--var', 'CONTAB_SYNC:esperar', '--var', `BACKUP_REPORT_TOKEN:${BACKUP_TOKEN}`, '--var', `FOTOS_BACKUP_TOKEN:${FOTOS_BACKUP_TOKEN}`, '--show-interactive-dev-session=false'],
     { stdio: 'pipe' },
   );
   let log = '';

@@ -8,6 +8,8 @@ import { taller } from './modules/taller';
 import { maestros } from './modules/maestros';
 import { catalogoAuto } from './modules/catalogo-auto';
 import { fotos } from './modules/fotos';
+import { checklists } from './modules/checklists';
+import { respaldoFotos } from './modules/respaldo-fotos';
 import { limpiarFotos } from './lib/fotos';
 import { catalogo } from './modules/catalogo';
 import { presupuestos } from './modules/presupuestos';
@@ -103,6 +105,9 @@ app.post('/api/plataforma/respaldo-latido', async (c) => {
   return c.json({ ok: true });
 });
 
+// Lectura de las fotografías para el respaldo programado: token propio de sólo lectura (no el de plataforma).
+app.route('/api/plataforma/fotos-respaldo', respaldoFotos);
+
 // Pantalla del reloj compartido: se autentica con el token del dispositivo, no con una sesión de usuario.
 app.route('/api/reloj', relojPublico);
 
@@ -129,6 +134,7 @@ api.route('/asistencia', relojAdmin);
 api.route('/', maestros);
 api.route('/', catalogoAuto);
 api.route('/', fotos);
+api.route('/', checklists);
 api.route('/', historial);
 api.route('/', mantenimientos);
 api.route('/tempario', tempario);

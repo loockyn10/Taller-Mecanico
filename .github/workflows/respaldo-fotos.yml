@@ -1,0 +1,119 @@
+# Respaldo programado de las FOTOGRAFÍAS de Fierro (R2) — ver docs/FOTOGRAFIAS.md y docs/RESPALDOS.md.
+#
+# Copia INCREMENTAL: cada ejecución baja sólo las fotos que no estaban en el respaldo anterior (una foto no cambia nunca), verifica el sha256 de cada archivo contra
+# D1, arma un paquete, lo CIFRA con la misma clave pública RSA que el respaldo de D1 y lo guarda como artefacto. Cada 30 días hace además una copia completa para
+# que la cadena de restauración sea corta (restaurar = la última completa + los incrementales posteriores).
+#
+# IMPORTANTE (el repositorio es PÚBLICO): los artefactos de un repositorio público los puede descargar cualquier persona con sesión de GitHub. Por eso sólo se sube
+# el paquete cifrado (.fbk); la clave privada que lo abre no está en GitHub. El índice (indice.json) queda sin cifrar a propósito: sólo tiene ids de foto y sha256,
+# nada de talleres, vehículos ni clientes. Las fotos descargadas viven en una carpeta temporal del runner que se borra al terminar; nunca se guardan en el repositorio.
+#
+# Credencial propia y mínima: FOTOS_BACKUP_TOKEN sólo puede LEER el manifiesto y los archivos. NO se carga el token de plataforma en GitHub.
+#
+# Configuración única (la hace el propietario; paso a paso en docs/RESPALDOS.md §9). Hasta que estén cargados, la ejecución FALLA a propósito y avisa qué falta:
+#   Variables: FIERRO_RESPALDO_CLAVE_PUBLICA (la misma del respaldo de D1), FIERRO_URL (https://taller-mecanico.estrubia455.workers.dev)
+#   Secret   : FOTOS_BACKUP_TOKEN (valor aleatorio de 32+ caracteres, el mismo que se carga en el Worker con «wrangler secret put FOTOS_BACKUP_TOKEN»)
+# No usa Cloudflare API token: lee las fotos a través del Worker, así que no suma permisos sobre la cuenta.
+name: Respaldo fotos
+
+on:
+  schedule:
+    - cron: '47 6 * * *' # 06:47 UTC = 03:47 en Argentina
+  workflow_dispatch:
+    inputs:
+      completo:
+        description: 'Forzar una copia completa'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read # para encontrar el índice del respaldo anterior
+
+concurrency:
+  group: respaldo-fotos
+  cancel-in-progress: false
+
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --no-audit --no-fund
+
+      - name: Comprobar configuración
+        env:
+          FOTOS_BACKUP_TOKEN: ${{ secrets.FOTOS_BACKUP_TOKEN }}
+          FIERRO_RESPALDO_CLAVE_PUBLICA: ${{ vars.FIERRO_RESPALDO_CLAVE_PUBLICA }}
+          FIERRO_URL: ${{ vars.FIERRO_URL }}
+        run: |
+          faltan=""
+          [ -z "$FOTOS_BACKUP_TOKEN" ] && faltan="$faltan secret:FOTOS_BACKUP_TOKEN"
+          [ -z "$FIERRO_RESPALDO_CLAVE_PUBLICA" ] && faltan="$faltan variable:FIERRO_RESPALDO_CLAVE_PUBLICA"
+          [ -z "$FIERRO_URL" ] && faltan="$faltan variable:FIERRO_URL"
+          if [ -n "$faltan" ]; then
+            echo "::error::Falta configurar:$faltan (ver docs/RESPALDOS.md §9). El respaldo de fotos NO se hizo."
+            exit 1
+          fi
+
+      # Índice del respaldo anterior (último artefacto «fierro-fotos-indice» vigente). Si no hay (primera vez o vencido) se hace una copia completa.
+      - name: Buscar el índice anterior
+        id: previo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previo"
+          id=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=fierro-fotos-indice&per_page=10" \
+            | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const a=(d.artifacts||[]).filter(x=>!x.expired).sort((p,q)=>q.created_at.localeCompare(p.created_at))[0];console.log(a?a.id:'')")
+          if [ -n "$id" ]; then
+            curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -o "$RUNNER_TEMP/previo/indice.zip" "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id/zip"
+            unzip -o -q "$RUNNER_TEMP/previo/indice.zip" -d "$RUNNER_TEMP/previo"
+            echo "base=$RUNNER_TEMP/previo/indice.json" >> "$GITHUB_OUTPUT"
+            echo "Índice anterior encontrado."
+          else
+            echo "base=" >> "$GITHUB_OUTPUT"
+            echo "No hay índice anterior: copia completa."
+          fi
+
+      - name: Respaldo cifrado de fotografías
+        id: respaldo
+        env:
+          FOTOS_BACKUP_TOKEN: ${{ secrets.FOTOS_BACKUP_TOKEN }}
+          FIERRO_RESPALDO_CLAVE_PUBLICA: ${{ vars.FIERRO_RESPALDO_CLAVE_PUBLICA }}
+          FIERRO_API: ${{ vars.FIERRO_URL }}
+        run: |
+          args=(--salida "$RUNNER_TEMP/salida")
+          [ -n "${{ steps.previo.outputs.base }}" ] && args+=(--base "${{ steps.previo.outputs.base }}")
+          [ "${{ inputs.completo }}" = "true" ] && args+=(--completo)
+          node scripts/fotos.mjs respaldo "${args[@]}"
+          # Conservación: 90 días (el máximo que admite GitHub). Con copia completa cada 30 días siempre queda una completa y sus incrementales.
+          echo "fecha=$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+          ls "$RUNNER_TEMP/salida"/*.fbk >/dev/null 2>&1 && echo "hay_paquete=1" >> "$GITHUB_OUTPUT" || echo "hay_paquete=0" >> "$GITHUB_OUTPUT"
+
+      - name: Guardar el paquete cifrado (artefacto)
+        if: steps.respaldo.outputs.hay_paquete == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fierro-fotos-${{ steps.respaldo.outputs.fecha }}
+          path: ${{ runner.temp }}/salida/*.fbk
+          retention-days: 90
+          if-no-files-found: error
+          compression-level: 0 # ya está cifrado
+
+      - name: Guardar el índice (sin datos de clientes)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fierro-fotos-indice
+          path: ${{ runner.temp }}/salida/indice.json
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true

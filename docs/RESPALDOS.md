@@ -97,7 +97,8 @@ Para llevar **un solo taller** a otra instalación hoy solo se puede como datos 
 
 | Prioridad | Qué | Por qué |
 |---|---|---|
-| P0 operativo | **Cargar la configuración de §7 y lograr una primera ejecución real del workflow** (más una prueba de apertura del artefacto) | Hasta entonces un incidente de cuenta no es recuperable. Preparado; falta el paso del propietario |
+| P0 operativo | **Cargar la configuración de §7 y lograr una primera ejecución real del workflow** (más una prueba de apertura del artefacto) | Hasta entonces un incidente de cuenta no es recuperable. Preparado; falta el paso del propietario. **Verificado el 24/10/2026: las 2 ejecuciones programadas fallaron por configuración faltante (§9)** |
+| P0 operativo | **Cargar `FOTOS_BACKUP_TOKEN` y lograr una primera ejecución real de *Respaldo fotos*** (§9) | Las fotografías todavía no tienen ninguna copia automática. Preparado (Sprint 18); falta el paso del propietario |
 | P1 | Exportación por el propietario desde la app (`datos.exportar`) | Cumplir con pedidos de portabilidad sin depender del operador |
 | P1 | Si el respaldo crece (> ~15 MB cifrado), mover las copias a R2/otro destino | El cupo gratuito de artefactos (500 MB) se agotaría. Requiere decisión de costos |
 | P2 | Restauración de un taller a un taller nuevo con controles | Ver 3 |
@@ -146,3 +147,40 @@ Crea una carpeta temporal, restaura el respaldo en un **D1 local de Miniflare** 
 | Archivo cifrado alterado, truncado, con otra clave o con la cabecera modificada | Se rechaza y no queda ningún archivo a medias (`tests/unit/respaldo-cifrado.test.ts`, 9 pruebas). |
 
 **No se implementó la restauración de un solo taller** (sigue sin poder garantizarse la integridad; ver §3). Restaurar siempre es de toda la plataforma, y siempre primero en una instancia aislada.
+
+## 9. Respaldo programado de las fotografías (Sprint 18) y estado real al 24/10/2026
+
+### Estado real de los respaldos automáticos (verificado, no supuesto)
+| Qué | Estado verificado el 2026-10-24 |
+|---|---|
+| **D1: Time Travel de Cloudflare** | Activo (`wrangler d1 time-travel info DB` devuelve el bookmark actual). Es lo único automático que existe y vive en la misma cuenta de Cloudflare. |
+| **D1: respaldo programado cifrado (GitHub Actions)** | **NO operativo.** El workflow `Respaldo D1` corre solo cada día (2 ejecuciones registradas por la API pública de GitHub: 2026-10-23 11:34 UTC y 2026-10-24 10:54 UTC) pero **las dos terminaron en rojo en el paso «Comprobar configuración»**: faltan el secreto `CLOUDFLARE_API_TOKEN`, el secreto `CLOUDFLARE_ACCOUNT_ID` y/o la variable `FIERRO_RESPALDO_CLAVE_PUBLICA` (§7). No hay ningún artefacto de respaldo en GitHub. |
+| **D1: respaldos manuales** | Existen en `respaldos/` (esta computadora, fuera de git): el último, `d1-antes-sprint16-20261023-1810.sql`, y los anteriores. Es lo que se usó antes de cada migración. No es una copia automática ni está fuera del equipo. |
+| **Fotografías (R2)** | **No hay copia automática.** Preparado: §9 abajo y `.github/workflows/respaldo-fotos.yml`. **Sin ejecución real todavía.** La D1 de producción registra **2 fotografías en estado «lista»**, subidas el 2026-10-24 a las 15:16 UTC (es decir, ya se está usando): **hoy no tienen ninguna copia**. Para protegerlas ya mismo, con el token de plataforma: `npm run fotos -- exportar` (a una carpeta fuera de git). |
+| **Restauración probada** | D1: `restaurar-aislado` con un respaldo cifrado real de producción (§8, 22/10/2026). Fotografías: exportar → borrar del bucket → restaurar → auditar con R2 real (`docs/FOTOGRAFIAS.md`, 24/10/2026) y la cadena cifrada incremental con el Worker local (pruebas automáticas). Nunca desde un artefacto producido por GitHub Actions, porque todavía no existe. |
+
+**No se puede afirmar que existan respaldos automáticos operativos fuera de Cloudflare hasta que una ejecución real de GitHub termine en verde y se haya probado abrir su resultado.**
+
+### Lo que tiene que hacer el titular de la plataforma (una sola vez; ~20 minutos)
+1. Completar la configuración del respaldo de D1 (§7, pasos 1 a 5). Es el mismo par de claves que usa el de fotografías.
+2. **Fotografías:** inventar un valor aleatorio de 32 o más caracteres (el gestor de contraseñas lo genera) y cargarlo en **dos lugares**:
+   ```bash
+   npx wrangler secret put FOTOS_BACKUP_TOKEN --name taller-mecanico
+   ```
+   y en **GitHub › Settings › Secrets and variables › Actions › Secrets** como `FOTOS_BACKUP_TOKEN`. En **Variables**: `FIERRO_RESPALDO_CLAVE_PUBLICA` (la misma de D1) y `FIERRO_URL` = `https://taller-mecanico.estrubia455.workers.dev`. Este token sólo permite *leer* las fotos para copiarlas; **no** se carga el token de plataforma en GitHub.
+3. **Primera ejecución real:** GitHub › Actions › *Respaldo fotos* › *Run workflow*. Debe terminar en verde y dejar un paquete completo (hoy con las 2 fotografías de producción) y el índice. Descargar el artefacto y **probar abrirlo**; después de que haya más fotos, volver a ejecutarla (debe generar un paquete *incremental* chico) y probar la cadena:
+   ```bash
+   npm run fotos -- respaldo-restaurar C:\ruta\fierro-fotos-XXXX-completo.fbk C:\ruta\fierro-fotos-YYYY-incremental.fbk --indice C:\ruta\indice.json --clave-privada C:\ruta\fierro-respaldo-PRIVADA.pem --salida C:\ruta\fotos-restauradas
+   ```
+   Recién con esa prueba exitosa la copia se considera operativa. Repetirla cada trimestre.
+4. Decidir (con costos a la vista) el destino a mediano plazo cuando las fotos superen unos cientos: ver «Costo» en `docs/FOTOGRAFIAS.md`.
+
+### Cómo funciona y cómo se recupera una pérdida
+Detalle en `docs/FOTOGRAFIAS.md` («Respaldo programado, incremental y cifrado»). En resumen: copia incremental cifrada con la clave pública (el repositorio es público: sólo se sube el `.fbk`), índice sin datos de clientes, copia completa cada 30 días, verificación de punta a punta antes de publicar, cero fotos en el repositorio y conservación 90 días.
+
+| Pérdida | Recuperación |
+|---|---|
+| Se borraron o dañaron archivos en R2 | `respaldo-restaurar` (cadena completo + incrementales) → `restaurar <carpeta> --remoto` → `auditar` (0 diferencias) |
+| Se perdió D1 (no R2) | Restaurar D1 (§3, §8) y correr `npm run fotos -- auditar`: las fotos siguen en R2 y sus filas vuelven con D1 (se relacionan por `foto_id`). Las fotos subidas *después* del último respaldo de D1 quedan como objetos huérfanos: `auditar` los lista |
+| Se perdieron D1 y R2 | Restaurar D1, luego la cadena de fotografías. Las filas de D1 y los archivos se encuentran por `foto_id`; lo posterior al último respaldo de cada uno se pierde |
+| Se perdió la cuenta de Cloudflare | Sólo con las copias de GitHub (D1 §7 y fotos §9) y la **clave privada**; sin ella ninguna copia cifrada se puede abrir |
