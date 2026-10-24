@@ -1,6 +1,6 @@
 // Catálogo automotor: lectura compartida y alta de vehículos desde el catálogo o a mano, sin pisar lo que el taller ya tenía.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { nuevoTaller, sqlLocal } from './cliente';
+import { nuevoPersonal, nuevoTaller, sqlLocal } from './cliente';
 
 beforeAll(async () => {
   // Fixture mínimo en la base local de ensayo (el catálogo real se carga con `npm run catalogo -- cargar`).
@@ -110,5 +110,76 @@ describe('catálogo automotor', () => {
     // Volver a escribir a mano desvincula del catálogo
     const e3 = await api.put(`/api/vehiculos/${v.body.id}`, { marca_texto: 'Toyota', modelo_texto: 'Hilux Especial', cat_modelo_id: null, cat_version_id: null, version: null });
     expect(e3.body).toMatchObject({ marca: 'Toyota', modelo: 'Hilux Especial', cat_modelo_id: null, version: null });
+  });
+});
+
+describe('explorador del catálogo (Sprint 17)', () => {
+  it('busca sin elegir marca, sin tildes ni mayúsculas, y los filtros se relacionan entre sí', async () => {
+    const { api } = await nuevoTaller('Taller explorador');
+    const directa = await api.get('/api/catalogo-auto/buscar?q=AMÁROK');
+    expect(directa.status).toBe(200);
+    expect(directa.body.total).toBe(1);
+    expect(directa.body.modelos[0]).toMatchObject({ id: 'mo_t_amarok', marca: 'Volkswagen', nombre: 'Amarok', versiones: 2, anios: [2018, 2019, 2020] });
+    // Por apodo de marca, por versión y por varias palabras a la vez
+    expect((await api.get('/api/catalogo-auto/buscar?q=vw')).body.modelos.map((m: any) => m.nombre)).toEqual(['Amarok', 'Gol Trend']);
+    expect((await api.get('/api/catalogo-auto/buscar?q=highline')).body.modelos.map((m: any) => m.id)).toEqual(['mo_t_amarok']);
+    expect((await api.get('/api/catalogo-auto/buscar?q=volkswagen%20highline%20v6')).body.total).toBe(1);
+    expect((await api.get('/api/catalogo-auto/buscar?q=amarok%20srv')).body.total).toBe(0);
+    // Marca y año acotan; las facetas ofrecen sólo opciones que dan resultados
+    const vw2018 = (await api.get('/api/catalogo-auto/buscar?marca=ma_t_vw&anio=2018')).body;
+    expect(vw2018.modelos.map((m: any) => m.id)).toEqual(['mo_t_amarok', 'mo_t_goltrend']);
+    const vw2020 = (await api.get('/api/catalogo-auto/buscar?marca=ma_t_vw&anio=2020')).body;
+    expect(vw2020.modelos.map((m: any) => m.id)).toEqual(['mo_t_amarok']);
+    expect(vw2020.facetas.marcas.map((m: any) => m.nombre)).toEqual(expect.arrayContaining(['Volkswagen', 'Toyota']));
+    expect(vw2020.facetas.modelos.map((m: any) => m.id)).toEqual(['mo_t_amarok']);
+    expect(vw2020.facetas.anios).toEqual([2020, 2019, 2018, 2017]);
+    // Paginación
+    const p1 = (await api.get('/api/catalogo-auto/buscar?limite=2')).body;
+    const p2 = (await api.get('/api/catalogo-auto/buscar?limite=2&desde=2')).body;
+    expect(p1.modelos).toHaveLength(2);
+    expect(p1.total).toBeGreaterThan(2);
+    expect(p2.modelos.map((m: any) => m.id)).not.toEqual(p1.modelos.map((m: any) => m.id));
+    // Entradas raras no rompen nada ni inyectan SQL
+    expect((await api.get("/api/catalogo-auto/buscar?q=%27%20OR%201%3D1%20--")).body.total).toBe(0);
+    expect((await api.get('/api/catalogo-auto/buscar?anio=abc')).status).toBe(400);
+    expect((await api.get('/api/catalogo-auto/buscar?limite=1000')).status).toBe(400);
+  });
+
+  it('las fichas técnicas están vacías (sin inventar nada) y sólo se exponen enlaces https de fichas con fuente', async () => {
+    const { api } = await nuevoTaller('Taller fichas');
+    expect((await api.get('/api/catalogo-auto/modelos/mo_t_amarok/fichas')).body).toEqual([]);
+    expect((await api.get('/api/catalogo-auto/modelos/no-existe/fichas')).status).toBe(404);
+    await sqlLocal(`
+      INSERT OR REPLACE INTO cat_fichas (id, modelo_id, version_id, aceite_recomendado, aceite_capacidad_l, filtros, intervalos, documentacion_url, fuente, fecha_verificacion) VALUES
+        ('fi_t_1', 'mo_t_hilux', 've_t_3', '5W-30', 7.5, '{"aceite":"X-1"}', 'no es json', 'http://inseguro.example/manual.pdf', 'Manual del fabricante (prueba)', '2026-10-24');
+    `);
+    try {
+      const f = (await api.get('/api/catalogo-auto/modelos/mo_t_hilux/fichas')).body;
+      expect(f).toHaveLength(1);
+      expect(f[0]).toMatchObject({ aceite_recomendado: '5W-30', aceite_capacidad_l: 7.5, filtros: { aceite: 'X-1' }, intervalos: null, documentacion_url: null, fuente: 'Manual del fabricante (prueba)' });
+      expect((await api.get('/api/catalogo-auto/modelos/mo_t_hilux')).body.fichas).toBe(1);
+    } finally {
+      await sqlLocal("DELETE FROM cat_fichas WHERE id = 'fi_t_1'");
+    }
+  });
+
+  it('un mecánico sin permisos económicos lo consulta; sin sesión no; y los vehículos del taller son privados', async () => {
+    const A = await nuevoTaller('Taller A explorador', 2);
+    const B = await nuevoTaller('Taller B explorador');
+    const mec = await nuevoPersonal(A.api, 'mecanico');
+    const caja = await nuevoPersonal(A.api, 'caja');
+    expect((await mec.api.get('/api/catalogo-auto/buscar?q=amarok')).status).toBe(200);
+    expect((await mec.api.get('/api/catalogo-auto/modelos/mo_t_amarok/fichas')).status).toBe(200);
+    expect((await caja.api.get('/api/catalogo-auto/buscar?q=amarok')).status).toBe(200); // información técnica general: no exige precios ni finanzas
+    expect((await fetch('http://127.0.0.1:8799/api/catalogo-auto/buscar?q=amarok')).status).toBe(401);
+    const ca = await A.api.post('/api/clientes', { nombre: 'Cliente A' });
+    const va = await A.api.post('/api/vehiculos', { cliente_id: ca.body.id, patente: 'AA100AA', cat_modelo_id: 'mo_t_amarok', cat_version_id: 've_t_1', anio: 2020 });
+    const cb = await B.api.post('/api/clientes', { nombre: 'Cliente B' });
+    const vb = await B.api.post('/api/vehiculos', { cliente_id: cb.body.id, patente: 'BB100BB', cat_modelo_id: 'mo_t_amarok' });
+    expect(va.status).toBe(201);
+    expect((await A.api.get('/api/vehiculos?cat_modelo_id=mo_t_amarok')).body.map((v: any) => v.patente)).toEqual(['AA100AA']);
+    expect((await B.api.get('/api/vehiculos?cat_modelo_id=mo_t_amarok')).body.map((v: any) => v.patente)).toEqual(['BB100BB']);
+    expect((await A.api.get('/api/vehiculos?cat_modelo_id=mo_t_hilux')).body).toEqual([]);
+    expect(vb.body.id).not.toBe(va.body.id);
   });
 });

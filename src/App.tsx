@@ -50,16 +50,20 @@ const PanelAsistencia = lazy(() => import('./pages/personal/PanelAsistencia').th
 const RelojAdmin = lazy(() => import('./pages/personal/RelojAdmin').then((m) => ({ default: m.RelojAdmin })));
 const Informes = lazy(() => import('./pages/Informes').then((m) => ({ default: m.Informes })));
 const Mantenimientos = lazy(() => import('./pages/Mantenimientos').then((m) => ({ default: m.Mantenimientos })));
+const CatalogoAutomotor = lazy(() => import('./pages/CatalogoAutomotor').then((m) => ({ default: m.CatalogoAutomotor })));
 const Tempario = lazy(() => import('./pages/Tempario').then((m) => ({ default: m.Tempario })));
 const Productividad = lazy(() => import('./pages/Productividad').then((m) => ({ default: m.Productividad })));
 const PuestaEnMarcha = lazy(() => import('./pages/config/PuestaEnMarcha').then((m) => ({ default: m.PuestaEnMarcha })));
 const Importar = lazy(() => import('./pages/config/Importar').then((m) => ({ default: m.Importar })));
 const Contabilidad = lazy(() => import('./pages/Contabilidad').then((m) => ({ default: m.Contabilidad })));
 
+/** Información técnica general: la ve quien trabaja con vehículos, consulta el catálogo o tiene órdenes asignadas (sin exigir precios, finanzas ni estadísticas). */
+const PERMISOS_CATALOGO_AUTO: Permiso[] = ['vehiculos.ver', 'catalogo.ver', 'ordenes.asignadas'];
+
 /** Guarda de ruta: el menú ya oculta las opciones, pero quien escribe la dirección a mano ve un aviso claro (la API igual verifica en el servidor). */
-function Requiere({ permiso, children }: { permiso: Permiso; children: ReactElement }) {
+function Requiere({ permiso, children }: { permiso: Permiso | Permiso[]; children: ReactElement }) {
   const { puede } = useAuth();
-  return puede(permiso) ? <Suspense fallback={<Cargando />}>{children}</Suspense> : <Vacio icono={<Lock className="size-5" />} titulo="No tenés acceso a esta sección" texto="Pedile al propietario o a un administrador que te habilite el permiso." />;
+  return [permiso].flat().some((p) => puede(p)) ? <Suspense fallback={<Cargando />}>{children}</Suspense> : <Vacio icono={<Lock className="size-5" />} titulo="No tenés acceso a esta sección" texto="Pedile al propietario o a un administrador que te habilite el permiso." />;
 }
 
 /** Quien solo ve sus órdenes asignadas (mecánico) empieza en "Mis trabajos" en vez del tablero general. */
@@ -108,6 +112,7 @@ export function App() {
         <Route path="agenda" element={<Requiere permiso="turnos.ver"><Agenda /></Requiere>} />
         <Route path="mantenimientos" element={<Requiere permiso="mantenimientos.ver"><Mantenimientos /></Requiere>} />
         <Route path="recordatorios" element={<Navigate to="/mantenimientos" replace />} />
+        <Route path="catalogo-automotor" element={<Requiere permiso={PERMISOS_CATALOGO_AUTO}><CatalogoAutomotor /></Requiere>} />
         <Route path="tempario" element={<Requiere permiso="catalogo.ver"><Tempario /></Requiere>} />
         <Route path="productividad" element={<Requiere permiso="productividad.ver"><Productividad /></Requiere>} />
         <Route path="asistencia" element={<Requiere permiso="asistencia.fichar"><Asistencia /></Requiere>} />

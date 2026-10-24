@@ -217,10 +217,12 @@ const SELECT_VEHICULO = `SELECT v.*, ma.nombre AS marca, mo.nombre AS modelo, ma
 
 maestros.get('/vehiculos', requirePerm('vehiculos.ver'), async (c) => {
   const s = c.get('sesion');
-  const { q, cliente_id } = query(c, z.object({ q: z.string().optional(), cliente_id: z.string().optional() }));
+  const { q, cliente_id, cat_modelo_id } = query(c, z.object({ q: z.string().optional(), cliente_id: z.string().optional(), cat_modelo_id: z.string().max(64).optional() }));
   const cond: string[] = ['v.taller_id = ?', 'v.activo = 1'];
   const params: unknown[] = [s.tallerId];
   if (cliente_id) (cond.push('v.cliente_id = ?'), params.push(cliente_id));
+  // Vehículos del taller vinculados a un modelo del catálogo (directo o por el modelo del taller): sólo ve los suyos.
+  if (cat_modelo_id) (cond.push('(v.cat_modelo_id = ? OR mo.cat_modelo_id = ?)'), params.push(cat_modelo_id, cat_modelo_id));
   if (q) {
     cond.push('(v.patente LIKE ? OR c.nombre LIKE ? OR ma.nombre LIKE ? OR mo.nombre LIKE ?)');
     params.push(like(normalizarPatente(q) || q), like(q), like(q), like(q));

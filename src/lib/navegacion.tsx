@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import {
   Banknote, BarChart3, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, PackageSearch, Package, PiggyBank,
   Receipt, Scale, ScrollText, Settings, ShoppingCart, Tags, Truck, UserCog, Users, Wallet, Wrench, KeyRound, ShieldCheck, History, UserRound, BadgeDollarSign, ShoppingBasket,
-  Warehouse, Clock, MonitorSmartphone, Rocket, Upload, UsersRound, CalendarCheck, HardHat, Timer, Activity,
+  Warehouse, Clock, MonitorSmartphone, Rocket, Upload, UsersRound, CalendarCheck, HardHat, Timer, Activity, BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permiso } from '@shared/permisos';
@@ -49,6 +49,7 @@ export const GRUPOS: GrupoNav[] = [
       item('clientes', 'Clientes', '/clientes', Users, 'cliente personas contactos', 'clientes.ver'),
       item('vehiculos', 'Vehículos', '/vehiculos', Car, 'autos patentes historial', 'vehiculos.ver'),
       item('mantenimientos', 'Mantenimientos', '/mantenimientos', Bell, 'service vencimientos avisos recordatorios programados kilometraje proximos vencidos', 'mantenimientos.ver'),
+      item('catalogo-auto', 'Catálogo automotor', '/catalogo-automotor', BookOpen, 'marcas modelos versiones motor motorizacion ficha tecnica manual aceite dnrpa autos', undefined, undefined, (puede) => puede('vehiculos.ver') || puede('catalogo.ver') || puede('ordenes.asignadas')),
       item('tempario', 'Tempario', '/tempario', Timer, 'tiempos mano de obra operaciones servicios tarifas horas precios catalogo', 'catalogo.ver'),
       item('mecanicos', 'Mecánicos sin usuario', '/configuracion?tab=mecanicos', UserCog, 'operarios equipo tercerizados', 'usuarios.gestionar'),
     ],

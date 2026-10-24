@@ -935,3 +935,28 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
   - **Recuperación:** exportar → verificar → borrar los 3 originales del bucket → `auditar` (3 faltantes) → `restaurar --remoto` → `auditar` (0 diferencias) → re-exportar: hashes idénticos. La auditoría también detectó correctamente los 20 objetos huérfanos que dejó la suite.
   - **Limpieza:** todos los objetos de prueba se borraron del bucket (auditoría final: 0 objetos); el bucket de producción queda vacío.
 - **No verificado online:** no se inició sesión en producción (no se usan credenciales reales), así que la subida desde la URL pública con un usuario real no se probó; sí el binding, la configuración y el código idéntico. Tampoco cámara física ni Safari/iOS.
+
+# Sprint 17 — Explorador del catálogo automotor
+
+## 104. Qué se hizo
+- **Pantalla "Catálogo automotor"** (Taller → Catálogo automotor, `/catalogo-automotor`, `src/pages/CatalogoAutomotor.tsx`): buscador + filtros Marca, Modelo, Año, Versión y Motorización, todos relacionados entre sí (cada lista ofrece sólo opciones que dan resultados). Se puede buscar "Amarok" sin elegir marca; ignora mayúsculas, tildes y signos; el apodo `vw` también encuentra Volkswagen. Estado en la dirección (`?q=&marca=&modelo=&anio=&version=&motor=`): se puede compartir y funciona Atrás. Resultados en tarjetas con paginación ("Ver más modelos", 24 por vez) y versiones con "Ver más".
+- **Ficha de la versión:** *Identificación* (marca, modelo, año, versión, descripción registral, motorización y combustible sólo si el registro los dice, fuente DNRPA/CC BY 4.0 con enlace al dataset), *Información técnica* (motor, lubricantes, capacidades, filtros, intervalos) y *Documentación* (manual del propietario, manual técnico, mantenimiento). Reutiliza `cat_fichas` (Sprint 15), que sigue **vacía**: todo campo sin dato dice "Sin datos verificados" y un aviso aclara que la descripción registral **no** es una especificación oficial del fabricante. Nada se estima ni se deduce. En escritorio la ficha va al costado; en tablet y celular se abre a pantalla completa.
+- **Documentación:** sólo estructura visual; no hay enlaces ficticios ni manuales descargados. Si una ficha verificada trae `documentacion_url`, se muestra únicamente si es `https` (el servidor descarta el resto).
+- **Integración con el taller:** *Registrar vehículo* (con `vehiculos.crear`): elige el cliente y abre el alta de siempre con marca, modelo, versión, año, motor y combustible ya cargados, vinculada al catálogo; al guardar lleva a la ficha del vehículo. *En tu taller*: vehículos de ese modelo (marca "Misma versión" si coincide), con `vehiculos.ver`.
+
+## 105. Endpoints (sin migraciones, sin tocar datos)
+- Se reutilizan `/api/catalogo-auto/marcas`, `/marcas/:id/modelos`, `/modelos/:id` e `/info`. Se agregaron **dos de sólo lectura**: `GET /api/catalogo-auto/buscar?q&marca&anio&limite&desde` (modelos paginados + facetas de marcas, modelos y años; cada palabra debe aparecer en marca/apodo, modelo o alguna versión) y `GET /api/catalogo-auto/modelos/:id/fichas`. Además `GET /api/vehiculos` acepta `cat_modelo_id` (siempre acotado al taller de la sesión). Una búsqueda necesita cruzar marcas, modelos y versiones, algo que los endpoints existentes no podían resolver sin bajar todo al navegador.
+- Consultas con parámetros, `LIKE` sobre claves normalizadas (sin comodines del usuario) e índices existentes; las respuestas del catálogo siguen con `Cache-Control: private, max-age=3600`.
+
+## 106. Permisos
+- Sin permiso nuevo. Se ve con **cualquiera** de `vehiculos.ver`, `catalogo.ver` u `ordenes.asignadas` (el mecánico entra sin permisos de precios, finanzas ni estadísticas). Menú, ruta y los endpoints nuevos lo exigen; sin sesión → 401. El catálogo es compartido; clientes y vehículos siguen siendo privados de cada taller (comprobado con dos talleres que tienen vehículos del mismo modelo).
+
+## 107. Pruebas
+- `npm run build` y `npm test`: **116 unitarias + 398 de integración, todas OK** (3 pruebas nuevas en `tests/api/catalogo-auto.test.ts`: búsqueda sin marca/tildes/apodo/versión, filtros relacionados y paginación, entradas hostiles; fichas vacías y enlaces no https descartados; mecánico y caja sin permisos económicos, 401 sin sesión, aislamiento entre talleres).
+- A mano, instancia local aislada (8790/5180) con el catálogo real (211/1.548/5.674): "amarok" → 1 modelo, 127 versiones; Volkswagen → Amarok → 2022 → Highline V6 3.0L 258 CV muestra la ficha con "Sin datos verificados"; alta de un vehículo desde la ficha (cliente → formulario precargado → guardado) y su aparición en "En tu taller". Sin scroll horizontal a 375, 768 y escritorio.
+- **Hallazgo corregido:** el primer ensayo mostró un 400 al abrir la pantalla (el cliente enviaba `anio=` vacío); ahora sólo envía los filtros con valor.
+- **No comprobado:** dispositivos reales (sólo emulación de ancho) ni cómo se ve una ficha con datos (no hay ninguna cargada; se probó en la API con una ficha de prueba, luego borrada).
+
+## 108. Despliegue y pendientes
+- Sin migraciones ni cambios de datos; commit directo a `main` (Workers Builds). Resultado de la verificación online al final de esta sección.
+- Pendiente a propósito: **carga masiva de especificaciones** (cada ficha exige fuente y fecha), documentos reales con licencia verificada, y vínculo versión↔ficha por motorización cuando existan fichas.
