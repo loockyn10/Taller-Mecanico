@@ -1042,3 +1042,6 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
 
 ## 121. Resultado de las pruebas
 - `npm run build` OK; `npm test`: **145 unitarias + 431 de integración, todas OK** (nuevas: 12 + 9). Pantalla probada en una instancia aislada (8790/5180): el botón «Imprimir orden» abre la ventana con las tres copias y el PDF se descarga como `application/pdf` válido (el visor de PDF del panel de prueba no pinta el iframe; la lectura visual se hizo rasterizando el PDF).
+
+## 122. Despliegue (2026-10-24)
+- Commit `77ef47a` en `main` (sin ramas ni PR; sin migraciones). Verificación online: la SPA publicada sirve `index-B73wq8_h.js`, idéntico en nombre al build local y con la llamada `/pdf?copia=`; `/api/salud` responde 200 y `GET /api/ordenes/:id/pdf` existe y exige sesión (401). **No se inició sesión en producción** (no se usan credenciales reales ni se crean datos en talleres reales): el PDF autenticado se probó en la instancia local equivalente y en las pruebas de integración, no en la URL pública.
