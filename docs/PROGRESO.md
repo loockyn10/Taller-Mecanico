@@ -965,7 +965,7 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
 
 # Sprint 18 — Checklist de recepción y entrega de vehículos + respaldo de fotografías
 
-> **PENDIENTE PRIORITARIO ANTES DE LA ENTREGA COMERCIAL → §115: hoja A4 de la orden de trabajo con renglones para el mecánico y copia para administración (requerimiento confirmado del cliente piloto; el formato todavía NO está definido y NO se implementó).**
+> ~~PENDIENTE PRIORITARIO → §115: hoja A4 de la OT con renglones y copia para administración.~~ **Implementado en el Sprint 19 (§118 en adelante)** como base flexible; sigue pendiente comparar con una muestra real del cliente piloto.
 
 ## 109. Qué se hizo
 - **Etapa 1 · Respaldo de fotografías** (preparado, sin ejecución real: ver §110). `npm run fotos -- respaldo` (copia incremental cifrada y verificada de punta a punta) y `respaldo-restaurar` (cadena completa + incrementales → carpeta verificada → `restaurar` → `auditar`); `.github/workflows/respaldo-fotos.yml`; endpoint de **sólo lectura** con credencial propia `FOTOS_BACKUP_TOKEN` (`/api/plataforma/fotos-respaldo/manifiesto|:id/archivo`, `worker/modules/respaldo-fotos.ts`) para no cargar el token de plataforma en GitHub. Reutiliza el manifiesto de D1, `verificarCarpeta` y el cifrado híbrido del respaldo de D1; `manifiestoFotos`/`archivoParaExportar` ahora se comparten en `worker/lib/fotos.ts` con la API de plataforma.
@@ -1017,3 +1017,28 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
 - Firma digital certificada, PDF o impresión del checklist y la hoja de OT (§115).
 - Reclasificar la etapa de una foto ya subida; modo sin conexión; aviso a la plataforma cuando el respaldo de fotos deja de llegar.
 - Verificación en dispositivos reales y verificación autenticada en producción.
+
+# Sprint 19 — PDF e impresión de órdenes de trabajo
+
+## 118. Qué se hizo
+- **Botón «Imprimir orden»** en el detalle de la OT (reemplaza a «Hoja taller») y aviso «Orden creada. ¿Querés imprimir…?» al crearla (`?nueva=1`). Ventana con: Mecánico / Administración / Ambas copias, vista previa del PDF, **Descargar**, **Abrir en otra pestaña** e **Imprimir** (sólo al apretarlo; nunca automático). `src/components/ImprimirOrden.tsx`.
+- **PDF A4 vertical generado en el servidor**: `GET /api/ordenes/:id/pdf?copia=mecanico|administracion|ambas`. «Ambas» = un único PDF con una hoja por copia, cada una rotulada («COPIA MECÁNICO» / «COPIA ADMINISTRACIÓN»). Detalle completo, maquetación y cómo ajustar las variantes en `docs/HOJA_OT.md`.
+- **Sin dependencias ni servicios externos**: escritor de PDF propio (`worker/lib/pdf/escritor.ts`, `metricas.ts`: Helvetica estándar, WinAnsi, JPEG), maquetación y variantes en `worker/lib/hoja-orden.ts`, datos en `worker/lib/hoja-orden-datos.ts`.
+- **Variantes independientes sobre una sola lógica**: `VARIANTES.mecanico` y `VARIANTES.administracion` (rótulo, permisos, secciones, anotaciones). Hoy comparten los datos operativos básicos; no se asumió ningún precio en administración.
+- **Contenido**: identidad del taller (y logo JPEG), N° y fecha de apertura, cliente y teléfono (sólo con `clientes.ver`), marca/modelo, patente, año, km registrado, técnico y participantes, entrega prometida, motivo, trabajos solicitados (con casilla), repuestos (sólo cantidades), diagnóstico y observaciones, y **«ANOTACIONES DEL MECÁNICO»** desde los 145 mm (~47 % de la hoja, 14 renglones de 9 mm). Contenido extenso → hojas de continuación; las anotaciones quedan en la última hoja o en una propia.
+- **Seguridad**: consulta propia y acotada (no reutiliza el detalle administrativo ni lee importes/costos/notas internas); permisos nuevos `ordenes.imprimir` y `ordenes.imprimir_administracion` (el mecánico imprime sólo la suya y de sus órdenes asignadas); taller siempre de la sesión; metadatos del PDF sin autor ni datos de personas; cada impresión queda en la auditoría.
+- La vista HTML «orden-taller» de `Imprimir.tsx` se eliminó (la reemplaza el PDF). «Imprimir» de la OT con importes para el cliente no se tocó.
+- Sin cambios en ARCA, respaldos, contabilidad, inventario, licencias ni migración desde SistroFix. **Sin migraciones** (los permisos se derivan de las plantillas).
+
+## 119. Referencia SistroFix y pendiente de validación
+- Se leyó el artículo público de SistroFix sobre recibir una reparación: la orden se imprime al guardar como comprobante de recepción para el cliente. No se copió diseño, marca ni recurso.
+- **Falta comparar el resultado con una muestra real del comprobante del cliente piloto** y confirmar: si las dos copias deben ser idénticas o distintas, si administración necesita precios/firmas/otros datos y qué rótulo prefiere. Cambiarlo es editar la definición de la variante (ver `docs/HOJA_OT.md`).
+
+## 120. Pruebas
+- `tests/unit/hoja-orden.test.ts` (12): estructura y xref del PDF, metadatos, datos legibles con acentos/ñ, ausencia de dinero, zona de anotaciones (≥13 renglones de ≥8,5 mm, nada de contenido dentro), «ambas», datos faltantes, orden extensa con continuación y ningún texto fuera del margen, anotaciones en hoja propia, textos sin espacios y caracteres raros, logo JPEG.
+- `tests/api/hoja-orden.test.ts` (9): PDF real descargado y leído, cero cifras de dinero ni notas internas con precios y nota reservada en la OT, «ambas», permisos por copia, mecánico sólo lo suyo y sin datos del cliente, otorgar/retirar permisos rige al instante, dos talleres (404), auditoría.
+- **Revisión visual** del PDF renderizado a imagen (PyMuPDF) de: copia mecánico, copia administración, orden extensa (4 hojas por copia, continuación con título repetido, hoja final sólo de anotaciones) y textos hostiles. Resultados de `npm run build` y `npm test` en §121.
+- **No comprobado**: impresoras físicas ni lectores de PDF distintos del visor del navegador; Safari/iOS.
+
+## 121. Resultado de las pruebas
+- `npm run build` OK; `npm test`: **145 unitarias + 431 de integración, todas OK** (nuevas: 12 + 9). Pantalla probada en una instancia aislada (8790/5180): el botón «Imprimir orden» abre la ventana con las tres copias y el PDF se descarga como `application/pdf` válido (el visor de PDF del panel de prueba no pinta el iframe; la lectura visual se hizo rasterizando el PDF).

@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { duracion, fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
 import { FotosOrden } from '@/components/Fotos';
+import { ImprimirOrden } from '@/components/ImprimirOrden';
 import { ChecklistOrden } from '@/components/checklist/Checklist';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
@@ -168,6 +169,8 @@ export function OrdenDetalle() {
   const { data: o, isLoading, error, refetch } = useQuery({ queryKey: ['orden', id], queryFn: () => api.get(`/ordenes/${id}`) });
   const { data: mecanicos = [] } = useMecanicos();
   const [params0] = useSearchParams();
+  const [imprimirOrden, setImprimirOrden] = useState(false);
+  const [recienCreada, setRecienCreada] = useState(() => params0.get('nueva') === '1');
   const [tab, setTab] = useState<'trabajo' | 'tareas' | 'fotos' | 'checklist' | 'historial' | 'cobro'>(() => (['tareas', 'fotos', 'checklist', 'historial'].includes(params0.get('tab') ?? '') ? (params0.get('tab') as 'checklist') : 'trabajo'));
   const [editando, setEditando] = useState(false);
   const [estadoModal, setEstadoModal] = useState(false);
@@ -269,6 +272,15 @@ export function OrdenDetalle() {
   return (
     <>
       {dialogo}
+      {puede('ordenes.imprimir') && <ImprimirOrden ordenId={o.id} numero={o.numero} abierto={imprimirOrden} onCerrar={() => setImprimirOrden(false)} />}
+      {recienCreada && puede('ordenes.imprimir') && !imprimirOrden && (
+        <Aviso tono="verde" className="mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>Orden creada. ¿Querés imprimir la hoja para el mecánico?</span>
+            <span className="flex gap-2"><Boton tam="sm" variante="primario" icono={<Printer className="size-4" />} onClick={() => setImprimirOrden(true)}>Imprimir orden</Boton><Boton tam="sm" variante="fantasma" onClick={() => setRecienCreada(false)}>Ahora no</Boton></span>
+          </div>
+        </Aviso>
+      )}
       <Encabezado
         volver="/ordenes"
         titulo={<span className="flex flex-wrap items-center gap-3">OT #{numero(o.numero)} <EstadoOTBadge estado={o.estado} /></span>}
@@ -277,7 +289,7 @@ export function OrdenDetalle() {
           <>
             {wa && <a href={wa} target="_blank" rel="noreferrer"><Boton icono={<MessageCircle className="size-4" />}>WhatsApp</Boton></a>}
             <Boton icono={<Printer className="size-4" />} onClick={() => window.open(`/imprimir/orden/${o.id}`, '_blank')}>Imprimir</Boton>
-            <Boton icono={<Printer className="size-4" />} onClick={() => window.open(`/imprimir/orden-taller/${o.id}`, '_blank')} title="Orden para el mecánico, sin precios">Hoja taller</Boton>
+            {puede('ordenes.imprimir') && <Boton icono={<Printer className="size-4" />} onClick={() => setImprimirOrden(true)} title="PDF A4 para el mecánico y copia para administración, sin precios">Imprimir orden</Boton>}
             {puedeTrabajar && <Boton variante="primario" icono={<ArrowRight className="size-4" />} onClick={() => setEstadoModal(true)}>Cambiar estado</Boton>}
           </>
         }

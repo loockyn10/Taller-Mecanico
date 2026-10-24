@@ -1,5 +1,6 @@
-// Vistas imprimibles (A4): presupuesto, OT (cliente y hoja de taller sin precios) y comprobante interno.
-// "Guardar como PDF" desde el diálogo de impresión del navegador.
+// Vistas imprimibles (A4): presupuesto, OT con importes (para el cliente) y comprobante interno.
+// "Guardar como PDF" desde el diálogo de impresión del navegador. La hoja de la OT para el mecánico y la copia de administración
+// se generan como PDF en el servidor (`ImprimirOrden`, `GET /api/ordenes/:id/pdf`).
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -12,7 +13,7 @@ import { CONDICION_IVA_LABEL, ESTADO_OT_LABEL, type CondicionIva, type EstadoOT 
 import { ImprimirDinero } from './ImprimirDinero';
 import { ImprimirCompras } from './ImprimirCompras';
 
-const RUTA: Record<string, string> = { presupuesto: '/presupuestos/', orden: '/ordenes/', 'orden-taller': '/ordenes/', venta: '/ventas/' };
+const RUTA: Record<string, string> = { presupuesto: '/presupuestos/', orden: '/ordenes/', venta: '/ventas/' };
 
 /** Recibos y estados de cuenta tienen su propia vista; el resto de los documentos comparte ésta. */
 export function Imprimir() {
@@ -37,7 +38,6 @@ function ImprimirDocumento() {
   if (isLoading || !cfg) return <Cargando />;
   if (error) return <div className="p-6"><ErrorCaja error={error} /></div>;
   const t = cfg.taller;
-  const sinPrecios = tipo === 'orden-taller';
   const titulo = tipo === 'presupuesto' ? `Presupuesto P-${numero(d.numero)}` : tipo === 'venta' ? `Comprobante interno N° ${numero(d.numero)}` : `Orden de trabajo N° ${numero(d.numero)}`;
   const vehiculo = [d.patente, d.marca, d.modelo, d.anio].filter(Boolean).join(' · ');
 
@@ -95,10 +95,9 @@ function ImprimirDocumento() {
           <tr className="border-b border-black text-left text-[11px] uppercase">
             <th className="py-1.5">Descripción</th>
             <th className="py-1.5 text-right">Cant.</th>
-            {!sinPrecios && <th className="py-1.5 text-right">P. unit.</th>}
-            {!sinPrecios && <th className="py-1.5 text-right">Desc.</th>}
-            {!sinPrecios && <th className="py-1.5 text-right">Subtotal</th>}
-            {sinPrecios && <th className="w-16 py-1.5 text-center">Hecho</th>}
+            <th className="py-1.5 text-right">P. unit.</th>
+            <th className="py-1.5 text-right">Desc.</th>
+            <th className="py-1.5 text-right">Subtotal</th>
           </tr>
         </thead>
         <tbody>
@@ -106,33 +105,25 @@ function ImprimirDocumento() {
             <tr key={i.id} className="border-b border-slate-200">
               <td className="py-1.5">{i.descripcion}</td>
               <td className="py-1.5 text-right">{cantidad(i.cantidad)}</td>
-              {!sinPrecios && <td className="py-1.5 text-right">{money(i.precio_unitario)}</td>}
-              {!sinPrecios && <td className="py-1.5 text-right">{i.desc_pct ? `${i.desc_pct}%` : ''}</td>}
-              {!sinPrecios && <td className="py-1.5 text-right">{money(i.subtotal)}</td>}
-              {sinPrecios && <td className="py-1.5 text-center">☐</td>}
+              <td className="py-1.5 text-right">{money(i.precio_unitario)}</td>
+              <td className="py-1.5 text-right">{i.desc_pct ? `${i.desc_pct}%` : ''}</td>
+              <td className="py-1.5 text-right">{money(i.subtotal)}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      {!sinPrecios && (
-        <div className="ml-auto mt-4 w-64 space-y-1">
-          <div className="flex justify-between"><span>Repuestos</span><span>{money(d.subtotal_articulos)}</span></div>
-          <div className="flex justify-between"><span>Mano de obra</span><span>{money(d.subtotal_servicios)}</span></div>
-          {d.descuento > 0 && <div className="flex justify-between"><span>Descuento</span><span>-{money(d.descuento)}</span></div>}
-          {d.iva > 0 && <div className="flex justify-between"><span>IVA {d.iva_pct}%</span><span>{money(d.iva)}</span></div>}
-          {d.recargo > 0 && <div className="flex justify-between"><span>Recargo {d.recargo_pct}%</span><span>{money(d.recargo)}</span></div>}
-          <div className="flex justify-between border-t border-black pt-1 text-base font-bold"><span>Total</span><span>{money(d.total)}</span></div>
-        </div>
-      )}
+      <div className="ml-auto mt-4 w-64 space-y-1">
+        <div className="flex justify-between"><span>Repuestos</span><span>{money(d.subtotal_articulos)}</span></div>
+        <div className="flex justify-between"><span>Mano de obra</span><span>{money(d.subtotal_servicios)}</span></div>
+        {d.descuento > 0 && <div className="flex justify-between"><span>Descuento</span><span>-{money(d.descuento)}</span></div>}
+        {d.iva > 0 && <div className="flex justify-between"><span>IVA {d.iva_pct}%</span><span>{money(d.iva)}</span></div>}
+        {d.recargo > 0 && <div className="flex justify-between"><span>Recargo {d.recargo_pct}%</span><span>{money(d.recargo)}</span></div>}
+        <div className="flex justify-between border-t border-black pt-1 text-base font-bold"><span>Total</span><span>{money(d.total)}</span></div>
+      </div>
 
-      {sinPrecios && d.checklist && (
-        <section className="mt-4 border-t border-slate-300 pt-3 text-xs">
-          <strong>Check-list:</strong> combustible {d.checklist.combustible ?? '—'}; daños: {d.checklist.datos.danos.join(', ') || 'ninguno'}; testigos: {d.checklist.datos.testigos.join(', ') || 'ninguno'}.
-        </section>
-      )}
       {d.observaciones && <p className="mt-4"><strong>Observaciones:</strong> {d.observaciones}</p>}
-      {!sinPrecios && (tipo === 'presupuesto' ? cfg.config.pie_presupuesto || cfg.config.pie_documentos : cfg.config.pie_documentos) && <p className="mt-6 border-t border-slate-300 pt-2 text-xs text-slate-600">{tipo === 'presupuesto' ? cfg.config.pie_presupuesto || cfg.config.pie_documentos : cfg.config.pie_documentos}</p>}
+      {(tipo === 'presupuesto' ? cfg.config.pie_presupuesto || cfg.config.pie_documentos : cfg.config.pie_documentos) && <p className="mt-6 border-t border-slate-300 pt-2 text-xs text-slate-600">{tipo === 'presupuesto' ? cfg.config.pie_presupuesto || cfg.config.pie_documentos : cfg.config.pie_documentos}</p>}
       {tipo === 'orden' && (
         <div className="mt-16 grid grid-cols-2 gap-10 text-center text-xs">
           <div className="border-t border-black pt-1">Firma del cliente</div>

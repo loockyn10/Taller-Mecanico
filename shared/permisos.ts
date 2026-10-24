@@ -19,6 +19,8 @@ export const PERMISOS = [
   'ordenes.crear',
   'ordenes.modificar', // editar ítems, cambiar estados y completar el check-list de cualquier orden
   'ordenes.asignar', // asignar el mecánico responsable, los participantes y las tareas de las órdenes (sin tocar importes)
+  'ordenes.imprimir', // imprimir la hoja de la orden para el mecánico (PDF A4 sin precios), sólo de las órdenes a las que tiene acceso
+  'ordenes.imprimir_administracion', // imprimir además la copia de administración
   'turnos.ver',
   'turnos.gestionar',
   // ── Fotografías de vehículos y órdenes de trabajo
@@ -106,6 +108,8 @@ export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
   'ordenes.crear': ['ordenes.ver'],
   'ordenes.modificar': ['ordenes.ver'],
   'ordenes.asignar': ['ordenes.ver'],
+  'ordenes.imprimir': ['ordenes.asignadas'],
+  'ordenes.imprimir_administracion': ['ordenes.ver', 'ordenes.imprimir'],
   'mantenimientos.ver': ['vehiculos.ver'],
   'mantenimientos.gestionar': ['mantenimientos.ver'],
   'ordenes.ver': ['ordenes.asignadas'],
@@ -142,11 +146,11 @@ const SIN_BANCOS_AJUSTE = (p: Permiso) => p !== 'bancos.ajustar' && p !== 'permi
 
 const RECEPCION: Permiso[] = [
   'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
-  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar',
+  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'ordenes.imprimir', 'ordenes.imprimir_administracion', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar',
   'fotos.ver', 'fotos.subir', 'checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.firmas',
 ];
-const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'mantenimientos.ver', 'asistencia.fichar', 'fotos.ver', 'fotos.subir', 'checklists.ver'];
+const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.imprimir', 'mantenimientos.ver', 'asistencia.fichar', 'fotos.ver', 'fotos.subir', 'checklists.ver'];
 const DEPOSITO: Permiso[] = [
   'catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'compras.ver', 'compras.gestionar', 'precios.venta.ver', 'precios.costo.ver',
   'ordenes.ver', 'vehiculos.ver', 'asistencia.fichar',
@@ -158,7 +162,7 @@ const CAJA: Permiso[] = [
 /** Plantilla anterior a este sprint: se conserva para los usuarios ya creados (mismos accesos que tenían). */
 const EMPLEADO: Permiso[] = [
   'clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar',
-  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar',
+  'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'ordenes.imprimir', 'ordenes.imprimir_administracion', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar',
   'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar', 'fotos.ver', 'fotos.subir', 'checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.firmas',
 ];
@@ -274,6 +278,8 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'ordenes.trabajar_asignadas': { etiqueta: 'Actualizar órdenes asignadas', ayuda: 'Tareas, estado y observaciones técnicas de sus órdenes' },
   'ordenes.crear': { etiqueta: 'Crear órdenes de trabajo' },
   'ordenes.asignar': { etiqueta: 'Asignar mecánicos y tareas', ayuda: 'Responsable, participantes y reparto de tareas de cada orden. No permite modificar importes' },
+  'ordenes.imprimir': { etiqueta: 'Imprimir la orden para el mecánico', ayuda: 'PDF A4 con los datos para trabajar y renglones para anotar. Sin precios ni costos. Sólo de las órdenes a las que tiene acceso' },
+  'ordenes.imprimir_administracion': { etiqueta: 'Imprimir la copia de administración', ayuda: 'Segunda copia de la orden, identificada para administración' },
   'ordenes.modificar': { etiqueta: 'Modificar órdenes de trabajo', ayuda: 'Editar ítems, estados y check-list. La edición de ítems requiere ver precios y presupuestos valorizados' },
   'turnos.ver': { etiqueta: 'Ver agenda de turnos' },
   'turnos.gestionar': { etiqueta: 'Gestionar turnos' },
@@ -333,7 +339,7 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
 
 export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Clientes y vehículos', permisos: ['clientes.ver', 'clientes.crear', 'clientes.editar', 'vehiculos.ver', 'vehiculos.crear', 'vehiculos.editar'] },
-  { titulo: 'Presupuestos, órdenes, agenda y mantenimientos', permisos: ['presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'turnos.ver', 'turnos.gestionar', 'mantenimientos.ver', 'mantenimientos.gestionar'] },
+  { titulo: 'Presupuestos, órdenes, agenda y mantenimientos', permisos: ['presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'ordenes.imprimir', 'ordenes.imprimir_administracion', 'turnos.ver', 'turnos.gestionar', 'mantenimientos.ver', 'mantenimientos.gestionar'] },
   { titulo: 'Fotografías', permisos: ['fotos.ver', 'fotos.subir', 'fotos.eliminar'] },
   { titulo: 'Recepción y entrega de vehículos', permisos: ['checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.corregir', 'checklists.firmas'] },
   { titulo: 'Precios y márgenes', permisos: ['precios.venta.ver', 'precios.costo.ver', 'margenes.ver', 'presupuestos.valorizados.ver', 'precios.gestionar'] },

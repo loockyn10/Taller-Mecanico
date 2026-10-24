@@ -16,6 +16,8 @@ import { nombreUsuarioSql, sentenciaTareasDesdeTrabajos } from '../lib/tareas';
 import { estimarManoObra, rentabilidadOrdenes } from '../lib/rentabilidad';
 import { sentenciasAplicarCredito, validarOrigenCredito } from '../lib/creditos';
 import { ESTADOS_TAREA } from '../../shared/tempario';
+import { datosHojaOrden } from '../lib/hoja-orden-datos';
+import { COPIAS, VARIANTES, generarHojaOrden, numeroOrden, variantesDeCopia } from '../lib/hoja-orden';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
 
 export const ordenes = new Hono<AppEnv>();
@@ -126,6 +128,35 @@ ordenes.get('/cronometro/activo', async (c) => {
     s.tallerId, s.usuarioId,
   );
   return c.json(x);
+});
+
+/**
+ * Hoja de la orden en PDF (A4): copia del mecánico, copia de administración o ambas en un único archivo.
+ * Se genera en el servidor con una consulta propia y acotada: el PDF no puede llevar importes porque nunca se leen. Exige poder ver la orden
+ * (las asignadas, para quien sólo tiene ese alcance) y el permiso de cada copia pedida. No imprime nada: devuelve el archivo para verlo o descargarlo.
+ */
+ordenes.get('/:id/pdf', async (c) => {
+  const s = c.get('sesion');
+  const { copia } = query(c, z.object({ copia: z.enum(COPIAS).default('mecanico') }));
+  const variantes = variantesDeCopia(copia);
+  for (const v of variantes) {
+    if (!VARIANTES[v].permisos.every((p) => tiene(s, p))) throw forbidden(`No tenés permiso para imprimir la ${VARIANTES[v].rotulo.toLowerCase()}`);
+  }
+  const datos = await datosHojaOrden(c.env.DB, s, c.req.param('id'), alcance(s));
+  if (!datos) throw notFound('Orden de trabajo');
+  const { pdf, hojas } = generarHojaOrden(datos, variantes);
+  // La impresión queda registrada (quién, qué orden y qué copia); si el registro falla, no se le niega el documento a quien lo pidió.
+  c.executionCtx.waitUntil(
+    auditar(c.env.DB, s.tallerId, s.usuarioId, 'ordenes', c.req.param('id'), 'imprimir_pdf', { copia, hojas: hojas.reduce((a, b) => a + b, 0) }).run().catch(() => undefined),
+  );
+  return new Response(pdf, {
+    headers: {
+      'content-type': 'application/pdf',
+      'content-disposition': `inline; filename="OT-${numeroOrden(datos.orden.numero)}-${copia === 'ambas' ? 'ambas-copias' : VARIANTES[copia].archivo}.pdf"`,
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    },
+  });
 });
 
 ordenes.get('/:id', async (c) => {

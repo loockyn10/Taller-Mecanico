@@ -61,7 +61,7 @@ export function NuevaOrden() {
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       qc.invalidateQueries({ queryKey: ['turnos'] });
       toast.ok(`OT #${String(o.numero).padStart(4, '0')} creada`);
-      nav(`/ordenes/${o.id}`, { replace: true });
+      nav(`/ordenes/${o.id}?nueva=1`, { replace: true });
     },
     onError: toast.error,
   });
