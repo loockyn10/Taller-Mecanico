@@ -310,6 +310,11 @@ export function OrdenDetalle() {
         }
       />
 
+      {/* Seguimiento del cliente: arriba, a la vista (antes estaba al final de la columna derecha y en pantallas angostas quedaba debajo de todo el detalle). */}
+      <div className="mb-5">
+        {puede('seguimiento.ver') ? <SeguimientoCliente orden={o} /> : <Aviso>El seguimiento del cliente no está disponible con tus permisos (hace falta «Consultar el seguimiento del cliente»).</Aviso>}
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-3">
         <div className="xl:col-span-2">
           <Pestanas
@@ -479,7 +484,6 @@ export function OrdenDetalle() {
               )}
             </dl>
           </Tarjeta>
-          {puede('seguimiento.ver') && <SeguimientoCliente orden={o} />}
           {verDinero && o.cliente_codigo !== 0 && (anticiposOT.length > 0 || (puede('cobros.registrar') && !cerrada)) && (
             <Tarjeta titulo="Anticipos del cliente" subtitulo="Dinero entregado antes de la venta (no es una venta)" acciones={puede('cobros.registrar') && !cerrada && <Boton tam="sm" icono={<Wallet className="size-4" />} onClick={() => setAnticipo(true)}>Registrar anticipo</Boton>}>
               {anticiposOT.length === 0 ? <p className="text-sm text-tenue">Sin anticipos para esta orden.</p> : (

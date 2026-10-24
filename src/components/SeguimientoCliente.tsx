@@ -168,6 +168,9 @@ export function SeguimientoCliente({ orden }: { orden: { id: string; numero: num
             </>
           )}
 
+          <details className="border-t border-borde-suave pt-3" open={s.mensajes.length > 0}>
+            <summary className="min-h-10 cursor-pointer text-sm font-semibold">Mensaje para el cliente y qué se muestra</summary>
+            <div className="space-y-5 pt-3">
           {mensajes || s.mensajes.length > 0 ? (
             <section className="space-y-3 border-t border-borde-suave pt-4" aria-labelledby="seg-msg">
               <h3 id="seg-msg" className="text-sm font-semibold">Mensaje para el cliente</h3>
@@ -237,6 +240,9 @@ export function SeguimientoCliente({ orden }: { orden: { id: string; numero: num
               </div>
             </section>
           )}
+
+            </div>
+          </details>
 
           {gestionar && s.activo && (
             <section className="flex flex-wrap gap-2 border-t border-borde-suave pt-4">
