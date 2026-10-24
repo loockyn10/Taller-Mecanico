@@ -1008,8 +1008,10 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
 - **Sin definir (hay que confirmar con el cliente antes de implementar):** cómo se diferencian las dos copias (¿rótulo «Original/Copia»?, ¿una versión con precios y otra sin?, ¿una sola hoja o dos?, ¿firmas?, ¿datos que sólo ve administración?). **No se implementó ni se asumió ningún formato.**
 - **Estado actual:** la OT ya se imprime con *Imprimir* (`/imprimir/orden/:id`, con importes) y *Hoja taller* (`/imprimir/orden-taller/:id`, sin precios), ambas en `src/pages/Imprimir.tsx`; la segunda es la base natural, pero no tiene renglones de anotaciones ni copia. **Debe mantenerse separada del checklist de recepción** (el checklist no se imprime en esa hoja ni la hoja reemplaza al checklist).
 
-## 116. Despliegue
-- (se completa al publicar)
+## 116. Despliegue (2026-10-24)
+- Orden seguido: respaldo de D1 → ensayo de la migración sobre el respaldo → migración 0016 aplicada en la D1 remota → recién después commit `03d5597` en `main` (sin ramas, sin PR, sin `gh`) → Workers Builds.
+- **Verificación online:** Workers Builds publicó la versión `61c73271…` de `taller-mecanico` (17:00:55 UTC); `wrangler versions view` lista D1 y `env.FIERRO_FOTOS (fierro-fotos) R2 Bucket` además del secreto de plataforma (los bindings se conservan). La SPA servida es el bundle `index-BSjZV7K1.js`, **byte a byte idéntico** (sha256) al build local y con la pestaña «Recepción y entrega». `/api/salud` 200; `/api/ordenes/:id/checklists`, `/api/vehiculos/:id/checklists` y `/api/checklists/:id/verificar` existen y exigen sesión (401); `/api/plataforma/fotos-respaldo/manifiesto` responde 401 sin token y con un token falso (el secreto `FOTOS_BACKUP_TOKEN` todavía no está cargado en el Worker: el endpoint está dormido). GitHub reconoce el workflow `Respaldo fotos` como activo (YAML válido).
+- **No verificado online:** no se inició sesión en producción (no se usan credenciales reales ni se crean datos en los talleres reales), así que el checklist autenticado no se probó en la URL pública; sí la migración, el código idéntico, los bindings y las rutas.
 
 ## 117. Lo que no se hizo / límites
 - Firma digital certificada, PDF o impresión del checklist y la hoja de OT (§115).
