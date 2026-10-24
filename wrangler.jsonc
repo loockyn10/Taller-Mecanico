@@ -17,11 +17,9 @@
     "migrations_dir": "migrations"
   }
 ],
-  // Fotografías (Sprint 16): bucket R2 PRIVADO. NO descomentar hasta que R2 esté habilitado en la cuenta y el bucket exista
-  // (`npx wrangler r2 bucket create fierro-fotos`): un binding a un bucket inexistente hace fallar el despliegue entero.
-  // Mientras tanto el Worker corre igual y las fotografías quedan deshabilitadas (la app lo avisa). En local y en las pruebas el bucket
-  // se simula en disco (scripts/lib.mjs › configLocal). Ver docs/FOTOGRAFIAS.md.
-  // "r2_buckets": [{ "binding": "FIERRO_FOTOS", "bucket_name": "fierro-fotos" }],
+  // Fotografías (Sprint 16): bucket R2 PRIVADO (sin acceso r2.dev ni dominios). Debe existir en la cuenta: un binding a un bucket inexistente
+  // hace fallar el despliegue entero. En local y en las pruebas el bucket se simula en disco (scripts/lib.mjs › configLocal). Ver docs/FOTOGRAFIAS.md.
+  "r2_buckets": [{ "binding": "FIERRO_FOTOS", "bucket_name": "fierro-fotos" }],
   // Mantenimiento periódico (gratis, incluido en el plan): drena la cola de contabilización, avanza reconciliaciones y deja un latido que la salud de plataforma vigila.
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
