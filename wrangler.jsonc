@@ -7,7 +7,8 @@
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    // /seguimiento/*: página pública de seguimiento de órdenes (la genera el Worker para controlar cabeceras: sin caché, sin indexación, sin Referer).
+    "run_worker_first": ["/api/*", "/seguimiento/*"]
   },
   "d1_databases": [
   {

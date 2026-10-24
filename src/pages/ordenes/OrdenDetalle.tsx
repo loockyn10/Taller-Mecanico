@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth';
 import { duracion, fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
 import { FotosOrden } from '@/components/Fotos';
 import { ImprimirOrden } from '@/components/ImprimirOrden';
+import { SeguimientoCliente, useSeguimiento } from '@/components/SeguimientoCliente';
 import { ChecklistOrden } from '@/components/checklist/Checklist';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
@@ -112,11 +113,20 @@ function Checklist({ orden }: { orden: any }) {
 function CambiarEstado({ orden, onCerrar, soloTaller }: { orden: any; onCerrar: () => void; soloTaller?: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const { puede } = useAuth();
   const [destino, setDestino] = useState<EstadoOT | null>(null);
   const [nota, setNota] = useState('');
+  // Mensaje para el cliente: un campo APARTE de la nota (que es interna y nunca se publica). Sólo si el seguimiento está activo y la persona puede publicar.
+  const { data: seg } = useSeguimiento(orden.id, puede('seguimiento.ver') && puede('seguimiento.mensajes'));
+  const [mensajeCliente, setMensajeCliente] = useState('');
   const opciones = TRANSICIONES_OT[orden.estado as EstadoOT].filter((e) => !soloTaller || ['diagnostico', 'en_reparacion', 'esperando_repuestos', 'lista'].includes(e));
   const m = useMutation({
-    mutationFn: () => api.post(`/ordenes/${orden.id}/estado`, { estado: destino, nota }),
+    mutationFn: async () => {
+      const r = await api.post(`/ordenes/${orden.id}/estado`, { estado: destino, nota });
+      // Si el estado cambió pero el mensaje no se pudo publicar, el estado queda cambiado (y se avisa).
+      if (mensajeCliente.trim() && seg?.activo) await api.post(`/ordenes/${orden.id}/seguimiento/mensajes`, { texto: mensajeCliente }).catch((e) => toast.error(e));
+      return r;
+    },
     onSuccess: (r) => {
       ['orden', 'ordenes', 'dashboard', 'articulos', 'turnos'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       toast.ok(r.stock === 'descontado' ? 'Estado actualizado. Se descontaron los repuestos del stock.' : r.stock === 'repuesto' ? 'Estado actualizado. Los repuestos volvieron al stock.' : 'Estado actualizado');
@@ -138,7 +148,12 @@ function CambiarEstado({ orden, onCerrar, soloTaller }: { orden: any; onCerrar: 
         </div>
         {descontara && <Aviso tono="ambar">Al pasar a “{ESTADO_OT_LABEL[destino!]}” se descontarán del stock los repuestos de la OT.</Aviso>}
         {repondra && <Aviso>Los repuestos descontados volverán al stock y la OT podrá editarse.</Aviso>}
-        <Campo label="Nota (opcional)"><Input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej.: se espera repuesto del proveedor" /></Campo>
+        <Campo label="Nota interna (opcional)" hint="Queda en el historial de la orden. El cliente no la ve."><Input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej.: se espera repuesto del proveedor" /></Campo>
+        {seg?.activo && (
+          <Campo label="Mensaje para el cliente (opcional)" hint="Se publica en su página de seguimiento. Es independiente de la nota interna: no se copia de ella.">
+            <Textarea rows={2} maxLength={500} value={mensajeCliente} onChange={(e) => setMensajeCliente(e.target.value)} placeholder="Ej.: Estamos esperando un repuesto solicitado al proveedor." />
+          </Campo>
+        )}
       </div>
     </Modal>
   );
@@ -464,6 +479,7 @@ export function OrdenDetalle() {
               )}
             </dl>
           </Tarjeta>
+          {puede('seguimiento.ver') && <SeguimientoCliente orden={o} />}
           {verDinero && o.cliente_codigo !== 0 && (anticiposOT.length > 0 || (puede('cobros.registrar') && !cerrada)) && (
             <Tarjeta titulo="Anticipos del cliente" subtitulo="Dinero entregado antes de la venta (no es una venta)" acciones={puede('cobros.registrar') && !cerrada && <Boton tam="sm" icono={<Wallet className="size-4" />} onClick={() => setAnticipo(true)}>Registrar anticipo</Boton>}>
               {anticiposOT.length === 0 ? <p className="text-sm text-tenue">Sin anticipos para esta orden.</p> : (

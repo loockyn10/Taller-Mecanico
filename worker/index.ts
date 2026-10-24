@@ -10,6 +10,8 @@ import { catalogoAuto } from './modules/catalogo-auto';
 import { fotos } from './modules/fotos';
 import { checklists } from './modules/checklists';
 import { respaldoFotos } from './modules/respaldo-fotos';
+import { seguimiento } from './modules/seguimiento';
+import { paginaNoEncontrada, paginaPublica, seguimientoPublico } from './modules/seguimiento-publico';
 import { limpiarFotos } from './lib/fotos';
 import { catalogo } from './modules/catalogo';
 import { presupuestos } from './modules/presupuestos';
@@ -44,7 +46,7 @@ import { puesta } from './modules/puesta';
 import { importaciones } from './modules/importaciones';
 import { aperturas } from './modules/aperturas';
 import { mantenimientoContable, sincronizarTrasOperacion } from './lib/contab/sync';
-import { ejecutarMantenimiento, latido, limpiarMensaje, medirD1, registrarErrorWorker, type Medicion } from './lib/observabilidad';
+import { ejecutarMantenimiento, latido, limpiarMensaje, medirD1, normalizarRuta, registrarErrorWorker, type Medicion } from './lib/observabilidad';
 import { exigirNoBloqueado, limpiarFallos, registrarFallo } from './lib/limites';
 import { igualSeguro } from './lib/crypto';
 import { z } from 'zod';
@@ -108,6 +110,11 @@ app.post('/api/plataforma/respaldo-latido', async (c) => {
 // Lectura de las fotografías para el respaldo programado: token propio de sólo lectura (no el de plataforma).
 app.route('/api/plataforma/fotos-respaldo', respaldoFotos);
 
+// Seguimiento público de órdenes: sin sesión, se entra con el enlace individual (token). Ver worker/modules/seguimiento-publico.ts y docs/SEGUIMIENTO.md.
+app.route('/api/seguimiento', seguimientoPublico);
+app.get('/seguimiento/:token', paginaPublica);
+app.all('/seguimiento/*', () => paginaNoEncontrada());
+
 // Pantalla del reloj compartido: se autentica con el token del dispositivo, no con una sesión de usuario.
 app.route('/api/reloj', relojPublico);
 
@@ -143,6 +150,7 @@ api.route('/', depositos);
 api.route('/', catalogo);
 api.route('/presupuestos', presupuestos);
 api.route('/ordenes', ordenes);
+api.route('/ordenes', seguimiento);
 api.route('/', comercial);
 api.route('/', anticipos);
 api.route('/', devoluciones);
@@ -173,7 +181,7 @@ app.onError((err, c) => {
   if (e) return c.json({ error: { code: e.code, message: e.message, details: e.details } }, e.status as 400);
   // Se registra sin datos del usuario: método, ruta normalizada y mensaje depurado (ver lib/observabilidad.ts). Los logs del Worker no llevan el cuerpo ni las cabeceras.
   const ruta = new URL(c.req.url).pathname;
-  console.error('Error no controlado', c.req.method, ruta.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, ':id'), err instanceof Error ? err.name : typeof err, limpiarMensaje(err instanceof Error ? err.message : String(err)));
+  console.error('Error no controlado', c.req.method, normalizarRuta(ruta), err instanceof Error ? err.name : typeof err, limpiarMensaje(err instanceof Error ? err.message : String(err)));
   const tarea = registrarErrorWorker(c.env.DB, c.req.method, ruta, err, c.get('sesion')?.tallerId ?? null);
   try {
     c.executionCtx.waitUntil(tarea);

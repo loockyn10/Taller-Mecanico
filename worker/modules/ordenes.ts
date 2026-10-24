@@ -17,6 +17,8 @@ import { estimarManoObra, rentabilidadOrdenes } from '../lib/rentabilidad';
 import { sentenciasAplicarCredito, validarOrigenCredito } from '../lib/creditos';
 import { ESTADOS_TAREA } from '../../shared/tempario';
 import { datosHojaOrden } from '../lib/hoja-orden-datos';
+import { generarHojaCliente } from '../lib/hoja-cliente';
+import { tokenActivo, urlSeguimiento } from '../lib/seguimiento';
 import { COPIAS, VARIANTES, generarHojaOrden, numeroOrden, variantesDeCopia } from '../lib/hoja-orden';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
 
@@ -137,7 +139,25 @@ ordenes.get('/cronometro/activo', async (c) => {
  */
 ordenes.get('/:id/pdf', async (c) => {
   const s = c.get('sesion');
-  const { copia } = query(c, z.object({ copia: z.enum(COPIAS).default('mecanico') }));
+  const { copia } = query(c, z.object({ copia: z.enum([...COPIAS, 'cliente']).default('mecanico') }));
+  // Copia para el cliente con el QR del seguimiento (Sprint 20): hoja aparte, no toca las copias del mecánico ni de administración.
+  if (copia === 'cliente') {
+    if (!tiene(s, 'ordenes.imprimir') || !tiene(s, 'seguimiento.compartir')) throw forbidden('No tenés permiso para imprimir la copia del cliente con el código QR de seguimiento');
+    const datos = await datosHojaOrden(c.env.DB, s, c.req.param('id'), alcance(s));
+    if (!datos) throw notFound('Orden de trabajo');
+    const token = await tokenActivo(c.env.DB, s.tallerId, c.req.param('id'));
+    if (!token) throw conflict('Activá el seguimiento del cliente antes de imprimir su código QR', 'seguimiento_inactivo');
+    const { pdf } = generarHojaCliente(datos, urlSeguimiento(new URL(c.req.url).origin, token));
+    c.executionCtx.waitUntil(auditar(c.env.DB, s.tallerId, s.usuarioId, 'ordenes', c.req.param('id'), 'imprimir_pdf', { copia, hojas: 1 }).run().catch(() => undefined));
+    return new Response(pdf, {
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': `inline; filename="OT-${numeroOrden(datos.orden.numero)}-seguimiento-cliente.pdf"`,
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+      },
+    });
+  }
   const variantes = variantesDeCopia(copia);
   for (const v of variantes) {
     if (!VARIANTES[v].permisos.every((p) => tiene(s, p))) throw forbidden(`No tenés permiso para imprimir la ${VARIANTES[v].rotulo.toLowerCase()}`);

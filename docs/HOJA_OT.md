@@ -31,3 +31,8 @@ Se leyó el artículo público «Cómo recibir una reparación»: en SistroFix l
 - **Falta comparar con una muestra real** del comprobante que usa el cliente piloto (no se conoce su formato exacto): qué datos agrega o quita, si las copias deben ser idénticas o distintas, si administración necesita precios o firmas, y si la hoja del cliente (con firma) sigue siendo la existente «Imprimir» de la OT.
 - Límites: logos PNG/WebP no se dibujan (sólo JPEG; sin logo aparece el nombre del taller); caracteres fuera de WinAnsi (emojis) salen como «?»; la hoja no incluye el checklist de recepción ni sus firmas (se mantiene separado); no se probó con impresoras físicas (sí con rasterizado a imagen y lectura del texto del PDF).
 - La vieja vista «Hoja taller» (HTML sin renglones) se eliminó: la reemplaza el PDF.
+
+## Copia para el cliente con QR de seguimiento (Sprint 20)
+- Cuarta opción de «Imprimir orden»: `GET /api/ordenes/:id/pdf?copia=cliente`. **Es una hoja aparte** (`worker/lib/hoja-cliente.ts`): las copias del mecánico y de administración, y «ambas», no cambiaron.
+- Una hoja A4 con el taller, «COPIA PARA EL CLIENTE», N° de orden, fecha de ingreso, marca/modelo/patente, el **código QR** del enlace de seguimiento (vectorial), la dirección escrita debajo y tres pasos para abrirlo. No lleva datos del cliente, motivo, diagnóstico, observaciones, importes ni notas.
+- Exige `ordenes.imprimir` + `seguimiento.compartir` y que el seguimiento esté **activo** (409 si no: se activa desde el detalle de la orden; imprimir no activa nada). Cada impresión queda en la auditoría como las demás. Ver `docs/SEGUIMIENTO.md`.

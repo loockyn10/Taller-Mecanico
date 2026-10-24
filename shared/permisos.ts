@@ -33,6 +33,11 @@ export const PERMISOS = [
   'checklists.entrega', // registrar la entrega del vehículo
   'checklists.corregir', // corregir un registro ya confirmado (queda una revisión; el original se conserva)
   'checklists.firmas', // ver las firmas capturadas y los datos de quien firmó
+  // ── Seguimiento público de órdenes (enlace para el cliente)
+  'seguimiento.ver', // consultar la configuración del seguimiento de una orden (si está activo, mensajes publicados, transiciones visibles). No incluye el enlace
+  'seguimiento.gestionar', // activar, desactivar y regenerar el enlace; ocultar la fecha estimada y las transiciones internas
+  'seguimiento.compartir', // ver y copiar el enlace, mostrar el QR, compartirlo por WhatsApp o imprimirlo
+  'seguimiento.mensajes', // publicar y retirar observaciones visibles para el cliente
   // ── Mantenimientos programados
   'mantenimientos.ver',
   'mantenimientos.gestionar', // planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro
@@ -105,6 +110,9 @@ export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
   'checklists.entrega': ['checklists.ver'],
   'checklists.corregir': ['checklists.ver'],
   'checklists.firmas': ['checklists.ver'],
+  'seguimiento.gestionar': ['seguimiento.ver'],
+  'seguimiento.compartir': ['seguimiento.ver'],
+  'seguimiento.mensajes': ['seguimiento.ver'],
   'ordenes.crear': ['ordenes.ver'],
   'ordenes.modificar': ['ordenes.ver'],
   'ordenes.asignar': ['ordenes.ver'],
@@ -149,6 +157,7 @@ const RECEPCION: Permiso[] = [
   'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'ordenes.imprimir', 'ordenes.imprimir_administracion', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar',
   'fotos.ver', 'fotos.subir', 'checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.firmas',
+  'seguimiento.ver', 'seguimiento.gestionar', 'seguimiento.compartir', 'seguimiento.mensajes',
 ];
 const MECANICO: Permiso[] = ['vehiculos.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.imprimir', 'mantenimientos.ver', 'asistencia.fichar', 'fotos.ver', 'fotos.subir', 'checklists.ver'];
 const DEPOSITO: Permiso[] = [
@@ -165,6 +174,7 @@ const EMPLEADO: Permiso[] = [
   'presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'ordenes.imprimir', 'ordenes.imprimir_administracion', 'turnos.ver', 'turnos.gestionar',
   'precios.venta.ver', 'presupuestos.valorizados.ver', 'catalogo.ver', 'stock.ver', 'ventas.ver', 'ventas.emitir', 'cobros.registrar', 'caja.operar',
   'mantenimientos.ver', 'mantenimientos.gestionar', 'asistencia.fichar', 'fotos.ver', 'fotos.subir', 'checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.firmas',
+  'seguimiento.ver', 'seguimiento.gestionar', 'seguimiento.compartir', 'seguimiento.mensajes',
 ];
 
 export interface Plantilla {
@@ -291,6 +301,10 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'checklists.entrega': { etiqueta: 'Registrar entregas', ayuda: 'Estado de salida, trabajos realizados y conformidad del cliente' },
   'checklists.corregir': { etiqueta: 'Corregir recepciones y entregas confirmadas', ayuda: 'No se pisa el original: se crea una revisión con el motivo y queda todo el historial' },
   'checklists.firmas': { etiqueta: 'Consultar firmas', ayuda: 'Ver la firma capturada y el nombre de quien firmó' },
+  'seguimiento.ver': { etiqueta: 'Consultar el seguimiento del cliente', ayuda: 'Si el enlace de seguimiento está activo y qué se publicó. No incluye el enlace: para verlo hace falta «Compartir el enlace de seguimiento»' },
+  'seguimiento.gestionar': { etiqueta: 'Activar y desactivar el seguimiento', ayuda: 'Activar, desactivar o regenerar el enlace (el anterior deja de funcionar) y elegir qué se muestra: fecha estimada y transiciones' },
+  'seguimiento.compartir': { etiqueta: 'Compartir el enlace de seguimiento', ayuda: 'Ver y copiar el enlace, mostrar el QR y enviarlo por WhatsApp. Quien tiene el enlace ve el estado de la reparación sin iniciar sesión' },
+  'seguimiento.mensajes': { etiqueta: 'Publicar mensajes para el cliente', ayuda: 'Observaciones que ve el cliente en la página de seguimiento. Son independientes de las notas internas' },
   'mantenimientos.ver': { etiqueta: 'Ver mantenimientos programados', ayuda: 'Vencimientos por kilometraje y tiempo de cada vehículo' },
   'mantenimientos.gestionar': { etiqueta: 'Gestionar mantenimientos', ayuda: 'Planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro' },
   'precios.venta.ver': { etiqueta: 'Ver precios de venta' },
@@ -342,6 +356,7 @@ export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Presupuestos, órdenes, agenda y mantenimientos', permisos: ['presupuestos.ver', 'presupuestos.gestionar', 'ordenes.ver', 'ordenes.asignadas', 'ordenes.trabajar_asignadas', 'ordenes.crear', 'ordenes.modificar', 'ordenes.asignar', 'ordenes.imprimir', 'ordenes.imprimir_administracion', 'turnos.ver', 'turnos.gestionar', 'mantenimientos.ver', 'mantenimientos.gestionar'] },
   { titulo: 'Fotografías', permisos: ['fotos.ver', 'fotos.subir', 'fotos.eliminar'] },
   { titulo: 'Recepción y entrega de vehículos', permisos: ['checklists.ver', 'checklists.recepcion', 'checklists.entrega', 'checklists.corregir', 'checklists.firmas'] },
+  { titulo: 'Seguimiento del cliente', permisos: ['seguimiento.ver', 'seguimiento.gestionar', 'seguimiento.compartir', 'seguimiento.mensajes'] },
   { titulo: 'Precios y márgenes', permisos: ['precios.venta.ver', 'precios.costo.ver', 'margenes.ver', 'presupuestos.valorizados.ver', 'precios.gestionar'] },
   { titulo: 'Catálogo e inventario', permisos: ['catalogo.ver', 'catalogo.editar', 'stock.ver', 'stock.ajustar', 'stock.valorizar'] },
   { titulo: 'Ventas y cobranzas', permisos: ['ventas.ver', 'ventas.emitir', 'ventas.anular', 'cobros.registrar', 'cobros.anular'] },

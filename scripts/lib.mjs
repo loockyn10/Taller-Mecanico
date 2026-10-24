@@ -51,12 +51,20 @@ export function configLocal() {
 
 export function wrangler(args, opts = {}) {
   if (args[0] === 'dev' && !args.includes('-c') && !args.includes('--config')) args = [...args, '-c', configLocal()];
-  return spawn(process.execPath, [WRANGLER, ...args], { cwd: ROOT, stdio: opts.stdio ?? 'inherit', env: { ...process.env, ...opts.env } });
+  // Con 'pipe' se captura la salida pero NO se deja abierta una entrada: wrangler (por ejemplo `d1 migrations apply`) espera una respuesta por stdin si la encuentra abierta y se cuelga.
+  const stdio = opts.stdio === 'pipe' ? ['ignore', 'pipe', 'pipe'] : (opts.stdio ?? 'inherit');
+  return spawn(process.execPath, [WRANGLER, ...args], { cwd: ROOT, stdio, env: { ...process.env, ...opts.env } });
 }
 
 export function esperarProceso(p) {
   return new Promise((resolve, reject) => {
-    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`proceso terminó con código ${code}`))));
+    // La salida capturada se consume siempre: si nadie la lee, el búfer de la tubería se llena (en Windows son pocos KB: la tabla de `d1 migrations apply`
+    // ya lo supera) y el proceso queda bloqueado escribiendo.
+    let salida = '';
+    p.stdout?.on('data', (d) => (salida = (salida + d).slice(-2000)));
+    p.stderr?.on('data', (d) => (salida = (salida + d).slice(-2000)));
+    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`proceso terminó con código ${code}
+${salida}`))));
     p.on('error', reject);
   });
 }

@@ -1,6 +1,6 @@
 # Progreso del desarrollo · Fierro v0.1.0
 
-Última actualización: 2026-10-24 (Sprint 18: checklist de recepción y entrega, secciones 109 a 117; **pendiente prioritario: hoja de OT del cliente piloto, §115**). Documento para retomar el trabajo en nuevas sesiones.
+Última actualización: 2026-10-24 (Sprint 20: seguimiento público de órdenes, secciones 123 a 129; Sprint 19: hoja de OT en PDF, §118 a §122; Sprint 18: checklist de recepción y entrega, §109 a §117). Documento para retomar el trabajo en nuevas sesiones.
 
 ## 1. Arquitectura implementada
 - **Un único Worker** (`worker/index.ts`, Hono) sirve la API en `/api/*` y la SPA compilada (assets estáticos). En desarrollo, Vite sirve la SPA y redirige `/api` a `wrangler dev`.
@@ -34,6 +34,7 @@
 | Descuento y reposición de stock por OT (una sola vez, idempotente) | ✅ | ✅ | ✅ concurrencia |
 | Check-list de ingreso (simple, anterior) | ✅ | ✅ | ✅ |
 | Recepción y entrega con daños, fotografías y firma del cliente (Sprint 18, `docs/CHECKLIST.md`) | ✅ | ✅ tablet/celular | ✅ |
+| Seguimiento público de la OT con enlace individual, QR y WhatsApp (Sprint 20, `docs/SEGUIMIENTO.md`) | ✅ página pública + gestión | ✅ celular, tablet y escritorio | ✅ |
 | Historial de reparaciones y recordatorios de service (km/meses) | ✅ | ✅ | ✅ |
 | Agenda de turnos (vinculada a presupuesto y OT) | ✅ | ✅ semanal | ✅ |
 | Artículos, categorías, stock inicial | ✅ | ✅ | ✅ |
@@ -1045,3 +1046,60 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
 
 ## 122. Despliegue (2026-10-24)
 - Commit `77ef47a` en `main` (sin ramas ni PR; sin migraciones). Verificación online: la SPA publicada sirve `index-B73wq8_h.js`, idéntico en nombre al build local y con la llamada `/pdf?copia=`; `/api/salud` responde 200 y `GET /api/ordenes/:id/pdf` existe y exige sesión (401). **No se inició sesión en producción** (no se usan credenciales reales ni se crean datos en talleres reales): el PDF autenticado se probó en la instancia local equivalente y en las pruebas de integración, no en la URL pública.
+
+
+# Sprint 20 — Seguimiento público de órdenes de trabajo
+
+## 123. Qué se hizo
+- **Enlace individual por OT** (`docs/SEGUIMIENTO.md`): en el detalle de la orden, tarjeta «Seguimiento del cliente» con *Activar seguimiento*, *Copiar enlace*, *Compartir por WhatsApp*, *Compartir…* (selector nativo si el navegador lo ofrece), *Mostrar código QR* (descargar o compartir la imagen), *Desactivar* y *Regenerar*. Al cambiar el estado de la OT hay un campo **aparte** «Mensaje para el cliente» (la nota interna no se publica nunca).
+- **Página pública** `GET /seguimiento/:token` (HTML generado por el Worker, sin JavaScript ni recursos externos, celular primero, claro/oscuro) y su JSON `GET /api/seguimiento/:token`: taller, N° de orden, marca y modelo, **patente parcialmente oculta**, estado actual con explicación, recorrido (✓ ● ○), historial desplegable con fecha y hora del servidor (zona del taller), última actualización, fecha estimada (como estimación, con advertencia si venció) y mensaje del taller. **Listo para retirar** se destaca.
+- **Estados reutilizados, sin sistema paralelo:** `ordenes.estado` y `orden_eventos` siguen siendo la única fuente; `shared/seguimiento.ts` sólo los traduce. No se fuerza una línea recta (puede volver a diagnóstico o esperar repuestos varias veces) y nunca una etapa futura figura como completada. El taller puede **ocultar transiciones internas** del historial (la del estado actual no).
+- **Observaciones públicas** con historial y responsable, texto plano de hasta 500 caracteres, separadas de las notas internas; un mensaje nuevo reemplaza al anterior en la página; retirarlo no revive otro.
+- **Código QR** local (`qrcode-generator`, MIT, sin servicios ni costos) con sólo la dirección del enlace; nueva copia **«Seguimiento del cliente»** en *Imprimir orden* (`?copia=cliente`: hoja A4 con el QR y la dirección escrita). Las copias del mecánico y de administración no se tocaron.
+- **Migración aditiva:** `0017` agrega `seguimiento_enlaces`, `seguimiento_mensajes` y `seguimiento_eventos_ocultos` (+ un disparador que impide reescribir lo publicado). No se tocó contabilidad, inventario, licencias, ARCA ni la gestión de órdenes (el único cambio en `ordenes.ts` es la copia `cliente` del PDF).
+
+## 124. Estados: lo que se adaptó a la estructura real
+| Pedido | Existe en la OT | Se muestra como |
+|---|---|---|
+| Vehículo recibido | `recibida` | Vehículo recibido |
+| En diagnóstico | `diagnostico` | En diagnóstico |
+| Esperando aprobación | **no existe** (la aprobación vive en el presupuesto) | — |
+| Esperando repuestos | `esperando_repuestos` | Esperando repuestos (paso «Espera de repuestos», sólo si ocurre) |
+| En reparación | `en_reparacion` | En reparación |
+| En control final | **no existe** | — |
+| Listo para retirar | `lista` | Listo para retirar |
+| Entregado | `entregada` | Entregado |
+| (cancelada) | `cancelada` | Orden cancelada, sin recorrido |
+
+Crear «esperando aprobación» o «control final» obligaba a modificar la gestión de órdenes (fuera de alcance). Si el taller los incorpora más adelante, alcanza con agregarlos a `shared/dominio.ts` y a `ESTADO_PUBLICO`/`PASOS` de `shared/seguimiento.ts`.
+
+## 125. Seguridad (resumen; detalle y tabla de requisitos en `docs/SEGUIMIENTO.md` §4)
+- Token de 32 bytes aleatorios (43 caracteres base64url), único por orden, no deducible del número ni de ningún id; formato verificado antes de consultar; búsqueda por igualdad exacta con índice único y `activo = 1`.
+- **Desactivar** lo apaga al instante; **regenerar** reemplaza el token (el anterior deja de existir). Inexistente, desactivado y reemplazado dan la **misma** respuesta 404.
+- **Límite de intentos** por origen con el mecanismo existente (20 fallidos en 10 min → bloqueo de 15; los accesos válidos no escriben).
+- `Cache-Control: private, no-store`, `X-Robots-Tag: noindex…` + meta + `robots.txt`, `Referrer-Policy: no-referrer`, CSP `default-src 'none'`, `X-Frame-Options: DENY`, sin cookies; la página no carga nada externo ni ejecuta código; todo texto de la base se escapa.
+- El token no se imprime ni se guarda en auditoría, errores ni límites (probado); los errores usan la ruta normalizada (también en el `console.error` del Worker).
+- La consulta pública es propia y acotada: sin cliente, teléfono, dirección, datos fiscales, precios, costos, márgenes, notas, diagnósticos, kilometraje, mecánico, fotos, firmas ni ids internos (pruebas sobre la página y el JSON con datos privados sembrados).
+- **Límite honesto:** el token viaja en la dirección (como en cualquier seguimiento de envíos), así que los registros de acceso de la infraestructura de Cloudflare pueden contener la URL; por eso la página expone sólo un estado de bajo riesgo y el enlace se puede revocar. Se guarda tal cual en D1 (hay que poder volver a mostrarlo y generar el QR).
+
+## 126. Permisos
+`seguimiento.ver` (configuración, **sin** el enlace), `seguimiento.gestionar` (activar/desactivar/regenerar, fecha estimada, transiciones), `seguimiento.compartir` (ver y copiar el enlace, QR, WhatsApp, imprimir el QR), `seguimiento.mensajes` (publicar y retirar). Gestionar, compartir y mensajes exigen *ver*. Por defecto: propietario y administrador todos; **recepción y empleado (heredado) los cuatro**; mecánico, depósito y caja ninguno (el propietario los otorga en Personal → Permisos, grupo «Seguimiento del cliente»). Además hay que poder ver la orden (las asignadas, para quien sólo tiene ese alcance). El cambio de estado sigue con los permisos de siempre. El teléfono del cliente se usa para WhatsApp sólo si la persona puede ver clientes. Otorgar o retirar permisos rige de inmediato (probado).
+
+## 127. Pruebas
+- `npm run build` OK. `npm test`: **171 unitarias + 467 de integración, todas OK** (nuevas: 26 unitarias en `tests/unit/seguimiento.test.ts`; 35 de integración en `tests/api/seguimiento.test.ts` y 1 de migración 0017 en `tests/api/migraciones.test.ts`; se ajustó una prueba de `hoja-orden` que usaba «cliente» como copia inválida).
+- Cubierto de punta a punta contra el Worker real: generación del enlace (idempotente, token aleatorio, uno por orden), apertura anónima, **cambio de estado desde la OT (recepción y mecánico asignado) reflejado en la página y el JSON**, recorrido sin etapas futuras completadas y con vuelta a diagnóstico, mensajes (publicar, reemplazar, retirar, validar, HTML escapado, historial inmutable por SQL), fecha estimada (mostrar, ocultar, vencida, sin fecha, sin tocar la planificación), transiciones ocultas, copia del cliente del PDF (QR, permisos, 409 sin seguimiento, sin datos privados), **desactivación y regeneración inmediatas**, **aislamiento entre dos talleres** (404 en las 7 operaciones, tokens alterados/truncados/ampliados y parámetros que intentan elegir otra orden), ausencia de datos privados y financieros (texto y claves del JSON), cabeceras, token fuera de los registros, límite de intentos y permisos granulares.
+- **Hallazgo corregido:** `scripts/lib.mjs` dejaba la salida de wrangler sin leer; desde la migración 0017 la tabla de `d1 migrations apply` supera el búfer de la tubería de Windows y la preparación de las pruebas se colgaba. Ahora la salida se consume siempre y la entrada se cierra.
+- **A mano** (instancia aislada 8790/5180, Taller Demo): activar desde la OT, copiar/WhatsApp (con el teléfono del cliente, el mensaje pedido y el enlace)/QR, **página pública a 375, 768 y escritorio sin scroll horizontal** (claro y oscuro), cambio de estado con nota interna y mensaje al cliente (la página muestra el mensaje y el nuevo estado; la nota interna no aparece), desactivar → «Este enlace no está disponible», ventana *Imprimir orden* con la cuarta copia. El **QR del PDF se rasterizó y se decodificó con una librería de lectura (jsQR): devuelve exactamente la dirección del enlace**.
+- **No comprobado:** teléfonos físicos, cámara real leyendo un QR impreso, WhatsApp real (sólo se verifica el enlace armado), impresoras, Safari/iOS.
+
+## 128. Despliegue (2026-10-24)
+- **Respaldo previo** de la D1 remota: `respaldos/d1-antes-sprint20-20261024-2228.sql` (fuera de git; 108 tablas, 11.485 filas, integridad OK, 0 claves foráneas rotas, SHA-256 `ab8da737…76ba`, bookmark de Time Travel `00000267-00000000-0000510e-7d33108749964230436ee431735903d0`).
+- **Ensayo** de la migración sobre ese respaldo (`respaldo -- ensayar-migraciones`): 108 tablas y 11.485 filas comparadas, **todas idénticas**; +3 tablas; integridad OK.
+- `wrangler d1 migrations apply DB --remote` **antes** de publicar el código; respaldo posterior `respaldos/d1-despues-sprint20-20261024-2247.sql`: 111 tablas, 11.486 filas (la nueva es el registro de la migración), integridad OK, 0 claves foráneas rotas, migraciones al día; en remoto existen las 3 tablas, sus índices y el disparador.
+- `wrangler.jsonc`: `run_worker_first` incluye `/seguimiento/*` (la página la atiende el Worker, no los assets); `wrangler deploy --dry-run` reconoce D1, R2 y las variables.
+
+## 129. Lo que no se hizo / pendientes
+- «Esperando aprobación» y «En control final» (no existen en la OT; ver §124).
+- El enlace no vence solo (sigue diciendo «Entregado» hasta que se desactive): decisión a revisar con los talleres.
+- Sin avisos automáticos al cliente (no se contrató WhatsApp Business API, a propósito) ni tiempo real.
+- Verificación en dispositivos físicos y verificación autenticada en producción (ver la verificación online al final de esta sección).

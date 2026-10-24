@@ -534,6 +534,53 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     db.close();
   });
 
+  it('0017 no toca ningún dato y la base protege el seguimiento público (un token por orden, tokens únicos y de largo fijo, mensajes que no se reescriben)', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    for (const m of fs.readdirSync(path.join(RAIZ, 'migrations')).sort().filter((x) => x < '0017')) db.exec(leer('migrations', m));
+    db.exec(leer('tests', 'fixtures', 'datos-previos-0002.sql'));
+    db.exec("INSERT INTO vehiculos (id, taller_id, cliente_id, patente, km_actual) VALUES ('v1', 't1', 'c1', 'AB123CD', 1000)");
+    db.exec("INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, fecha_ingreso) VALUES ('o1', 't1', 1, 'c1', 'v1', '2026-10-24')");
+    db.exec("INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, fecha_ingreso) VALUES ('o2', 't1', 2, 'c1', 'v1', '2026-10-24')");
+    db.exec("INSERT INTO orden_eventos (id, taller_id, orden_id, estado_nuevo) VALUES ('e1', 't1', 'o1', 'recibida')");
+    const tablas = ['clientes', 'vehiculos', 'ordenes', 'orden_eventos', 'ventas', 'cobros'];
+    const antes = tablas.map((t) => db.prepare(`SELECT * FROM ${t}`).all().map((r: any) => ({ ...r })));
+    db.exec(leer('migrations', '0017_seguimiento_publico.sql'));
+    expect(tablas.map((t) => db.prepare(`SELECT * FROM ${t}`).all().map((r: any) => ({ ...r })))).toEqual(antes);
+    for (const t of ['seguimiento_enlaces', 'seguimiento_mensajes', 'seguimiento_eventos_ocultos']) expect((db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as any).n).toBe(0);
+
+    const tok = (c: string) => c.repeat(43);
+    db.exec(`INSERT INTO seguimiento_enlaces (id, taller_id, orden_id, token) VALUES ('s1', 't1', 'o1', '${tok('a')}')`);
+    // Un enlace por orden y un token nunca se repite (ni entre órdenes)
+    expect(() => db.exec(`INSERT INTO seguimiento_enlaces (id, taller_id, orden_id, token) VALUES ('s2', 't1', 'o1', '${tok('b')}')`)).toThrow(/UNIQUE/);
+    expect(() => db.exec(`INSERT INTO seguimiento_enlaces (id, taller_id, orden_id, token) VALUES ('s2', 't1', 'o2', '${tok('a')}')`)).toThrow(/UNIQUE/);
+    // Sólo tokens del largo previsto (256 bits en base64url) y una orden ajena no se puede colgar de otro taller
+    expect(() => db.exec("INSERT INTO seguimiento_enlaces (id, taller_id, orden_id, token) VALUES ('s3', 't1', 'o2', 'corto')")).toThrow(/CHECK/);
+    expect(() => db.exec(`INSERT INTO seguimiento_enlaces (id, taller_id, orden_id, token) VALUES ('s3', 't2', 'o2', '${tok('c')}')`)).toThrow(/FOREIGN/);
+    expect(() => db.exec(`INSERT INTO seguimiento_enlaces (id, taller_id, orden_id, token, activo) VALUES ('s3', 't1', 'o2', '${tok('c')}', 2)`)).toThrow(/CHECK/);
+    // Desactivar y regenerar son simples UPDATE
+    db.exec("UPDATE seguimiento_enlaces SET activo = 0 WHERE id = 's1'");
+    db.exec(`UPDATE seguimiento_enlaces SET token = '${tok('d')}', generacion = generacion + 1 WHERE id = 's1'`);
+    expect((db.prepare("SELECT activo, generacion FROM seguimiento_enlaces WHERE id = 's1'").get() as any)).toMatchObject({ activo: 0, generacion: 2 });
+
+    // Mensajes: vacíos o de más de 500 caracteres no entran; lo publicado no se reescribe, sólo se retira
+    expect(() => db.exec("INSERT INTO seguimiento_mensajes (id, taller_id, orden_id, texto) VALUES ('m0', 't1', 'o1', '   ')")).toThrow(/CHECK/);
+    expect(() => db.exec(`INSERT INTO seguimiento_mensajes (id, taller_id, orden_id, texto) VALUES ('m0', 't1', 'o1', '${'x'.repeat(501)}')`)).toThrow(/CHECK/);
+    db.exec("INSERT INTO seguimiento_mensajes (id, taller_id, orden_id, texto, usuario_id) VALUES ('m1', 't1', 'o1', 'Esperando repuesto', 'u1')");
+    expect(() => db.exec("UPDATE seguimiento_mensajes SET texto = 'otro' WHERE id = 'm1'")).toThrow(/inmutable/);
+    expect(() => db.exec("UPDATE seguimiento_mensajes SET usuario_id = 'u2' WHERE id = 'm1'")).toThrow(/inmutable/);
+    db.exec("UPDATE seguimiento_mensajes SET retirado_at = '2026-10-24T12:00:00Z', retirado_por = 'u1' WHERE id = 'm1'");
+
+    // Transiciones ocultas: una vez por evento; si se borra la orden o el evento, se va la marca
+    db.exec("INSERT INTO seguimiento_eventos_ocultos (taller_id, orden_id, evento_id) VALUES ('t1', 'o1', 'e1')");
+    expect(() => db.exec("INSERT INTO seguimiento_eventos_ocultos (taller_id, orden_id, evento_id) VALUES ('t1', 'o1', 'e1')")).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => db.exec("INSERT INTO seguimiento_eventos_ocultos (taller_id, orden_id, evento_id) VALUES ('t1', 'o1', 'no-existe')")).toThrow(/FOREIGN/);
+    db.exec("DELETE FROM orden_eventos WHERE id = 'e1'");
+    expect((db.prepare('SELECT COUNT(*) AS n FROM seguimiento_eventos_ocultos').get() as any).n).toBe(0);
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    db.close();
+  });
+
   it('0015 no toca ningún dato y la base protege las fotografías (etapa de OT, cupo y estados)', () => {
     const db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');

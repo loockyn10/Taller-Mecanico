@@ -86,7 +86,7 @@ describe('contenido del PDF', () => {
   });
 
   it('copia inválida: 400; sin sesión: 401', async () => {
-    expect((await pedirPdf(T.a.api, T.ot.id, 'cliente')).status).toBe(400);
+    expect((await pedirPdf(T.a.api, T.ot.id, 'desconocida')).status).toBe(400);
     const anon = new Api();
     expect((await pedirPdf(anon, T.ot.id)).status).toBe(401);
   });

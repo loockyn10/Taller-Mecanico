@@ -32,7 +32,7 @@ export default defineConfig({
       workbox: {
         // Solo se cachea la aplicación. Los datos (/api) siempre van a la red: nunca se guardan datos de un taller en caché.
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/seguimiento\//],
         runtimeCaching: [],
       },
     }),
@@ -40,6 +40,10 @@ export default defineConfig({
   server: {
     // Puertos configurables (FIERRO_WEB_PORT / FIERRO_API_PORT) para correr una segunda instancia sin pisar la de siempre.
     port: Number(process.env.FIERRO_WEB_PORT ?? 5173),
-    proxy: { '/api': { target: `http://127.0.0.1:${process.env.FIERRO_API_PORT ?? 8787}`, changeOrigin: false } },
+    proxy: {
+      '/api': { target: `http://127.0.0.1:${process.env.FIERRO_API_PORT ?? 8787}`, changeOrigin: false },
+      // Página pública de seguimiento de órdenes (la genera el Worker).
+      '/seguimiento': { target: `http://127.0.0.1:${process.env.FIERRO_API_PORT ?? 8787}`, changeOrigin: false },
+    },
   },
 });

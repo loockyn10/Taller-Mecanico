@@ -6,8 +6,9 @@ import { Download, ExternalLink, Printer } from 'lucide-react';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Aviso, Boton, Cargando, ErrorCaja, Modal } from '@/components/ui';
+import { useSeguimiento } from '@/components/SeguimientoCliente';
 
-type Copia = 'mecanico' | 'administracion' | 'ambas';
+type Copia = 'mecanico' | 'administracion' | 'ambas' | 'cliente';
 
 async function pedirPdf(ordenId: string, copia: Copia): Promise<Blob> {
   let r: Response;
@@ -32,19 +33,24 @@ const OPCIONES: Array<{ copia: Copia; titulo: string; detalle: string }> = [
   { copia: 'mecanico', titulo: 'Mecánico', detalle: 'Datos para trabajar y media hoja para anotaciones. Sin precios.' },
   { copia: 'administracion', titulo: 'Administración', detalle: 'Copia identificada como «COPIA ADMINISTRACIÓN».' },
   { copia: 'ambas', titulo: 'Ambas copias', detalle: 'Un solo PDF con una hoja A4 por cada copia.' },
+  { copia: 'cliente', titulo: 'Seguimiento del cliente', detalle: 'Hoja con el código QR para que el cliente siga su vehículo desde el celular.' },
 ];
 
 export function ImprimirOrden({ ordenId, numero, abierto, onCerrar }: { ordenId: string; numero: number; abierto: boolean; onCerrar: () => void }) {
   const { puede } = useAuth();
   const admin = puede('ordenes.imprimir_administracion');
-  const opciones = OPCIONES.filter((o) => admin || o.copia === 'mecanico');
+  // La hoja del cliente lleva el QR del seguimiento: hace falta poder compartir el enlace y que esté activo (activarlo es una decisión aparte).
+  const conQr = puede('seguimiento.compartir');
+  const { data: seg } = useSeguimiento(ordenId, abierto && conQr);
+  const qrListo = !!seg?.activo && !!seg.url;
+  const opciones = OPCIONES.filter((o) => (o.copia === 'cliente' ? conQr : admin || o.copia === 'mecanico'));
   const [copia, setCopia] = useState<Copia>('mecanico');
   const marco = useRef<HTMLIFrameElement>(null);
 
   const { data: blob, isFetching, error } = useQuery({
     queryKey: ['orden-pdf', ordenId, copia],
     queryFn: () => pedirPdf(ordenId, copia),
-    enabled: abierto,
+    enabled: abierto && (copia !== 'cliente' || qrListo),
     staleTime: 0,
     gcTime: 0,
     retry: false,
@@ -52,7 +58,7 @@ export function ImprimirOrden({ ordenId, numero, abierto, onCerrar }: { ordenId:
   const url = useMemo(() => (blob ? URL.createObjectURL(blob) : null), [blob]);
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
 
-  const archivo = `OT-${String(numero).padStart(4, '0')}-${copia === 'ambas' ? 'ambas-copias' : copia}.pdf`;
+  const archivo = `OT-${String(numero).padStart(4, '0')}-${copia === 'ambas' ? 'ambas-copias' : copia === 'cliente' ? 'seguimiento-cliente' : copia}.pdf`;
   const imprimir = () => {
     if (!url) return;
     try {
@@ -83,11 +89,11 @@ export function ImprimirOrden({ ordenId, numero, abierto, onCerrar }: { ordenId:
       <div className="space-y-4">
         <fieldset>
           <legend className="mb-2 text-sm font-medium">¿Qué copia querés?</legend>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {opciones.map((o) => (
-              <label key={o.copia} className={`flex cursor-pointer items-start gap-2 rounded-ctl border p-3 text-sm ${copia === o.copia ? 'border-marca-500 bg-marca-50' : 'border-borde'}`}>
-                <input type="radio" name="copia" className="mt-1" checked={copia === o.copia} onChange={() => setCopia(o.copia)} />
-                <span><strong className="block">{o.titulo}</strong><span className="text-xs text-slate-600">{o.detalle}</span></span>
+              <label key={o.copia} className={`flex items-start gap-2 rounded-ctl border p-3 text-sm ${o.copia === 'cliente' && !qrListo ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${copia === o.copia ? 'border-marca-500 bg-marca-50' : 'border-borde'}`}>
+                <input type="radio" name="copia" className="mt-1" checked={copia === o.copia} disabled={o.copia === 'cliente' && !qrListo} onChange={() => setCopia(o.copia)} />
+                <span><strong className="block">{o.titulo}</strong><span className="text-xs text-slate-600">{o.copia === 'cliente' && !qrListo ? 'Primero activá el seguimiento del cliente en el detalle de la orden.' : o.detalle}</span></span>
               </label>
             ))}
           </div>
