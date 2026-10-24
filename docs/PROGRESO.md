@@ -890,7 +890,7 @@ Las 10 familias pedidas aparecen; ninguna se agregó a mano. `Gol` (35) es resid
 
 Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activación de R2) en `docs/FOTOGRAFIAS.md`.
 
-## 95. Estado de R2
+## 95. Estado de R2 (histórico: al cierre del primer día R2 no estaba habilitado; ver §103 para el estado actual)
 - **R2 no está habilitado en la cuenta de Cloudflare** (`wrangler r2 bucket list` → `10042 Please enable R2 through the Cloudflare Dashboard`). Habilitarlo es una acción del titular en el panel y puede requerir medio de pago: **no se hizo ni se aceptó ningún costo**. Se detuvo sólo ese paso.
 - Por eso **no existe el bucket `fierro-fotos`** y el binding `FIERRO_FOTOS` está **comentado en `wrangler.jsonc`** (un binding a un bucket inexistente rompería el despliegue de Workers Builds). El código está desplegado y **degrada sin romper nada**: sin binding, `/api/fotos/estado` → `habilitado: false`, la app muestra un aviso en vez de los botones y subir/bajar da `503 fotos_no_habilitadas` (comprobado levantando el Worker sin binding). Los listados y el resto de Fierro funcionan igual.
 - Pasos para activarlo (4, en `docs/FOTOGRAFIAS.md`): habilitar R2 en el panel → `npx wrangler r2 bucket create fierro-fotos` → descomentar el binding → push a `main`. Que Workers Builds conserve el binding se confirma después de ese push (el binding vive en el archivo de configuración, no en el panel); **no se pudo comprobar en producción**.
@@ -924,3 +924,14 @@ Detalle completo (arquitectura, seguridad, procedimiento de respaldo y activaci�
 ## 102. Despliegue (2026-10-23)
 - Respaldo previo de la D1 remota `respaldos/d1-antes-sprint16-20261023-1810.sql` (fuera de git; 103 tablas, 11.469 filas, integridad OK, SHA-256 `635dbe40…aba`). Bookmark de Time Travel: `0000011e-00000000-0000510d-213f46991d5f391b0f9fba688f859742`. Ensayo de la migración sobre el respaldo y `wrangler d1 migrations apply DB --remote` (0015) aplicados antes de publicar el código.
 - **Verificación online:** commit `b27e3f8` en `main`; en https://taller-mecanico.estrubia455.workers.dev la SPA publicada sirve el bundle `index-CRUbOq1k.js` (idéntico al build local y con el código de fotografías), `/api/salud` responde 200 y `/api/fotos/estado` y `/api/platform/almacenamiento` existen y exigen sesión/token. **Fotografías deshabilitadas en producción hasta habilitar R2** (§95). No se inició sesión en producción.
+
+## 103. Activación de R2 y verificación con R2 real (2026-10-24)
+- R2 habilitado por el titular y bucket privado `fierro-fotos` creado (Standard, ENAM, `r2.dev` deshabilitado, sin dominios). Se activó el binding `FIERRO_FOTOS` en `wrangler.jsonc` (commit `4222674`; `wrangler deploy --dry-run` lo reconoce). La migración 0015 ya estaba aplicada (`d1 migrations list`: nada pendiente); no hubo migraciones nuevas ni cambios a datos de talleres.
+- **Despliegue:** Workers Builds publicó la versión `c4948260…` de `taller-mecanico`; `wrangler versions view` lista `env.FIERRO_FOTOS (fierro-fotos) R2 Bucket` (el binding se conserva) además de D1 y el secreto de plataforma. La SPA servida es el mismo bundle `index-CRUbOq1k.js`; `/api/salud` 200; las rutas de fotos y de plataforma exigen sesión/token.
+- **Verificación contra R2 real** (nuevo `FIERRO_R2_REAL=1` en `scripts/lib.mjs`: Worker local con D1 local y binding remoto):
+  - Suite `tests/api/fotos.test.ts` completa (10/10) contra el bucket real: subida, EXIF quitado, reintento sin duplicar, contenido inválido, etapas de OT, aislamiento entre talleres, permisos del mecánico, eliminación, cupo, exportación/auditoría.
+  - Un objeto subido por la API se bajó con `wrangler r2 object get --remote`: mismo sha256 que D1, sin rastro de GPS, miniatura aparte.
+  - Escenario con dos talleres: Demo sube 3 fotos (vehículo, recepción y entrega de una OT); Norte recibe **404** al pedir la foto, la lista de la OT y al subir a un vehículo ajeno; Demo la ve (200, `image/jpeg`). Eliminar vía API → 200, luego 404, objetos borrados del bucket.
+  - **Recuperación:** exportar → verificar → borrar los 3 originales del bucket → `auditar` (3 faltantes) → `restaurar --remoto` → `auditar` (0 diferencias) → re-exportar: hashes idénticos. La auditoría también detectó correctamente los 20 objetos huérfanos que dejó la suite.
+  - **Limpieza:** todos los objetos de prueba se borraron del bucket (auditoría final: 0 objetos); el bucket de producción queda vacío.
+- **No verificado online:** no se inició sesión en producción (no se usan credenciales reales), así que la subida desde la URL pública con un usuario real no se probó; sí el binding, la configuración y el código idéntico. Tampoco cámara física ni Safari/iOS.

@@ -2,16 +2,11 @@
 
 Cualquier persona autorizada puede sacar o elegir fotos desde el celular o la tablet y asociarlas a un **vehículo** o a una **orden de trabajo** (etapas: recepción, reparación, entrega). Quedan disponibles al instante para el resto del taller. Los archivos viven en un bucket **privado** de Cloudflare R2; en D1 sólo hay referencias y metadatos.
 
-## Estado de R2 (importante)
-- La cuenta de Cloudflare **todavía no tiene R2 habilitado** (`wrangler r2 bucket list` responde `code 10042: Please enable R2 through the Cloudflare Dashboard`). Habilitarlo exige una acción de la persona titular de la cuenta en el panel y puede pedir un medio de pago; **no se hizo ni se aceptó ningún costo**.
-- Mientras tanto el código está desplegado pero **las fotografías están deshabilitadas**: `GET /api/fotos/estado` informa `habilitado: false`, la app muestra un aviso en lugar de los botones, y subir/bajar devuelve `503 fotos_no_habilitadas`. El resto de Fierro no se afecta.
-- El binding **no** está activo en `wrangler.jsonc` (queda comentado): un binding a un bucket inexistente haría fallar todo el despliegue de Workers Builds.
-
-### Cómo activarlo (pasos del titular de la cuenta)
-1. Panel de Cloudflare → **R2 Object Storage** → *Purchase R2 / Enable R2* (plan Standard; incluye 10 GB-mes, 1 M de operaciones de escritura y 10 M de lectura gratuitos por mes, sin cargo por salida de datos; requiere aceptar el alta de R2 y, según la cuenta, cargar un medio de pago).
-2. Crear el bucket privado: `npx wrangler r2 bucket create fierro-fotos` (no activar el acceso público ni un dominio personalizado).
-3. En `wrangler.jsonc` descomentar `"r2_buckets": [{ "binding": "FIERRO_FOTOS", "bucket_name": "fierro-fotos" }]`, commit y push a `main`. Workers Builds toma el binding del archivo de configuración: no hay que cargarlo a mano en el panel.
-4. Comprobar: iniciar sesión → *Administración → Licencia* debe mostrar "Fotografías: 0 MB de 2 GB"; `npm run fotos -- uso` debe decir "habilitado".
+## Estado de R2
+- **R2 habilitado y en uso** (desde el 2026-10-24): bucket privado `fierro-fotos` (clase Standard, región ENAM, acceso `r2.dev` deshabilitado y sin dominios personalizados), binding `FIERRO_FOTOS` declarado en `wrangler.jsonc`. Workers Builds lo conserva: la versión activa de `taller-mecanico` lista `env.FIERRO_FOTOS (fierro-fotos) R2 Bucket` (`wrangler versions view`).
+- Si el binding faltara (otro entorno, bucket borrado) el Worker sigue corriendo: `GET /api/fotos/estado` informa `habilitado: false`, la app avisa y subir/bajar devuelve `503 fotos_no_habilitadas`. No habilitar nunca un binding a un bucket inexistente: rompe el despliegue entero.
+- En local y en las pruebas el bucket se simula en disco (Miniflare). Con `FIERRO_R2_REAL=1` el Worker local (D1 local) usa el **bucket real**, para verificar el almacenamiento de verdad; deja objetos de prueba que hay que borrar al terminar.
+- Costos: R2 Standard cobra almacenamiento y operaciones por encima de la capa gratuita mensual vigente en el panel de Cloudflare, sin cargo por salida de datos; con el límite de 2 GB por taller el consumo máximo está acotado por la cantidad de talleres.
 
 ## Qué hace
 - **Vehículo:** galería en el alta (se eligen antes de guardar y se suben cuando el vehículo ya existe; si alguna falla, el vehículo queda guardado y se puede reintentar sin duplicar), en la edición y en la ficha. Chips para filtrar por "del vehículo" y por etapa de OT.
@@ -46,8 +41,8 @@ Cualquier persona autorizada puede sacar o elegir fotos desde el celular o la ta
 3. **Comparar R2 con D1:** `npm run fotos -- auditar` → objetos huérfanos y fotos "lista" sin archivo.
 4. **Recuperar:** (a) si se perdió D1: restaurar D1 (`docs/RESPALDOS.md`) y luego las imágenes; (b) si se perdió R2 (o el bucket): recrear el bucket y `npm run fotos -- restaurar <carpeta> --remoto` (verifica la carpeta antes de subir nada); (c) `npm run fotos -- auditar` debe terminar sin diferencias. Las filas de D1 y los archivos se relacionan por `foto_id`.
 5. Las carpetas exportadas contienen **fotos privadas de clientes**: van en `respaldos/` (ignorado por git), nunca al repositorio, y no se entregan. Frecuencia recomendada: igual que el respaldo de D1, y siempre antes de una migración que toque `fotos`.
-- **Probado en local** (Miniflare): exportar 3 fotos → verificar → borrar el almacenamiento de R2 → `auditar` (6 objetos faltantes) → `restaurar` → `auditar` (0 diferencias) → nueva exportación con hashes idénticos. **No** se probó contra R2 real (todavía no está habilitado).
-- Pendiente: la exportación no está automatizada en GitHub Actions (como sí lo está el respaldo cifrado de D1); sería el paso siguiente una vez habilitado R2.
+- **Probado con R2 real** (2026-10-24, Worker local contra el bucket `fierro-fotos`): exportar 3 fotos (sha256 verificado contra D1) → verificar → borrar los 3 originales del bucket → `auditar` (3 faltantes) → `restaurar --remoto` → `auditar` (0 diferencias) → nueva exportación con hashes idénticos. También en local con R2 simulado.
+- Pendiente: la exportación no está automatizada en GitHub Actions (como sí lo está el respaldo cifrado de D1) y todavía no hay fotos en producción que respaldar; conviene automatizarla antes de que el taller empiece a usarlas en serio.
 
 ## Lo que NO se hizo (alcance)
 Checklist de recepción, firmas digitales, manuales y fichas técnicas, cambios en el catálogo de marcas, ARCA o funciones comerciales nuevas.
