@@ -1143,3 +1143,9 @@ Crear «esperando aprobación» o «control final» obligaba a modificar la gest
 - La baja no se anula como operación: se corrige con una entrada manual de stock. No hay «anular baja» (no estaba pedido).
 - Quien sólo tiene permisos de depósito no puede cargar consumos (requiere editar órdenes con importes); el propietario puede otorgar los permisos.
 - **No verificado:** lector de códigos físico (se simuló el Enter), tablets y celulares reales, y la verificación autenticada en producción (no se usan credenciales reales; ver §133 al publicar).
+
+## 133. Verificación online del Sprint 22 (2026-10-26)
+- Commit `0119d93` en `main` (sin ramas, sin PR, sin `gh`). Workers Builds publicó la versión nueva de `taller-mecanico`: https://taller-mecanico.estrubia455.workers.dev sirve `index-DFpr2IYu.js`, el mismo nombre del build local (antes servía `index-CJwHnOSu.js`).
+- Sin sesión: `/api/salud` 200; `GET /api/rapidas/consulta-precios`, `GET /api/rapidas/historial` y `POST /api/rapidas/bajas` responden **401** (las rutas existen y exigen sesión); `/operaciones-rapidas` 200 (la SPA).
+- La migración 0018 ya estaba aplicada en la D1 remota antes de publicar (ver §132).
+- **No verificado online:** no se inició sesión en producción ni se registró ninguna operación en los talleres reales (no se usan credenciales reales ni se crean datos en ellos). El flujo completo con sesión se probó en las pruebas de integración y en la instancia local equivalente.
