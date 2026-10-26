@@ -30,7 +30,7 @@ export function Inicio() {
   const nav = useNavigate();
   const [consulta, setConsulta] = useState(false);
   const puedeRapidas = (puede('ventas.emitir') && puede('precios.venta.ver')) || (puede('ordenes.modificar') && puede('presupuestos.valorizados.ver') && puede('precios.venta.ver')) || puede('stock.ajustar');
-  const hayAcciones = puede('ordenes.crear') || puede('catalogo.ver') || puede('presupuestos.gestionar') || puede('turnos.ver');
+  const hayAcciones = puede('ordenes.crear') || puede('catalogo.ver') || puede('presupuestos.gestionar');
   const { data: caja } = useEstadoCaja();
   const { data: puesta } = usePuesta();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get('/dashboard'), refetchInterval: 60_000 });
@@ -56,7 +56,6 @@ export function Inicio() {
             {puede('catalogo.ver') && <Accion titulo="Consultar precios" detalle="Precio y stock al instante" icono={<Barcode className="size-5" />} onClick={() => setConsulta(true)} />}
             {puedeRapidas && <Accion titulo="Operaciones rápidas" detalle="Venta, consumo en OT y bajas" icono={<Zap className="size-5" />} onClick={() => nav('/operaciones-rapidas')} />}
             {puede('presupuestos.gestionar') && <Accion titulo="Presupuesto" detalle="Armar uno nuevo" icono={<FileText className="size-5" />} onClick={() => nav('/presupuestos/nuevo')} />}
-            {puede('turnos.ver') && <Accion titulo="Agenda" detalle="Turnos del taller" icono={<CalendarDays className="size-5" />} onClick={() => nav('/agenda')} />}
           </div>
         </section>
       )}
