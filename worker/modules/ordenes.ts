@@ -18,7 +18,7 @@ import { sentenciasAplicarCredito, validarOrigenCredito } from '../lib/creditos'
 import { ESTADOS_TAREA } from '../../shared/tempario';
 import { datosHojaOrden } from '../lib/hoja-orden-datos';
 import { generarHojaCliente } from '../lib/hoja-cliente';
-import { tokenActivo, urlSeguimiento } from '../lib/seguimiento';
+import { sentenciasEnlaceInicial, tokenActivo, urlSeguimiento } from '../lib/seguimiento';
 import { COPIAS, VARIANTES, generarHojaOrden, numeroOrden, variantesDeCopia } from '../lib/hoja-orden';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
 
@@ -162,7 +162,7 @@ ordenes.get('/:id/pdf', async (c) => {
   for (const v of variantes) {
     if (!VARIANTES[v].permisos.every((p) => tiene(s, p))) throw forbidden(`No tenés permiso para imprimir la ${VARIANTES[v].rotulo.toLowerCase()}`);
   }
-  const datos = await datosHojaOrden(c.env.DB, s, c.req.param('id'), alcance(s));
+  const datos = await datosHojaOrden(c.env.DB, s, c.req.param('id'), alcance(s), c.env.FIERRO_FOTOS);
   if (!datos) throw notFound('Orden de trabajo');
   const { pdf, hojas } = generarHojaOrden(datos, variantes);
   // La impresión queda registrada (quién, qué orden y qué copia); si el registro falla, no se le niega el documento a quien lo pidió.
@@ -327,6 +327,7 @@ ordenes.post('/', requirePerm('ordenes.crear'), async (c) => {
     ...(lista ? [sentenciaListaEnDocumento(c.env.DB, 'ordenes', s.tallerId, id, lista)] : []),
     c.env.DB.prepare("INSERT INTO orden_eventos (id, taller_id, orden_id, estado_nuevo, usuario_id) VALUES (?, ?, ?, 'recibida', ?)").bind(uid(), s.tallerId, id, s.usuarioId),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'crear', { total: t.total }),
+    ...sentenciasEnlaceInicial(c.env.DB, s.tallerId, id, s.usuarioId),
   ];
   if (d.km_ingreso != null) stmts.push(c.env.DB.prepare('UPDATE vehiculos SET km_actual = MAX(km_actual, ?) WHERE taller_id = ? AND id = ?').bind(d.km_ingreso, s.tallerId, d.vehiculo_id));
   if (d.turno_id) {

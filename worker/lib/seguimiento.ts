@@ -3,7 +3,7 @@
 // Regla de datos: la consulta pública (`consultarSeguimiento`) es PROPIA y ACOTADA. Lee sólo las columnas que se muestran y arma `SeguimientoPublico`, el único
 // objeto que sale hacia afuera: no reutiliza el detalle de la OT (importes, costos, notas internas) ni devuelve identificadores internos. Si algún día se
 // agrega un campo, hay que agregarlo acá a propósito (y la prueba de privacidad lo va a revisar).
-import { ahora, all, first } from './db';
+import { ahora, all, auditar, first, uid, type Stmt } from './db';
 import { tokenAleatorio } from './crypto';
 import { zonaDelTaller, fechaLocal } from './zona';
 import { ESTADOS_OT, type EstadoOT } from '../../shared/dominio';
@@ -13,6 +13,23 @@ export const nuevoToken = tokenAleatorio;
 
 /** Dirección pública del enlace, con el origen desde el que se llegó al servidor. El token es la última parte de la ruta. */
 export const urlSeguimiento = (origen: string, token: string) => `${origen}${RUTA_PUBLICA}/${token}`;
+
+/**
+ * Sentencias que dejan el seguimiento ACTIVO desde que nace la orden. Van en el MISMO batch que el INSERT de la OT (cualquier ruta que cree órdenes las suma):
+ * o existe la orden con su enlace, o ninguno de los dos. `DO NOTHING` ante un enlace existente: nunca duplica ni reactiva uno desactivado ni cambia su token.
+ */
+export function sentenciasEnlaceInicial(db: D1Database, tallerId: string, ordenId: string, usuarioId: string | null): Stmt[] {
+  const t = ahora();
+  return [
+    db
+      .prepare(
+        `INSERT INTO seguimiento_enlaces (id, taller_id, orden_id, token, activo, creado_por, creado_at, token_generado_at, activado_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+         ON CONFLICT (taller_id, orden_id) DO NOTHING`,
+      )
+      .bind(uid(), tallerId, ordenId, nuevoToken(), usuarioId, t, t, t, t),
+    auditar(db, tallerId, usuarioId, 'orden', ordenId, 'seguimiento_activado', { automatico: true }),
+  ];
+}
 
 /** Token del enlace de una orden si está ACTIVO (para la copia del cliente con QR del PDF de la orden); null si no hay enlace o está desactivado. */
 export async function tokenActivo(db: D1Database, tallerId: string, ordenId: string): Promise<string | null> {

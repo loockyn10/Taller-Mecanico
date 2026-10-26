@@ -4,8 +4,8 @@ Cada orden puede tener una **página pública de seguimiento**: el cliente recib
 
 ## 1. Cómo se usa
 
-1. En el detalle de la OT, tarjeta **«Seguimiento del cliente»** → **Activar seguimiento**.
-2. **Copiar enlace**, **Compartir por WhatsApp** (abre WhatsApp con el mensaje preparado; no envía nada solo), **Compartir…** (selector nativo del celular) o **Mostrar código QR** (descargarlo o compartirlo como imagen).
+1. El seguimiento queda **activo solo al crear la orden** (Mejora 20B); en el detalle de la OT, tarjeta **«Seguimiento del cliente»**, se puede desactivar, regenerar o (en órdenes anteriores o desactivadas) activar.
+2. **Enviar WhatsApp al cliente** (botón único del encabezado de la orden: abre WhatsApp con el mensaje preparado y el enlace; no envía nada solo), **Copiar enlace** o **Mostrar código QR** (descargarlo o compartirlo como imagen).
 3. En **Imprimir orden** hay una cuarta copia, **«Seguimiento del cliente»**: una hoja A4 con el QR y la dirección escrita, lista para entregar. Las copias del mecánico y de administración **no se modificaron**.
 4. Cuando alguien cambia el estado de la OT (con los permisos de siempre) la página lo refleja al abrirla o recargarla.
 5. **Mensaje para el cliente**: texto aparte de las notas internas (también se puede escribir al cambiar el estado, en un campo separado de la nota interna).

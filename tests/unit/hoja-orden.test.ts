@@ -177,6 +177,38 @@ describe('hoja de la orden de trabajo (PDF)', () => {
     expect(texto(generarHojaOrden({ ...base(), logo: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2]) }, ['mecanico']).pdf)).not.toContain('/Subtype /Image');
   });
 
+  it('la foto del vehículo va arriba a la derecha, sin deformarse, y no quita espacio ni agrega hojas: las anotaciones siguen en 145 mm con sus renglones', () => {
+    const seg = (m: number, d: number[]) => [0xff, m, (d.length + 2) >> 8, (d.length + 2) & 0xff, ...d];
+    const jpg = (w: number, h: number) => Uint8Array.from([0xff, 0xd8, ...seg(0xc0, [8, h >> 8, h & 0xff, w >> 8, w & 0xff, 1, 1, 0x11, 0]), ...seg(0xda, [1, 1, 0, 0, 0x3f, 0]), 1, 2, 3, 0xff, 0xd9]);
+    const sin = generarHojaOrden(base(), ['mecanico', 'administracion']);
+    for (const [w, h] of [[640, 480], [480, 640], [1000, 200]]) {
+      const con = generarHojaOrden({ ...base(), foto: jpg(w, h) }, ['mecanico', 'administracion']);
+      expect(con.hojas).toEqual(sin.hojas);
+      const t = texto(con.pdf);
+      expect(t.match(/\/Subtype \/Image/g)).toHaveLength(1); // una sola imagen para las dos copias
+      const flujos = contenidos(con.pdf);
+      for (const f of flujos) {
+        const m = /q ([\d.]+) 0 0 ([\d.]+) ([\d.]+) ([\d.]+) cm \/Im1 Do Q/.exec(f)!;
+        const [ancho, alto, x, y] = [+m[1] / MM, +m[2] / MM, +m[3] / MM, 297 - +m[4] / MM];
+        expect(ancho / alto).toBeCloseTo(w / h, 1); // proporciones intactas
+        expect(ancho).toBeLessThanOrEqual(30.01);
+        expect(alto).toBeLessThanOrEqual(23.01);
+        expect(x + ancho).toBeCloseTo(PAGINA.der, 1); // pegada al margen derecho
+        expect(y).toBeLessThan(PAGINA.anotacionesDesde - 40); // en la parte superior
+        // las 14 líneas de anotaciones y su título siguen donde estaban
+        const renglones = lineasEscritas(f).filter((l) => l.y1 === l.y2 && l.x2 - l.x1 > 170 * MM && l.y1 / MM < 297 - PAGINA.anotacionesDesde - 8 && l.y1 / MM > 297 - PAGINA.limite - 0.5);
+        expect(renglones.length).toBeGreaterThanOrEqual(13);
+        expect(leer(f).join(' ')).toContain('ANOTACIONES DEL MECÁNICO');
+      }
+    }
+  });
+
+  it('una foto que no es un JPEG incrustable se omite sin romper la hoja', () => {
+    const r = generarHojaOrden({ ...base(), foto: Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 2, 3]) }, ['mecanico']);
+    expect(texto(r.pdf)).not.toContain('/Subtype /Image');
+    expect(r.hojas).toEqual([1]);
+  });
+
   it('textos largos sin espacios y caracteres raros no rompen el diseño ni el archivo', () => {
     const d = base();
     d.motivo = `${'X'.repeat(300)} (paréntesis) \\ barra \t tab\r\nsegunda línea 😀 ✓`;

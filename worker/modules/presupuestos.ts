@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zFecha, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, like, SEQ_VALOR, seqIncrementar, uid } from '../lib/db';
+import { sentenciasEnlaceInicial } from '../lib/seguimiento';
 import { requirePerm, requireRW } from '../lib/auth';
 import { exigirValorizado, limpiarDocumento, limpiarItems } from '../lib/privacidad';
 import { fechaComercial } from '../lib/fechas';
@@ -183,6 +184,7 @@ presupuestos.post('/:id/convertir', requirePerm('ordenes.crear'), async (c) => {
     c.env.DB.prepare("UPDATE turnos SET orden_id = ?, estado = CASE WHEN estado IN ('agendado','confirmado') THEN 'en_taller' ELSE estado END WHERE taller_id = ? AND presupuesto_id = ? AND orden_id IS NULL")
       .bind(ordenId, s.tallerId, id),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'presupuesto', id, 'convertir', { orden_id: ordenId }),
+    ...sentenciasEnlaceInicial(c.env.DB, s.tallerId, ordenId, s.usuarioId),
   ]);
   const o = await first(c.env.DB, 'SELECT id, numero FROM ordenes WHERE taller_id = ? AND id = ?', s.tallerId, ordenId);
   return c.json(o, 201);

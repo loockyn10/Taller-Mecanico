@@ -49,10 +49,10 @@ beforeAll(async () => {
 });
 
 describe('1. generación del enlace', () => {
-  it('antes de activarlo no existe enlace; al activarlo se genera una dirección con un token aleatorio de 256 bits', async () => {
+  it('el enlace se genera solo al crear la orden (Mejora 20B), con un token aleatorio de 256 bits; activarlo de nuevo es idempotente', async () => {
     const antes = await T.a.api.get(`/api/ordenes/${T.ot.id}/seguimiento`);
     expect(antes.status).toBe(200);
-    expect(antes.body).toMatchObject({ existe: false, activo: false, url: null });
+    expect(antes.body).toMatchObject({ existe: true, activo: true, generacion: 1 });
     const r = await T.rec.api.post(`/api/ordenes/${T.ot.id}/seguimiento/activar`);
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ existe: true, activo: true, generacion: 1 });
@@ -293,7 +293,8 @@ describe('5, 6 y 7. enlace para compartir (WhatsApp, QR e impresión)', () => {
     expect(ok.texto).toContain('COPIA PARA EL CLIENTE');
     expect(ok.texto).toContain(tokenDe(T.url)); // la dirección escrita debajo del QR
     for (const x of ['Ñañez', '555-7788', 'FALLA-PRIVADA', 'DIAGNOSTICO-PRIVADO', 'OBSERVACION-PRIVADA', 'NOTA-INTERNA', '87654', '34567']) expect(ok.texto).not.toContain(x);
-    // Sin seguimiento activo no hay QR que imprimir (la OT B ni siquiera tiene enlace)
+    // Sin seguimiento activo no hay QR que imprimir (la OT B nace con enlace; se lo desactiva)
+    await T.b.api.post(`/api/ordenes/${T.otB.id}/seguimiento/desactivar`);
     const cliB = (await T.b.api.get(`/api/ordenes/${T.otB.id}`)).body;
     expect(cliB.id).toBe(T.otB.id);
     expect((await pedir(T.b.api, T.otB.id)).status).toBe(409);

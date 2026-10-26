@@ -15,6 +15,8 @@ export interface DatosHoja {
   taller: { nombre: string; razonSocial: string | null; direccion: string | null; telefono: string | null; email: string | null };
   /** JPEG del logo del taller, si lo tiene cargado en ese formato. */
   logo: Uint8Array | null;
+  /** JPEG (miniatura) de la fotografía del vehículo, si tiene alguna a la que quien imprime pueda acceder. */
+  foto?: Uint8Array | null;
   orden: { numero: number; fechaApertura: string; fechaPrometida: string | null };
   cliente: { visible: boolean; nombre: string | null; telefono: string | null };
   vehiculo: { patente: string; marca: string | null; modelo: string | null; anio: number | null; km: number | null };
@@ -133,6 +135,7 @@ interface Contexto {
   d: DatosHoja;
   v: DefVariante;
   logo: ImagenJpeg | null;
+  foto: ImagenJpeg | null;
 }
 
 const separador = (alto = 2.2): Elemento => ({ alto, blando: true, dibujar: () => undefined });
@@ -277,30 +280,60 @@ function filaDatos(celdas: Celda[]): Elemento {
   };
 }
 
-function seccionDatos({ d }: Contexto): Elemento[] {
+/** Recuadro máximo de la fotografía del vehículo (mm): se ajusta dentro, sin deformarla, en el extremo derecho del bloque de datos. */
+const FOTO = { ancho: 30, alto: 23 } as const;
+const X_FOTO = PAGINA.der - FOTO.ancho;
+
+function seccionDatos({ d, foto }: Contexto): Elemento[] {
   const vh = d.vehiculo;
+  // Con foto, las filas terminan antes de su columna (sin ella conservan el ancho completo de siempre).
+  const fin = foto ? X_FOTO - 4 : PAGINA.der;
   const veh = [vh.marca, vh.modelo].filter(Boolean).join(' ');
   const tecnico = [d.tecnico.responsable, ...d.tecnico.participantes.map((n) => `${n} (participa)`)].filter(Boolean).join(' · ');
   const filas: Elemento[] = [];
   if (d.cliente.visible) {
     filas.push(filaDatos([
-      { etiqueta: 'CLIENTE', valor: d.cliente.nombre ?? '', x: PAGINA.izq, ancho: 100, negrita: true },
-      { etiqueta: 'TELÉFONO', valor: d.cliente.telefono ?? '', x: 118, ancho: PAGINA.der - 118 },
+      { etiqueta: 'CLIENTE', valor: d.cliente.nombre ?? '', x: PAGINA.izq, ancho: foto ? 88 : 100, negrita: true },
+      { etiqueta: 'TELÉFONO', valor: d.cliente.telefono ?? '', x: foto ? 106 : 118, ancho: fin - (foto ? 106 : 118) },
     ]));
   } else {
-    filas.push(filaDatos([{ etiqueta: 'CLIENTE', valor: 'No disponible con los permisos de quien imprime', x: PAGINA.izq, ancho: ANCHO, atenuado: true }]));
+    filas.push(filaDatos([{ etiqueta: 'CLIENTE', valor: 'No disponible con los permisos de quien imprime', x: PAGINA.izq, ancho: fin - PAGINA.izq, atenuado: true }]));
   }
-  filas.push(filaDatos([
+  filas.push(filaDatos(foto ? [
+    { etiqueta: 'VEHÍCULO (MARCA Y MODELO)', valor: veh, x: PAGINA.izq, ancho: 62 },
+    { etiqueta: 'PATENTE', valor: vh.patente, x: 78, ancho: 34, negrita: true, tam: 14 },
+    { etiqueta: 'AÑO', valor: vh.anio ? String(vh.anio) : '', x: 114, ancho: 14 },
+    { etiqueta: 'KM REGISTRADO', valor: vh.km != null ? `${miles(vh.km)} km` : '', x: 130, ancho: fin - 130 },
+  ] : [
     { etiqueta: 'VEHÍCULO (MARCA Y MODELO)', valor: veh, x: PAGINA.izq, ancho: 74 },
     { etiqueta: 'PATENTE', valor: vh.patente, x: 92, ancho: 36, negrita: true, tam: 14 },
     { etiqueta: 'AÑO', valor: vh.anio ? String(vh.anio) : '', x: 130, ancho: 18 },
     { etiqueta: 'KM REGISTRADO', valor: vh.km != null ? `${miles(vh.km)} km` : '', x: 150, ancho: PAGINA.der - 150 },
   ]));
   filas.push(filaDatos([
-    { etiqueta: 'TÉCNICO ASIGNADO', valor: tecnico, x: PAGINA.izq, ancho: 120 },
-    { etiqueta: 'ENTREGA PROMETIDA', valor: d.orden.fechaPrometida ? fechaLocalTexto(d.orden.fechaPrometida, d.zonaHoraria) : '', x: 138, ancho: PAGINA.der - 138 },
+    { etiqueta: 'TÉCNICO ASIGNADO', valor: tecnico, x: PAGINA.izq, ancho: foto ? 92 : 120 },
+    { etiqueta: 'ENTREGA PROMETIDA', valor: d.orden.fechaPrometida ? fechaLocalTexto(d.orden.fechaPrometida, d.zonaHoraria) : '', x: foto ? 110 : 138, ancho: fin - (foto ? 110 : 138) },
   ]));
-  return [...filas, separador(3)];
+  if (!foto) return [...filas, separador(3)];
+  // La foto ocupa el costado derecho de las tres filas: el bloque se dibuja junto (no se parte entre hojas) y no agrega altura a la hoja.
+  const suma = filas.reduce((a, f) => a + f.alto, 0);
+  const escala = Math.min(FOTO.ancho / foto.ancho, FOTO.alto / foto.alto);
+  const w = foto.ancho * escala;
+  const h = foto.alto * escala;
+  const bloque: Elemento = {
+    alto: Math.max(suma, FOTO.alto + 1),
+    dibujar: (p, y) => {
+      let cy = y;
+      for (const f of filas) {
+        f.dibujar(p, cy);
+        cy += f.alto;
+      }
+      const x = PAGINA.der - w;
+      p.imagen(foto, x, y + 0.5, w, h);
+      p.rect(x, y + 0.5, w, h, { ancho: 0.25, gris: 0.35 });
+    },
+  };
+  return [bloque, separador(3)];
 }
 
 // ── Secciones de contenido ──
@@ -436,8 +469,8 @@ function zonaAnotaciones(p: Pagina, titulo: string, desde: number) {
   }
 }
 
-function dibujarVariante(doc: Documento, d: DatosHoja, v: DefVariante, logo: ImagenJpeg | null): number {
-  const ctx: Contexto = { d, v, logo };
+function dibujarVariante(doc: Documento, d: DatosHoja, v: DefVariante, logo: ImagenJpeg | null, foto: ImagenJpeg | null): number {
+  const ctx: Contexto = { d, v, logo, foto };
   const elementos = v.secciones.flatMap((s) => SECCIONES[s](ctx));
   const hojas = paginar(elementos, encabezadoContinuacion(ctx));
   const ultima = hojas[hojas.length - 1];
@@ -472,7 +505,9 @@ export function generarHojaOrden(d: DatosHoja, variantes: VarianteId[]): HojaGen
   const rotulos = defs.map((v) => v.rotulo.replace('COPIA ', '').toLowerCase()).join(' y ');
   const doc = new Documento({ titulo: `Orden de trabajo N° ${numeroOrden(d.orden.numero)} - copia ${rotulos}`, asunto: 'Orden de trabajo', fecha: d.impresoAt });
   const logo = d.logo ? doc.agregarJpeg(d.logo) : null;
-  const hojas = defs.map((v) => dibujarVariante(doc, d, v, logo));
+  // Una foto que no se pueda incrustar (formato o estructura inesperados) se omite: nunca impide generar la orden.
+  const foto = d.foto ? doc.agregarJpeg(d.foto) : null;
+  const hojas = defs.map((v) => dibujarVariante(doc, d, v, logo, foto));
   return { pdf: doc.generar(), hojas };
 }
 

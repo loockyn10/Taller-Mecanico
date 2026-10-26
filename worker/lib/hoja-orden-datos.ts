@@ -7,6 +7,8 @@ import { all, first } from './db';
 import { nombreUsuarioSql } from './tareas';
 import { zonaDelTaller } from './zona';
 import type { DatosHoja } from './hoja-orden';
+import { claveMiniatura, sha256 } from './fotos';
+import { leerJpeg } from './pdf/escritor';
 
 const LOGO_JPEG = /^data:image\/jpe?g;base64,([A-Za-z0-9+/=]+)$/;
 
@@ -20,15 +22,53 @@ function jpegDeLogo(logo: string | null): Uint8Array | null {
   }
 }
 
+/** Tope de la miniatura que se incrusta: la hoja es de 30 × 23 mm, así que una imagen de hasta 640 px de lado (≤ 200 KB al subirla) sobra. */
+const MAX_FOTO_PDF_BYTES = 200_000;
+const CANDIDATAS_FOTO = 4;
+
+/**
+ * Fotografía del vehículo para el encabezado de la hoja (miniatura JPEG tomada de R2 en el servidor; no hay enlace público al bucket).
+ * Orden: 1) fotos de la galería del vehículo (sin OT), la más reciente; 2) fotos de recepción de ESTA orden; 3) las demás fotos de esta orden.
+ * Nunca se usan fotos de otras órdenes del vehículo ni imágenes genéricas. Mismos permisos que la descarga normal (`fotos.ver`; la galería exige `vehiculos.ver`).
+ * Cualquier problema (sin bucket, objeto faltante, hash distinto, formato no incrustable) pasa a la siguiente candidata y, al final, a ninguna: la hoja sale igual.
+ */
+export async function fotoParaHoja(db: D1Database, bucket: R2Bucket | undefined, s: Sesion, vehiculoId: string, ordenId: string): Promise<Uint8Array | null> {
+  if (!bucket || !tiene(s, 'fotos.ver')) return null;
+  try {
+    const galeria = tiene(s, 'vehiculos.ver');
+    const filas = await all<{ id: string; miniatura_bytes: number; miniatura_sha256: string }>(
+      db,
+      `SELECT id, miniatura_bytes, miniatura_sha256 FROM fotos
+        WHERE taller_id = ? AND vehiculo_id = ? AND estado = 'lista' AND (orden_id = ?${galeria ? ' OR orden_id IS NULL' : ''}) AND miniatura_bytes <= ?
+        ORDER BY CASE WHEN orden_id IS NULL THEN 0 WHEN etapa = 'recepcion' THEN 1 ELSE 2 END, created_at DESC, id LIMIT ?`,
+      s.tallerId, vehiculoId, ordenId, MAX_FOTO_PDF_BYTES, CANDIDATAS_FOTO,
+    );
+    for (const f of filas) {
+      try {
+        const obj = await bucket.get(claveMiniatura(s.tallerId, f.id));
+        if (!obj) continue;
+        const bytes = new Uint8Array(await obj.arrayBuffer());
+        if (bytes.length !== f.miniatura_bytes || (await sha256(bytes)) !== f.miniatura_sha256) continue;
+        if (leerJpeg(bytes)) return bytes;
+      } catch {
+        /* siguiente candidata */
+      }
+    }
+  } catch {
+    /* la foto es opcional */
+  }
+  return null;
+}
+
 /** Devuelve los datos operativos de la orden, o null si no existe, es de otro taller o la sesión no tiene acceso a ella. */
-/** `alcance`: condición SQL (sobre el alias `o`) y parámetros que limitan las órdenes a las que la sesión tiene acceso. */
-export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string, alcance: { cond: string[]; params: unknown[] }): Promise<DatosHoja | null> {
+/** `alcance`: condición SQL (sobre el alias `o`) y parámetros que limitan las órdenes a las que la sesión tiene acceso. `bucket`: R2 de fotos; sólo se pasa en las hojas que llevan la foto del vehículo. */
+export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string, alcance: { cond: string[]; params: unknown[] }, bucket?: R2Bucket): Promise<DatosHoja | null> {
   const o = await first<{
-    id: string; numero: number; fecha_ingreso: string; fecha_prometida: string | null; km_ingreso: number | null; falla_reportada: string | null; diagnostico: string | null; observaciones: string | null;
+    id: string; vehiculo_id: string; numero: number; fecha_ingreso: string; fecha_prometida: string | null; km_ingreso: number | null; falla_reportada: string | null; diagnostico: string | null; observaciones: string | null;
     cliente: string; cliente_telefono: string | null; patente: string; anio: number | null; marca: string | null; modelo: string | null; mecanico: string | null;
   }>(
     db,
-    `SELECT o.id, o.numero, o.fecha_ingreso, o.fecha_prometida, o.km_ingreso, o.falla_reportada, o.diagnostico, o.observaciones,
+    `SELECT o.id, o.vehiculo_id, o.numero, o.fecha_ingreso, o.fecha_prometida, o.km_ingreso, o.falla_reportada, o.diagnostico, o.observaciones,
             c.nombre AS cliente, c.telefono AS cliente_telefono, v.patente, v.anio, ma.nombre AS marca, mo.nombre AS modelo, m.nombre AS mecanico
        FROM ordenes o
        JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id
@@ -41,7 +81,7 @@ export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string,
   );
   if (!o) return null;
 
-  const [items, participantes, taller, zona] = await Promise.all([
+  const [items, participantes, taller, zona, foto] = await Promise.all([
     all<{ tipo: string; descripcion: string; cantidad: number; unidad: string | null }>(
       db,
       `SELECT oi.tipo, oi.descripcion, oi.cantidad, a.unidad FROM orden_items oi
@@ -62,6 +102,7 @@ export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string,
       s.tallerId,
     ),
     zonaDelTaller(db, s.tallerId),
+    fotoParaHoja(db, bucket, s, o.vehiculo_id, o.id),
   ]);
 
   // Con permiso para ver clientes se muestran el nombre y el teléfono; sin él, ninguno de los dos.
@@ -75,6 +116,7 @@ export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string,
       email: taller?.email ?? null,
     },
     logo: jpegDeLogo(taller?.logo ?? null),
+    foto,
     orden: { numero: o.numero, fechaApertura: o.fecha_ingreso, fechaPrometida: o.fecha_prometida },
     cliente: { visible: verCliente, nombre: verCliente ? o.cliente : null, telefono: verCliente ? o.cliente_telefono : null },
     vehiculo: { patente: o.patente, marca: o.marca, modelo: o.modelo, anio: o.anio, km: o.km_ingreso },

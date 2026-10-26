@@ -1,17 +1,16 @@
-// "Seguimiento del cliente" en el detalle de la OT: activar el enlace público, copiarlo, mandarlo por WhatsApp, mostrar el QR, publicar mensajes
+// "Seguimiento del cliente" en el detalle de la OT: el enlace público se activa solo al crear la orden; acá se copia, se muestra el QR, se publican mensajes
 // para el cliente y elegir qué se muestra. El estado de la orden NO se cambia acá: se sigue cambiando donde siempre y la página pública lo refleja sola.
 import { lazy, Suspense, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, ExternalLink, Link2, MessageCircle, QrCode, RefreshCw, Share2, Trash2 } from 'lucide-react';
+import { Copy, ExternalLink, Link2, MessageCircle, QrCode, RefreshCw, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, fechaHora, whatsapp } from '@/lib/format';
 import { Aviso, Boton, Cargando, Check, ErrorCaja, Insignia, Input, Tarjeta, Textarea, useConfirmar, useToast, type Tono } from '@/components/ui';
 import { MENSAJE_MAX } from '@shared/seguimiento';
+import { mensajeOrdenWhatsApp } from '@shared/mensaje-ingreso';
 
 const QrEnlace = lazy(() => import('@/components/QrEnlace'));
-
-export const TEXTO_WHATSAPP = 'Hola, podés consultar el estado de reparación de tu vehículo desde este enlace:';
 
 interface Mensaje { id: string; texto: string; creado_at: string; usuario: string | null; retirado_at: string | null; retirado_por: string | null; vigente: boolean }
 interface Transicion { id: string; estado: string; titulo: string; at: string; visible: boolean; es_actual: boolean }
@@ -34,6 +33,40 @@ const TONO: Record<string, Tono> = { info: 'azul', trabajo: 'azul', espera: 'amb
 /** Estado del seguimiento de una orden (se vuelve a leer cuando cambia el estado de la OT: la clave empieza con ['orden', id]). */
 export function useSeguimiento(ordenId: string, habilitado = true) {
   return useQuery({ queryKey: ['orden', ordenId, 'seguimiento'], queryFn: () => api.get<EstadoSeguimiento>(`/ordenes/${ordenId}/seguimiento`), enabled: habilitado });
+}
+
+interface OrdenWhatsApp {
+  id: string;
+  numero: number;
+  estado: string;
+  patente: string;
+  marca?: string | null;
+  modelo?: string | null;
+  cliente?: string | null;
+  cliente_telefono?: string | null;
+}
+
+/**
+ * ÚNICA acción de WhatsApp de la orden: abre WhatsApp con el mensaje armado con los datos reales de la OT y el enlace de seguimiento. No envía nada solo.
+ * El teléfono del cliente sólo llega si la persona puede consultar clientes; sin él, WhatsApp pide elegir el contacto. Sin enlace disponible
+ * (seguimiento desactivado o sin permiso para compartirlo) el mensaje sale sin esa parte, nunca con un enlace que no funciona.
+ */
+export function BotonWhatsAppOrden({ orden, tam, variante }: { orden: OrdenWhatsApp; tam?: 'sm'; variante?: 'primario' }) {
+  const { puede, me } = useAuth();
+  const { data: s, isLoading } = useSeguimiento(orden.id, puede('seguimiento.ver'));
+  if (orden.estado === 'entregada' || orden.estado === 'cancelada') return null;
+  const texto = mensajeOrdenWhatsApp({
+    cliente: orden.cliente,
+    vehiculo: [orden.marca, orden.modelo].filter(Boolean).join(' '),
+    patente: orden.patente,
+    numero: orden.numero,
+    taller: me?.taller.nombre,
+    url: s?.activo ? s.url : null,
+    listo: orden.estado === 'lista',
+  });
+  const href = whatsapp(orden.cliente_telefono, texto) ?? `https://wa.me/?text=${encodeURIComponent(texto)}`;
+  const boton = <Boton tam={tam} variante={variante} disabled={isLoading} icono={<MessageCircle className="size-4" />}>Enviar WhatsApp al cliente</Boton>;
+  return isLoading ? boton : <a href={href} target="_blank" rel="noreferrer noopener">{boton}</a>;
 }
 
 async function copiar(texto: string): Promise<boolean> {
@@ -92,22 +125,10 @@ export function SeguimientoCliente({ orden }: { orden: { id: string; numero: num
   if (error || !s) return <Tarjeta titulo="Seguimiento del cliente"><ErrorCaja error={error} reintentar={refetch} /></Tarjeta>;
 
   const url = s.url;
-  const mensajeWa = url ? `${TEXTO_WHATSAPP} ${url}` : '';
-  // El teléfono del cliente sólo llega si la persona puede consultar clientes; sin él, WhatsApp pide elegir el contacto.
-  const hrefWa = url ? (whatsapp(orden.cliente_telefono, mensajeWa) ?? `https://wa.me/?text=${encodeURIComponent(mensajeWa)}`) : null;
-  const puedeCompartirNativo = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
   const copiarEnlace = async () => {
     if (!url) return;
     if (await copiar(url)) toast.ok('Enlace copiado');
     else { campo.current?.select(); toast.error(new Error('No se pudo copiar solo: seleccionalo y copialo a mano')); }
-  };
-  const compartirNativo = async () => {
-    if (!url) return;
-    try {
-      await navigator.share({ text: TEXTO_WHATSAPP, url });
-    } catch {
-      /* la persona cerró el selector */
-    }
   };
   const pedir = async (titulo: string, detalle: string, ejecutar: () => void) => {
     if (await confirmar(titulo, detalle, true)) ejecutar();
@@ -130,7 +151,7 @@ export function SeguimientoCliente({ orden }: { orden: { id: string; numero: num
           {!s.activo ? (
             <div className="space-y-3">
               <p className="text-sm text-tenue">
-                {s.existe ? `El enlace está desactivado${s.desactivado_at ? ` desde el ${fecha(s.desactivado_at)}` : ''}: quien lo tenga no puede abrirlo.` : 'Activá el seguimiento para generar un enlace individual y enviárselo al cliente.'}
+                {s.existe ? `El enlace está desactivado${s.desactivado_at ? ` desde el ${fecha(s.desactivado_at)}` : ''}: quien lo tenga no puede abrirlo.` : 'Esta orden no tiene enlace de seguimiento (es anterior a la activación automática). Activalo para generar un enlace individual.'}
               </p>
               {gestionar ? (
                 <Boton variante="primario" icono={<Link2 className="size-4" />} cargando={activar.isPending} onClick={() => activar.mutate()}>{s.existe ? 'Volver a activar el seguimiento' : 'Activar seguimiento'}</Boton>
@@ -149,18 +170,12 @@ export function SeguimientoCliente({ orden }: { orden: { id: string; numero: num
               {compartir && url ? (
                 <div className="space-y-3">
                   <Input ref={campo} readOnly value={url} onFocus={(e) => e.currentTarget.select()} aria-label="Enlace de seguimiento" className="text-xs" />
-                  <div className="grid grid-cols-2 gap-2 [&_button]:h-auto [&_button]:min-h-10 [&_button]:py-1.5 [&_button]:leading-tight">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 [&_button]:h-auto [&_button]:min-h-10 [&_button]:py-1.5 [&_button]:leading-tight">
                     <Boton icono={<Copy className="size-4" />} onClick={copiarEnlace}>Copiar enlace</Boton>
-                    <a href={hrefWa!} target="_blank" rel="noreferrer noopener" className="contents">
-                      <Boton icono={<MessageCircle className="size-4" />} className="w-full">Compartir por WhatsApp</Boton>
-                    </a>
                     <Boton icono={<QrCode className="size-4" />} onClick={() => setQr(true)}>Mostrar código QR</Boton>
-                    {puedeCompartirNativo ? <Boton icono={<Share2 className="size-4" />} onClick={compartirNativo}>Compartir…</Boton> : (
-                      <a href={url} target="_blank" rel="noreferrer noopener" className="contents"><Boton icono={<ExternalLink className="size-4" />} className="w-full">Ver como cliente</Boton></a>
-                    )}
+                    <a href={url} target="_blank" rel="noreferrer noopener" className="contents"><Boton icono={<ExternalLink className="size-4" />} className="w-full">Ver como cliente</Boton></a>
                   </div>
-                  {puedeCompartirNativo && <a href={url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1.5 text-sm font-medium text-marca-700"><ExternalLink className="size-4" /> Ver como lo ve el cliente</a>}
-                  {!orden.cliente_telefono && <p className="text-xs text-tenue">WhatsApp te va a pedir elegir el contacto{puede('clientes.ver') ? ' (el cliente no tiene teléfono cargado)' : ''}. No se envía nada automáticamente.</p>}
+                  <p className="text-xs text-tenue">Para avisarle al cliente usá «Enviar WhatsApp al cliente» (arriba): lleva este enlace y no se envía nada automáticamente.</p>
                 </div>
               ) : (
                 <Aviso>El seguimiento está activo. No tenés permiso para ver ni compartir el enlace.</Aviso>

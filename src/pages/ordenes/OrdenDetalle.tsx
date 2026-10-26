@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowRight, ClipboardCheck, MessageCircle, Pencil, Printer, Receipt, Wallet, X } from 'lucide-react';
+import { ArrowRight, ClipboardCheck, Pencil, Printer, Receipt, Wallet, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { duracion, fecha, fechaHora, km, money, numero, whatsapp } from '@/lib/format';
+import { duracion, fecha, fechaHora, km, money, numero } from '@/lib/format';
 import { FotosOrden } from '@/components/Fotos';
 import { ImprimirOrden } from '@/components/ImprimirOrden';
-import { SeguimientoCliente, useSeguimiento } from '@/components/SeguimientoCliente';
+import { BotonWhatsAppOrden, SeguimientoCliente, useSeguimiento } from '@/components/SeguimientoCliente';
 import { ChecklistOrden } from '@/components/checklist/Checklist';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
@@ -179,7 +179,7 @@ export function OrdenDetalle() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
-  const { puede, me } = useAuth();
+  const { puede } = useAuth();
   const { confirmar, dialogo } = useConfirmar();
   const { data: o, isLoading, error, refetch } = useQuery({ queryKey: ['orden', id], queryFn: () => api.get(`/ordenes/${id}`) });
   const { data: mecanicos = [] } = useMecanicos();
@@ -277,22 +277,20 @@ export function OrdenDetalle() {
   const vigentesAnt = anticiposOT.filter((a) => a.estado === 'registrado');
   const abonado = vigentesAnt.reduce((a, x) => a + x.total - x.devuelto, 0);
   const vehiculo = [o.marca, o.modelo, o.anio].filter(Boolean).join(' ');
-  const wa = !o.cliente ? null : whatsapp(
-    o.cliente_telefono,
-    o.estado === 'lista'
-      ? `Hola ${o.cliente}! Te avisamos de ${me?.taller.nombre} que tu vehículo ${o.patente} ya está listo para retirar.${valorizado ? ` Total: ${money(o.total)}.` : ''}`
-      : `Hola ${o.cliente}! Te escribimos de ${me?.taller.nombre} por tu vehículo ${o.patente} (OT #${numero(o.numero)}). Estado: ${ESTADO_OT_LABEL[o.estado as EstadoOT]}.`,
-  );
 
   return (
     <>
       {dialogo}
       {puede('ordenes.imprimir') && <ImprimirOrden ordenId={o.id} numero={o.numero} abierto={imprimirOrden} onCerrar={() => setImprimirOrden(false)} />}
-      {recienCreada && puede('ordenes.imprimir') && !imprimirOrden && (
+      {recienCreada && !imprimirOrden && (
         <Aviso tono="verde" className="mb-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>Orden creada. ¿Querés imprimir la hoja para el mecánico?</span>
-            <span className="flex gap-2"><Boton tam="sm" variante="primario" icono={<Printer className="size-4" />} onClick={() => setImprimirOrden(true)}>Imprimir orden</Boton><Boton tam="sm" variante="fantasma" onClick={() => setRecienCreada(false)}>Ahora no</Boton></span>
+            <span>Orden creada.{puede('ordenes.imprimir') ? ' ¿Querés imprimir la hoja para el mecánico?' : ''} El seguimiento del cliente ya está activo.</span>
+            <span className="flex flex-wrap gap-2">
+              {puede('ordenes.imprimir') && <Boton tam="sm" variante="primario" icono={<Printer className="size-4" />} onClick={() => setImprimirOrden(true)}>Imprimir orden</Boton>}
+              <BotonWhatsAppOrden orden={o} tam="sm" />
+              <Boton tam="sm" variante="fantasma" onClick={() => setRecienCreada(false)}>Ahora no</Boton>
+            </span>
           </div>
         </Aviso>
       )}
@@ -302,7 +300,7 @@ export function OrdenDetalle() {
         subtitulo={<>{[o.patente, vehiculo || 'Vehículo', o.cliente].filter(Boolean).join(' · ')}</>}
         acciones={
           <>
-            {wa && <a href={wa} target="_blank" rel="noreferrer"><Boton icono={<MessageCircle className="size-4" />}>WhatsApp</Boton></a>}
+            {!(recienCreada && !imprimirOrden) && <BotonWhatsAppOrden orden={o} />}
             <Boton icono={<Printer className="size-4" />} onClick={() => window.open(`/imprimir/orden/${o.id}`, '_blank')}>Imprimir</Boton>
             {puede('ordenes.imprimir') && <Boton icono={<Printer className="size-4" />} onClick={() => setImprimirOrden(true)} title="PDF A4 para el mecánico y copia para administración, sin precios">Imprimir orden</Boton>}
             {puedeTrabajar && <Boton variante="primario" icono={<ArrowRight className="size-4" />} onClick={() => setEstadoModal(true)}>Cambiar estado</Boton>}
