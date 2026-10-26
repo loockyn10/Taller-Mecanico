@@ -285,7 +285,7 @@ export function Indicador({ titulo, valor, detalle, icono, tono = 'azul', onClic
       disabled={!onClick}
       className="flex w-full min-w-0 items-start gap-3 rounded-card border border-borde bg-white p-3.5 text-left shadow-card transition [container-type:inline-size] enabled:hover:border-marca-300 enabled:hover:shadow-pop sm:p-4"
     >
-      {icono && <span className={cn('grid size-8 shrink-0 place-items-center rounded-ctl ring-1 ring-inset sm:size-10', TONOS[tono])}>{icono}</span>}
+      {icono && <span className={cn('grid size-8 shrink-0 place-items-center rounded-ctl ring-1 ring-inset @min-[13rem]:size-10', TONOS[tono])}>{icono}</span>}
       <span className="min-w-0">
         <span className="block text-xs font-medium uppercase tracking-wide text-tenue">{titulo}</span>
         {/* Los importes no se parten en dos líneas: la letra se ajusta al ancho real de la tarjeta (consulta de contenedor). */}

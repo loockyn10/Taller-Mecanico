@@ -71,7 +71,7 @@ export function Inicio() {
         </Link>
       )}
 
-      <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 xl:grid-cols-4">
+      <div className="@container"><div className="grid grid-cols-1 gap-3 @[20rem]:grid-cols-2 @[42rem]:grid-cols-4">
         {puede('ordenes.ver') && <Indicador titulo="OT abiertas" valor={abiertas} detalle={`${cant('en_reparacion')} en reparación`} icono={<Wrench className="size-5" />} onClick={() => nav('/ordenes')} />}
         {puede('ordenes.ver') && <Indicador titulo="Listas p/ entregar" valor={cant('lista')} icono={<CheckCircle2 className="size-5" />} tono="verde" onClick={() => nav('/ordenes?estado=lista')} />}
         {puede('turnos.ver') && <Indicador titulo="Turnos hoy" valor={data.turnosHoy.length} icono={<CalendarDays className="size-5" />} tono="violeta" onClick={() => nav('/agenda')} />}
@@ -93,7 +93,7 @@ export function Inicio() {
             <Indicador titulo="Por cobrar" valor={money(data.finanzas.por_cobrar)} icono={<AlertTriangle className="size-5" />} tono="rojo" onClick={() => nav('/cuentas')} />
           </>
         )}
-      </div>
+      </div></div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         {puede('ordenes.ver') && <Tarjeta titulo="Trabajos en curso" className="lg:col-span-2" sinPadding acciones={<Link to="/ordenes" className="text-sm font-medium text-marca-700">Ver tablero</Link>}>
