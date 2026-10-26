@@ -18,6 +18,7 @@ import { sentenciasAplicarCredito, validarOrigenCredito } from '../lib/creditos'
 import { ESTADOS_TAREA } from '../../shared/tempario';
 import { datosHojaOrden } from '../lib/hoja-orden-datos';
 import { generarHojaCliente } from '../lib/hoja-cliente';
+import { urlPublica } from '../lib/url-publica';
 import { sentenciasEnlaceInicial, tokenActivo, urlSeguimiento } from '../lib/seguimiento';
 import { COPIAS, VARIANTES, generarHojaOrden, numeroOrden, variantesDeCopia } from '../lib/hoja-orden';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
@@ -147,7 +148,7 @@ ordenes.get('/:id/pdf', async (c) => {
     if (!datos) throw notFound('Orden de trabajo');
     const token = await tokenActivo(c.env.DB, s.tallerId, c.req.param('id'));
     if (!token) throw conflict('Activá el seguimiento del cliente antes de imprimir su código QR', 'seguimiento_inactivo');
-    const { pdf } = generarHojaCliente(datos, urlSeguimiento(new URL(c.req.url).origin, token));
+    const { pdf } = generarHojaCliente(datos, urlSeguimiento(urlPublica(c.req.url, c.env), token));
     c.executionCtx.waitUntil(auditar(c.env.DB, s.tallerId, s.usuarioId, 'ordenes', c.req.param('id'), 'imprimir_pdf', { copia, hojas: 1 }).run().catch(() => undefined));
     return new Response(pdf, {
       headers: {

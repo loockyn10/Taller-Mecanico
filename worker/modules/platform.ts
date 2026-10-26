@@ -10,6 +10,7 @@ import { exigirNoBloqueado, limpiarFallos, registrarFallo } from '../lib/limites
 import { ejecutarMantenimiento, informeSalud } from '../lib/observabilidad';
 import { mantenimientoContable } from '../lib/contab/sync';
 import { huellaCorta, registrarEvento } from '../lib/seguridad';
+import { urlPublica } from '../lib/url-publica';
 import { sentenciasAltaTaller } from './provision';
 import { archivoParaExportar, claveFoto, claveMiniatura, limpiarFotos, manifiestoFotos, usoFotos } from '../lib/fotos';
 
@@ -116,7 +117,7 @@ platform.post('/invitaciones', async (c) => {
   await c.env.DB.prepare(
     'INSERT INTO invitaciones_activacion (id, token_hash, nombre_sugerido, email_destino, plan, usuarios_adicionales, notas, vence_at) VALUES (?,?,?,?,?,?,?,?)',
   ).bind(id, await sha256Hex(token), d.nombre_sugerido, d.email, d.plan, d.usuarios_adicionales, d.notas, vence).run();
-  const origen = new URL(c.req.url).origin;
+  const origen = urlPublica(c.req.url, c.env);
   // El token va en el fragmento (#): el navegador no lo envía al servidor ni lo manda en el encabezado Referer.
   return c.json({ id, token, enlace: `${origen}/activar#${token}`, vence_at: vence }, 201);
 });

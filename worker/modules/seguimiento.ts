@@ -10,7 +10,8 @@
 // Ninguna respuesta de este módulo incluye precios, costos, notas internas ni la nota del cambio de estado.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { AppEnv, Sesion } from '../env';
+import type { AppEnv, Env, Sesion } from '../env';
+import { urlPublica } from '../lib/url-publica';
 import { badRequest, body, conflict, notFound, zId } from '../lib/http';
 import { all, auditar, first, uid, ahora } from '../lib/db';
 import { requireAny, requirePerm, tiene } from '../lib/auth';
@@ -88,12 +89,12 @@ async function estadoSeguimiento(db: D1Database, s: Sesion, o: OrdenSeg, origen:
   };
 }
 
-const origenDe = (url: string) => new URL(url).origin;
+const origenDe = (url: string, env: Env) => urlPublica(url, env);
 
 seguimiento.get('/:id/seguimiento', requirePerm('seguimiento.ver'), async (c) => {
   const s = c.get('sesion');
   const o = await ordenAccesible(c.env.DB, s, c.req.param('id')!);
-  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url)));
+  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url, c.env)));
 });
 
 /** Activa el seguimiento. Si nunca tuvo enlace crea uno con un token nuevo; si estaba desactivado lo reactiva con el MISMO token (para uno nuevo, regenerar). */
@@ -110,7 +111,7 @@ seguimiento.post('/:id/seguimiento/activar', requirePerm('seguimiento.gestionar'
       .bind(uid(), s.tallerId, o.id, nuevoToken(), s.usuarioId, t, t, t, t),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', o.id, 'seguimiento_activado'),
   ]);
-  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url)));
+  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url, c.env)));
 });
 
 /** Desactiva el enlace: deja de funcionar de inmediato (la página pública exige `activo = 1` en cada consulta). El token se conserva por si se reactiva. */
@@ -122,7 +123,7 @@ seguimiento.post('/:id/seguimiento/desactivar', requirePerm('seguimiento.gestion
     c.env.DB.prepare('UPDATE seguimiento_enlaces SET activo = 0, desactivado_at = ?, updated_at = ? WHERE taller_id = ? AND orden_id = ? AND activo = 1').bind(t, t, s.tallerId, o.id),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', o.id, 'seguimiento_desactivado'),
   ]);
-  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url)));
+  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url, c.env)));
 });
 
 /** Reemplaza el token por uno nuevo. El anterior deja de existir en la base: el enlace viejo (y su QR impreso) falla de inmediato. Sólo con el seguimiento activo. */
@@ -136,7 +137,7 @@ seguimiento.post('/:id/seguimiento/regenerar', requirePerm('seguimiento.gestiona
     .run();
   if (!r.meta.changes) throw conflict('Primero activá el seguimiento de esta orden', 'seguimiento_inactivo');
   await auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', o.id, 'seguimiento_regenerado').run();
-  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url)));
+  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url, c.env)));
 });
 
 /** Qué se muestra: hoy, sólo si se publica la fecha estimada de entrega. */
@@ -150,7 +151,7 @@ seguimiento.patch('/:id/seguimiento', requirePerm('seguimiento.gestionar'), asyn
     .run();
   if (!r.meta.changes) throw conflict('Primero activá el seguimiento de esta orden', 'seguimiento_inactivo');
   await auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', o.id, 'seguimiento_config', { mostrar_fecha_estimada: d.mostrar_fecha_estimada }).run();
-  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url)));
+  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url, c.env)));
 });
 
 /**
@@ -177,7 +178,7 @@ seguimiento.put('/:id/seguimiento/transiciones/:eventoId', requirePerm('seguimie
       auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', o.id, 'seguimiento_transicion_oculta', { evento_id: eventoId }),
     ]);
   }
-  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url)));
+  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url, c.env)));
 });
 
 /** Texto plano: sin caracteres de control y con los saltos de línea normalizados (se muestra con `white-space: pre-line` y escapado, nunca como HTML). */
@@ -203,7 +204,7 @@ seguimiento.post('/:id/seguimiento/mensajes', requirePerm('seguimiento.mensajes'
     c.env.DB.prepare('INSERT INTO seguimiento_mensajes (id, taller_id, orden_id, texto, usuario_id) VALUES (?, ?, ?, ?, ?)').bind(id, s.tallerId, o.id, d.texto, s.usuarioId),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', o.id, 'seguimiento_mensaje', { mensaje_id: id }),
   ]);
-  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url)), 201);
+  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url, c.env)), 201);
 });
 
 /** Retira un mensaje de la página (queda en el historial como retirado). */
@@ -220,5 +221,5 @@ seguimiento.delete('/:id/seguimiento/mensajes/:mid', requirePerm('seguimiento.me
     throw badRequest('El mensaje ya estaba retirado');
   }
   await auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', o.id, 'seguimiento_mensaje_retirado', { mensaje_id: mid }).run();
-  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url)));
+  return c.json(await estadoSeguimiento(c.env.DB, s, o, origenDe(c.req.url, c.env)));
 });

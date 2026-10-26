@@ -16,6 +16,8 @@ export interface Env {
   BACKUP_REPORT_TOKEN?: string;
   /** Secreto de sólo lectura del respaldo programado de las fotografías (GitHub Actions). Sólo exporta manifiesto y archivos; no es el token de plataforma. */
   FOTOS_BACKUP_TOKEN?: string;
+  /** Dirección pública para los enlaces absolutos (por defecto https://taller.orvelan.com.ar; en local se usa el origen de la solicitud). */
+  URL_PUBLICA?: string;
 }
 
 export interface Sesion {

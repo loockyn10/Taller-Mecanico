@@ -1149,3 +1149,6 @@ Crear «esperando aprobación» o «control final» obligaba a modificar la gest
 - Sin sesión: `/api/salud` 200; `GET /api/rapidas/consulta-precios`, `GET /api/rapidas/historial` y `POST /api/rapidas/bajas` responden **401** (las rutas existen y exigen sesión); `/operaciones-rapidas` 200 (la SPA).
 - La migración 0018 ya estaba aplicada en la D1 remota antes de publicar (ver §132).
 - **No verificado online:** no se inició sesión en producción ni se registró ninguna operación en los talleres reales (no se usan credenciales reales ni se crean datos en ellos). El flujo completo con sesión se probó en las pruebas de integración y en la instancia local equivalente.
+
+## Dominio oficial taller.orvelan.com.ar
+- `urlPublica` centraliza el origen de los enlaces absolutos (seguimiento, PDF de la OT, invitaciones); `routes` con `custom_domain` en `wrangler.jsonc`; `configLocal` quita `routes` para desarrollo/pruebas. Detalle y pendientes en `docs/DOMINIO.md`.

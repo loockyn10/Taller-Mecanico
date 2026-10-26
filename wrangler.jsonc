@@ -22,6 +22,9 @@
   // hace fallar el despliegue entero. En local y en las pruebas el bucket se simula en disco (scripts/lib.mjs › configLocal). Ver docs/FOTOGRAFIAS.md.
   "r2_buckets": [{ "binding": "FIERRO_FOTOS", "bucket_name": "fierro-fotos" }],
   // Mantenimiento periódico (gratis, incluido en el plan): drena la cola de contabilización, avanza reconciliaciones y deja un latido que la salud de plataforma vigila.
+  // Dominio oficial (ya conectado a este Worker en Cloudflare; acá se conserva para los despliegues). La dirección workers.dev anterior sigue activa.
+  "workers_dev": true,
+  "routes": [{ "pattern": "taller.orvelan.com.ar", "custom_domain": true }],
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "PBKDF2_ITERATIONS": "100000",

@@ -44,6 +44,8 @@ export function configLocal() {
   if (!(cfg.r2_buckets ?? []).some((b) => b.binding === 'FIERRO_FOTOS')) cfg.r2_buckets = [...(cfg.r2_buckets ?? []), { binding: 'FIERRO_FOTOS', bucket_name: 'fierro-fotos' }];
   // FIERRO_R2_REAL=1: el Worker local (con D1 local) usa el bucket R2 REAL de la cuenta, para verificar el almacenamiento de verdad. Deja objetos de prueba: borrarlos al terminar.
   if (process.env.FIERRO_R2_REAL === '1') cfg.r2_buckets = cfg.r2_buckets.map((b) => (b.binding === 'FIERRO_FOTOS' ? { ...b, remote: true } : b));
+  // El dominio personalizado es solo de producción: con rutas, wrangler dev serviría las solicitudes con ese host y los enlaces/controles de origen local se romperían.
+  delete cfg.routes;
   const destino = path.join(ROOT, 'wrangler.local.generado.jsonc');
   fs.writeFileSync(destino, JSON.stringify(cfg, null, 2));
   return destino;
