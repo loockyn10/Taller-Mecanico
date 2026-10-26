@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays, ChevronDown, ChevronRight, Clock, Gauge, HardHat, LogOut, Menu, Search, Users, Wrench, X } from 'lucide-react';
+import { CalendarDays, ChevronDown, ChevronRight, Clock, Gauge, HardHat, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search, Users, Wrench, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { buscarSecciones, gruposVisibles, resaltar, ubicar, type ItemNav } from '@/lib/navegacion';
@@ -15,6 +15,10 @@ function Marca() {
     <MarcaProducto oscuro />
   );
 }
+
+const CLAVE_CONTRAIDO = 'fierro.menu.contraido';
+const leerContraido = (): boolean => { try { return localStorage.getItem(CLAVE_CONTRAIDO) === '1'; } catch { return false; } };
+const guardarContraido = (v: boolean) => { try { localStorage.setItem(CLAVE_CONTRAIDO, v ? '1' : '0'); } catch { /* sin almacenamiento */ } };
 
 const CLAVE_MENU = 'fierro.menu.abierto';
 const leerAbierto = (): string | null => { try { return localStorage.getItem(CLAVE_MENU); } catch { return null; } };
@@ -36,7 +40,7 @@ function EnlaceItem({ it, activo, consulta, onNavegar }: { it: ItemNav; activo: 
 }
 
 /** Menú lateral: buscador de secciones fijo arriba y grupos desplegables (acordeón) que se desplazan solos. */
-function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
+function Navegacion({ onNavegar, compacto = false, onExpandir }: { onNavegar?: () => void; compacto?: boolean; onExpandir?: () => void }) {
   const { puede } = useAuth();
   const loc = useLocation();
   const nav = useNavigate();
@@ -46,6 +50,21 @@ function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
   const [q, setQ] = useState('');
   const entrada = useRef<HTMLInputElement>(null);
   const grupoActual = actual?.grupo.id;
+  // Menú contraído: el grupo cuyo panel flotante está abierto y dónde anclarlo.
+  const [flotante, setFlotante] = useState<{ id: string; top: number; left: number } | null>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => setFlotante(null), [loc.pathname, loc.search, compacto]);
+  useEffect(() => {
+    if (!flotante) return;
+    const fuera = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!panel.current?.contains(t) && !t.closest('[data-grupo-btn]')) setFlotante(null);
+    };
+    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') setFlotante(null); };
+    document.addEventListener('mousedown', fuera);
+    document.addEventListener('keydown', tecla);
+    return () => { document.removeEventListener('mousedown', fuera); document.removeEventListener('keydown', tecla); };
+  }, [flotante]);
 
   // La categoría de la pantalla actual se abre sola al navegar; después se puede cerrar a mano.
   useEffect(() => {
@@ -77,6 +96,71 @@ function Navegacion({ onNavegar }: { onNavegar?: () => void }) {
     onNavegar?.();
     nav(it.a);
   };
+
+  if (compacto) {
+    const base = 'relative grid h-10 w-full place-items-center rounded-ctl transition-colors';
+    const estado = (act: boolean) => (act ? 'bg-white/12 text-white before:absolute before:inset-y-1.5 before:-left-0.5 before:w-[3px] before:rounded-full before:bg-sky-400' : 'text-petroleo-100/85 hover:bg-white/7 hover:text-white');
+    const gf = flotante ? grupos.find((g) => g.id === flotante.id) : undefined;
+    return (
+      <>
+        <div className="px-2 pb-1 pt-3">
+          <button type="button" onClick={onExpandir} title="Buscar sección" aria-label="Buscar sección (expande el menú)" className={cn(base, 'border border-petroleo-700 bg-petroleo-800 text-petroleo-200 hover:text-white')}>
+            <Search className="size-4" />
+          </button>
+        </div>
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 pb-4" aria-label="Secciones">
+          <ul className="space-y-1">
+            {grupos.map((g) => {
+              if (g.id === 'inicio') {
+                const it = g.items[0];
+                return (
+                  <li key={g.id}>
+                    <Link to={it.a} title="Inicio" aria-label="Inicio" aria-current={actual?.item.id === it.id ? 'page' : undefined} className={cn(base, estado(actual?.item.id === it.id))}>{it.icono}</Link>
+                  </li>
+                );
+              }
+              const abre = flotante?.id === g.id;
+              return (
+                <li key={g.id}>
+                  <button
+                    type="button"
+                    data-grupo-btn
+                    title={g.titulo}
+                    aria-label={g.titulo}
+                    aria-haspopup="true"
+                    aria-expanded={abre}
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setFlotante(abre ? null : { id: g.id, top: r.top, left: r.right + 8 });
+                    }}
+                    className={cn(base, estado(actual?.grupo.id === g.id || abre))}
+                  >
+                    {g.icono}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+        {flotante && gf && (
+          <div
+            ref={panel}
+            role="menu"
+            aria-label={gf.titulo}
+            style={{ top: Math.max(8, Math.min(flotante.top, window.innerHeight - 56 - gf.items.length * 36)), left: flotante.left }}
+            className="no-print fixed z-50 max-h-[calc(100vh-1rem)] w-60 overflow-y-auto rounded-card border border-petroleo-700 bg-petroleo-900 p-2 shadow-modal"
+          >
+            <div className="mb-1 px-2 text-micro font-semibold uppercase tracking-wider text-petroleo-300">{gf.titulo}</div>
+            <ul className="space-y-0.5">
+              {gf.items.map((i) => (
+                <li key={i.id}><EnlaceItem it={i} activo={actual?.item.id === i.id} onNavegar={() => setFlotante(null)} /></li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <>
@@ -187,9 +271,17 @@ function Migas() {
   );
 }
 
-function Usuario() {
+function Usuario({ compacto = false }: { compacto?: boolean }) {
   const { me, logout } = useAuth();
   if (!me) return null;
+  if (compacto) {
+    return (
+      <div className="flex flex-col items-center gap-1 border-t border-petroleo-800 px-2 py-3">
+        <div title={`${me.usuario.nombre} · ${ROL_LABEL[me.usuario.rol]} · ${me.taller.nombre}`} className="grid size-9 shrink-0 place-items-center rounded-full bg-petroleo-600 text-sm font-bold text-white">{me.usuario.nombre.slice(0, 1).toUpperCase()}</div>
+        <Boton variante="fantasma" tam="sm" className="text-petroleo-200 hover:bg-white/10 hover:text-white" onClick={logout} aria-label="Cerrar sesión" title="Cerrar sesión" icono={<LogOut className="size-4" />} />
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2 border-t border-petroleo-800 p-3">
       <div className="grid size-9 shrink-0 place-items-center rounded-full bg-petroleo-600 text-sm font-bold text-white">{me.usuario.nombre.slice(0, 1).toUpperCase()}</div>
@@ -257,6 +349,8 @@ function Resultado({ titulo, detalle, onClick }: { titulo: string; detalle: stri
 export function Layout() {
   const [menu, setMenu] = useState(false);
   const [busqueda, setBusqueda] = useState(false);
+  const [contraido, setContraido] = useState(leerContraido);
+  const alternar = (v: boolean) => { setContraido(v); guardarContraido(v); };
   const { me, puede, soloMecanico } = useAuth();
   const loc = useLocation();
   useEffect(() => setMenu(false), [loc.pathname]);
@@ -284,10 +378,20 @@ export function Layout() {
   return (
     <div className="flex h-full">
       {/* Barra lateral (escritorio) */}
-      <aside className="no-print hidden w-menu shrink-0 flex-col bg-petroleo-900 lg:flex">
-        <div className="px-4 pb-1 pt-4"><Marca /></div>
-        <Navegacion />
-        <Usuario />
+      <aside className={cn('no-print hidden shrink-0 flex-col bg-petroleo-900 transition-[width] duration-200 lg:flex', contraido ? 'w-[4.25rem]' : 'w-menu')}>
+        {contraido ? (
+          <div className="flex flex-col items-center gap-2 px-2 pb-1 pt-4">
+            <div className="grid size-10 place-items-center rounded-ctl bg-white"><Isotipo className="size-7" /></div>
+            <Boton variante="fantasma" tam="sm" className="text-petroleo-200 hover:bg-white/10 hover:text-white" onClick={() => alternar(false)} icono={<PanelLeftOpen className="size-4" />} aria-label="Expandir menú" title="Expandir menú" />
+          </div>
+        ) : (
+          <div className="flex items-start justify-between gap-1 px-4 pb-1 pt-4">
+            <Marca />
+            <Boton variante="fantasma" tam="sm" className="text-petroleo-200 hover:bg-white/10 hover:text-white" onClick={() => alternar(true)} icono={<PanelLeftClose className="size-4" />} aria-label="Contraer menú" title="Contraer menú" />
+          </div>
+        )}
+        <Navegacion compacto={contraido} onExpandir={() => alternar(false)} />
+        <Usuario compacto={contraido} />
       </aside>
 
       {/* Menú deslizable (móvil/tablet) */}

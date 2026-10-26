@@ -287,7 +287,7 @@ export function Indicador({ titulo, valor, detalle, icono, tono = 'azul', onClic
     >
       {icono && <span className={cn('grid size-8 shrink-0 place-items-center rounded-ctl ring-1 ring-inset @min-[13rem]:size-10', TONOS[tono])}>{icono}</span>}
       <span className="min-w-0">
-        <span className="block text-xs font-medium uppercase tracking-wide text-tenue">{titulo}</span>
+        <span className="block text-xs font-medium uppercase tracking-wide text-tenue @max-[11rem]:text-[10px] @max-[11rem]:tracking-normal">{titulo}</span>
         {/* Los importes no se parten en dos líneas: la letra se ajusta al ancho real de la tarjeta (consulta de contenedor). */}
         <span className={cn('block font-bold leading-tight tabular-nums text-texto [font-size:clamp(0.8125rem,10.5cqw,1.25rem)]', !trozos && 'whitespace-nowrap')}>
           {trozos ? trozos.map((t, i) => <span key={i} className="inline-block whitespace-nowrap">{i > 0 && "/ "}{t}{i < trozos.length - 1 && " "}</span>) : valor}
