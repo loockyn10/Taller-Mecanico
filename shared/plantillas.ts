@@ -1,4 +1,4 @@
-// Plantillas generales de Fierro: catálogos de arranque útiles para cualquier taller.
+// Plantillas generales de ORVELAN: catálogos de arranque útiles para cualquier taller.
 //
 // NO son datos de ningún taller y NO traen precios de venta: cada taller recibe su propia copia y la personaliza. Los tiempos del tempario
 // (shared/tempario.ts) son orientativos. Nada de lo que un taller carga se copia a otro: estas listas son lo único compartido.

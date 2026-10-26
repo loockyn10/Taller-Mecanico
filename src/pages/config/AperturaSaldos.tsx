@@ -1,4 +1,4 @@
-// Apertura de saldos: cómo empieza a operar en Fierro un taller que viene de otro sistema. Los saldos de caja, bancos e inventario ya se cargan en sus pantallas;
+// Apertura de saldos: cómo empieza a operar en ORVELAN un taller que viene de otro sistema. Los saldos de caja, bancos e inventario ya se cargan en sus pantallas;
 // acá se ve cuáles están declarados y se cargan las deudas con proveedores (sin crear compras falsas ni tocar los resultados).
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -39,7 +39,7 @@ export function AperturaSaldos() {
   if (!puede('aperturas.gestionar')) return <Aviso tono="ambar">No tenés permiso para cargar saldos de apertura.</Aviso>;
   return (
     <>
-      <Encabezado titulo="Apertura de saldos" subtitulo="Los saldos con que el taller empieza a operar en Fierro si viene de otro sistema" />
+      <Encabezado titulo="Apertura de saldos" subtitulo="Los saldos con que el taller empieza a operar en ORVELAN si viene de otro sistema" />
       <div className="space-y-5">
         <EstadoApertura />
         <CargarProveedores />
@@ -251,7 +251,7 @@ function CargarProveedores() {
               ]}
             />
             {rev.resumen.con_aviso > 0 && rev.resumen.puede_confirmar && (
-              <Check checked={aceptaAvisos} onChange={setAceptaAvisos} label="Revisé los avisos y confirmo que los saldos no incluyen operaciones ya cargadas en Fierro" />
+              <Check checked={aceptaAvisos} onChange={setAceptaAvisos} label="Revisé los avisos y confirmo que los saldos no incluyen operaciones ya cargadas en ORVELAN" />
             )}
             <Boton variante="primario" disabled={!rev.resumen.puede_confirmar || (rev.resumen.con_aviso > 0 && !aceptaAvisos)} cargando={confirmar.isPending} onClick={() => confirmar.mutate()}>
               Guardar la apertura

@@ -111,7 +111,7 @@ export function ActivarContabilidad({ estado }: { estado: EstadoContab }) {
     <Tarjeta titulo="Activar la contabilidad de este taller" subtitulo="Se hace una sola vez y es seguro repetirlo: no duplica asientos ni modifica ningún comprobante.">
       <div className="space-y-4 text-sm">
         <p>
-          Al activarla, Fierro crea el plan de cuentas y genera los asientos de partida doble de lo que ya se operó (con la fecha original de cada operación, marcados como históricos).
+          Al activarla, ORVELAN crea el plan de cuentas y genera los asientos de partida doble de lo que ya se operó (con la fecha original de cada operación, marcados como históricos).
           Desde ese momento cada venta, cobro, compra, pago, gasto o movimiento de caja y banco se contabiliza solo.
         </p>
         <p className="text-tenue">Mirar las pantallas de Contabilidad no genera nada: hasta que la actives, estas pantallas están vacías.</p>

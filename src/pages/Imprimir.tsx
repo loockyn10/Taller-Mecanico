@@ -9,6 +9,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, km, money, numero, cantidad } from '@/lib/format';
 import { Boton, Cargando, ErrorCaja } from '@/components/ui';
+import { PieOrvelan } from '@/components/Marca';
 import { CONDICION_IVA_LABEL, ESTADO_OT_LABEL, type CondicionIva, type EstadoOT } from '@shared/dominio';
 import { ImprimirDinero } from './ImprimirDinero';
 import { ImprimirCompras } from './ImprimirCompras';
@@ -130,6 +131,7 @@ function ImprimirDocumento() {
           <div className="border-t border-black pt-1">Por {me?.taller.nombre}</div>
         </div>
       )}
+      <PieOrvelan />
     </div>
   );
 }

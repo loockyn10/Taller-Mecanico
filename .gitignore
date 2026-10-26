@@ -17,3 +17,4 @@ scripts/carga/resultados/
 
 # Catalogo automotor: descargas y agregados intermedios (reproducibles con npm run catalogo)
 .cache/
+branding/

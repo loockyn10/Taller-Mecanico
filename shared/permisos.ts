@@ -40,7 +40,7 @@ export const PERMISOS = [
   'seguimiento.mensajes', // publicar y retirar observaciones visibles para el cliente
   // ── Mantenimientos programados
   'mantenimientos.ver',
-  'mantenimientos.gestionar', // planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro
+  'mantenimientos.gestionar', // planes por vehículo, intervalos y mantenimientos realizados antes de usar ORVELAN
   // ── Precios (visibilidad)
   'precios.venta.ver', // precios de venta de servicios y artículos
   'precios.costo.ver', // costos de artículos
@@ -306,7 +306,7 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'seguimiento.compartir': { etiqueta: 'Compartir el enlace de seguimiento', ayuda: 'Ver y copiar el enlace, mostrar el QR y enviarlo por WhatsApp. Quien tiene el enlace ve el estado de la reparación sin iniciar sesión' },
   'seguimiento.mensajes': { etiqueta: 'Publicar mensajes para el cliente', ayuda: 'Observaciones que ve el cliente en la página de seguimiento. Son independientes de las notas internas' },
   'mantenimientos.ver': { etiqueta: 'Ver mantenimientos programados', ayuda: 'Vencimientos por kilometraje y tiempo de cada vehículo' },
-  'mantenimientos.gestionar': { etiqueta: 'Gestionar mantenimientos', ayuda: 'Planes por vehículo, intervalos y mantenimientos realizados antes de usar Fierro' },
+  'mantenimientos.gestionar': { etiqueta: 'Gestionar mantenimientos', ayuda: 'Planes por vehículo, intervalos y mantenimientos realizados antes de usar ORVELAN' },
   'precios.venta.ver': { etiqueta: 'Ver precios de venta' },
   'precios.costo.ver': { etiqueta: 'Ver precios de costo' },
   'margenes.ver': { etiqueta: 'Ver márgenes de ganancia', ayuda: 'Implica ver precios de venta y de costo' },

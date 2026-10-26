@@ -493,7 +493,7 @@ function FichaVersion({ marca, modelo, version, anio, fichas, info }: { marca: s
             </a>
           </p>
         )}
-        <p className="mt-3 text-xs text-tenue">Fierro no aloja ni redistribuye manuales protegidos: sólo mostrará enlaces a documentos oficiales o de uso libre cuando se verifique su origen.</p>
+        <p className="mt-3 text-xs text-tenue">ORVELAN no aloja ni redistribuye manuales protegidos: sólo mostrará enlaces a documentos oficiales o de uso libre cuando se verifique su origen.</p>
       </Tarjeta>
     </div>
   );

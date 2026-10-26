@@ -274,7 +274,7 @@ export function interpretarDocumento(rawIn: Celda, tipoIn?: Celda): DocumentoInt
 // ───────────────────────── Sugerencia de columnas ─────────────────────────
 
 /**
- * Para cada campo de Fierro propone la columna del archivo que mejor le corresponde (índice) o null. Cada columna se usa una sola vez;
+ * Para cada campo de ORVELAN propone la columna del archivo que mejor le corresponde (índice) o null. Cada columna se usa una sola vez;
  * primero se asignan las coincidencias exactas con un nombre habitual y después las parciales.
  */
 export function sugerirMapeo(tipo: TipoImportacion, columnas: string[]): Record<string, number | null> {

@@ -46,7 +46,7 @@ function FormCuenta({ inicial, onCerrar }: { inicial?: any; onCerrar: () => void
         <Campo label="CBU / CVU" hint="22 dígitos"><Input inputMode="numeric" value={f.cbu} onChange={(e) => setF({ ...f, cbu: e.target.value.replace(/\D/g, '').slice(0, 22) })} /></Campo>
         <Campo label="Titular"><Input value={f.titular} onChange={(e) => setF({ ...f, titular: e.target.value })} /></Campo>
         <Campo label="CUIT del titular"><Input value={f.cuit_titular} onChange={(e) => setF({ ...f, cuit_titular: e.target.value })} placeholder="30-12345678-9" /></Campo>
-        <Campo label="Saldo inicial" hint={conMovs ? 'Con movimientos no se puede cambiar: usá un ajuste' : 'Saldo de la cuenta al empezar a usar Fierro'}><InputMoneda value={f.saldo_inicial} disabled={conMovs} onChange={(v) => setF({ ...f, saldo_inicial: v })} /></Campo>
+        <Campo label="Saldo inicial" hint={conMovs ? 'Con movimientos no se puede cambiar: usá un ajuste' : 'Saldo de la cuenta al empezar a usar ORVELAN'}><InputMoneda value={f.saldo_inicial} disabled={conMovs} onChange={(v) => setF({ ...f, saldo_inicial: v })} /></Campo>
         {inicial && <div className="flex items-end"><Check checked={f.activa} onChange={(v) => setF({ ...f, activa: v })} label="Cuenta activa (disponible para cobrar y pagar)" /></div>}
         <Campo label="Notas" className="sm:col-span-2"><Input value={f.notas} onChange={(e) => setF({ ...f, notas: e.target.value })} /></Campo>
       </div>

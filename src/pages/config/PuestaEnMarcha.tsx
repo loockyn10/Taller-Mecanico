@@ -166,7 +166,7 @@ function PanelDeposito({ estado }: { estado: string }) {
     <>
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo label="Nombre del depósito principal" hint="Ahí entran por defecto las compras y de ahí salen las ventas. Más adelante podés sumar otros (mostrador, camioneta, sucursal)."><Input value={nombre} onChange={(e) => setNombre(e.target.value)} /></Campo>
-        <Campo label="Moneda principal" hint="Fierro trabaja en pesos argentinos."><Input value="Peso argentino (ARS)" readOnly /></Campo>
+        <Campo label="Moneda principal" hint="ORVELAN trabaja en pesos argentinos."><Input value="Peso argentino (ARS)" readOnly /></Campo>
       </div>
       <Acciones paso="deposito" estado={estado}>
         <Boton variante="primario" tam="sm" disabled={!nombre.trim() || nombre === principal.nombre} onClick={() => renombrar.mutate()} cargando={renombrar.isPending}>Guardar nombre</Boton>
@@ -298,7 +298,7 @@ function PanelCobros({ estado }: { estado: string }) {
       </div>
       <div className="mt-4">
         <Check checked={obligatoria} onChange={setObligatoria} label="Exigir caja abierta para cobrar, pagar y registrar gastos" />
-        <p className="mt-1 pl-6 text-xs text-tenue">Fierro maneja una caja por día: se abre al empezar y se cierra con arqueo. Así ningún cobro en efectivo queda fuera del control.</p>
+        <p className="mt-1 pl-6 text-xs text-tenue">ORVELAN maneja una caja por día: se abre al empezar y se cierra con arqueo. Así ningún cobro en efectivo queda fuera del control.</p>
       </div>
       <Acciones paso="cobros" estado={estado}>
         <Boton variante="primario" tam="sm" onClick={() => guardar.mutate()} cargando={guardar.isPending}>Guardar</Boton>
@@ -366,7 +366,7 @@ export function PuestaEnMarcha() {
       <Encabezado
         titulo="Puesta en marcha"
         subtitulo={`Configuración de ${me?.taller.nombre ?? 'tu taller'}`}
-        acciones={data.asistente_pendiente ? <Boton variante="primario" icono={<Rocket className="size-4" />} onClick={() => cerrar.mutate()} cargando={cerrar.isPending}>Empezar a usar Fierro</Boton> : undefined}
+        acciones={data.asistente_pendiente ? <Boton variante="primario" icono={<Rocket className="size-4" />} onClick={() => cerrar.mutate()} cargando={cerrar.isPending}>Empezar a usar ORVELAN</Boton> : undefined}
       />
       <div className="max-w-formulario">
         <Tarjeta className="mb-4">
@@ -377,7 +377,7 @@ export function PuestaEnMarcha() {
           <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={data.completos} aria-valuemin={0} aria-valuemax={data.total}>
             <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
           </div>
-          <p className="mt-3 text-sm text-tenue">Ya podés usar Fierro: nada de esto bloquea el trabajo. Completá los pasos a tu ritmo, saltá los que no necesites y volvé cuando quieras desde <b>Administración › Puesta en marcha</b>.</p>
+          <p className="mt-3 text-sm text-tenue">Ya podés usar ORVELAN: nada de esto bloquea el trabajo. Completá los pasos a tu ritmo, saltá los que no necesites y volvé cuando quieras desde <b>Administración › Puesta en marcha</b>.</p>
         </Tarjeta>
         <div className="space-y-2">
           {data.pasos.map((p, i) => {

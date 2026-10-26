@@ -192,7 +192,7 @@ app.onError((err, c) => {
 });
 
 // Fuera de /api, servir la SPA (en desarrollo la sirve Vite).
-app.all('*', async (c) => (c.env.ASSETS ? c.env.ASSETS.fetch(c.req.raw) : c.text('Fierro API', 200)));
+app.all('*', async (c) => (c.env.ASSETS ? c.env.ASSETS.fetch(c.req.raw) : c.text('ORVELAN Taller Mecánico API', 200)));
 
 export default {
   fetch: app.fetch,

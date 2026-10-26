@@ -6,6 +6,7 @@ import { Printer } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cantidad, fecha, money, numero } from '@/lib/format';
 import { Boton, Cargando, ErrorCaja } from '@/components/ui';
+import { PieOrvelan } from '@/components/Marca';
 import { ESTADO_OC_LABEL, MEDIO_PAGO_LABEL, type EstadoOrdenCompra, type MedioPago } from '@shared/dominio';
 import { useAuth } from '@/lib/auth';
 import { Cabecera } from './ImprimirDinero';
@@ -166,6 +167,7 @@ export function ImprimirCompras() {
           {(cfg.config.pie_recibo || cfg.config.pie_documentos) && <p className="mt-6 border-t border-slate-300 pt-2 text-xs text-slate-600">{cfg.config.pie_recibo || cfg.config.pie_documentos}</p>}
         </>
       )}
+      <PieOrvelan />
     </div>
   );
 }

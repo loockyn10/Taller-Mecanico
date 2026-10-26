@@ -600,7 +600,7 @@ const stockAjuste: FuenteDef = {
 
 // ───────────────────────── Saldos iniciales conocidos ─────────────────────────
 // Sólo lo que el sistema registra como saldo inicial: cuentas bancarias en pesos y la primera caja. Los demás saldos iniciales (inventario, deudas
-// anteriores al uso de Fierro) NO se inventan: se cargan con un asiento manual y mientras tanto el control los marca como no determinados.
+// anteriores al uso de ORVELAN) NO se inventan: se cargan con un asiento manual y mientras tanto el control los marca como no determinados.
 const aperturaBanco: FuenteDef = {
   tipo: 'apertura_banco', prioridad: 1, etiqueta: 'Saldos iniciales de cuentas bancarias',
   async pendientes(ctx, limite) {

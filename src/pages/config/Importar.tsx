@@ -289,7 +289,7 @@ export function Importar() {
       {/* ───── 2. Columnas ───── */}
       {paso === 1 && tipo && datos && (
         <div className="space-y-4">
-          <Tarjeta titulo="Relacioná las columnas de tu archivo con los campos de Fierro" subtitulo="Ya probamos relacionarlas solas. Revisalas y corregí lo que haga falta. Las columnas que no elijas no se importan.">
+          <Tarjeta titulo="Relacioná las columnas de tu archivo con los campos de ORVELAN" subtitulo="Ya probamos relacionarlas solas. Revisalas y corregí lo que haga falta. Las columnas que no elijas no se importan.">
             <div className="divide-y divide-borde">
               {campos.map((c) => (
                 <div key={c.clave} className="grid gap-2 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
@@ -420,7 +420,7 @@ export function Importar() {
                   <div key={k} className="grid gap-2 rounded-ctl border border-borde p-3 sm:grid-cols-[1fr_1.2fr] sm:items-center">
                     <div className="text-sm">
                       <p className="font-medium">{p.tipo === 'cliente' ? 'Cliente' : 'Proveedor'}: {p.etiqueta}</p>
-                      <p className="text-xs text-tenue">{p.motivo === 'ambiguo' ? 'Hay más de uno que coincide' : 'No existe en Fierro'} · {p.filas.length} fila{p.filas.length === 1 ? '' : 's'} (ej.: {p.filas.slice(0, 4).join(', ')})</p>
+                      <p className="text-xs text-tenue">{p.motivo === 'ambiguo' ? 'Hay más de uno que coincide' : 'No existe en ORVELAN'} · {p.filas.length} fila{p.filas.length === 1 ? '' : 's'} (ej.: {p.filas.slice(0, 4).join(', ')})</p>
                     </div>
                     {p.tipo === 'cliente' ? (
                       <ElegirCliente valorId={resoluciones[`cliente:${p.clave}`]} onElegir={(c) => setResoluciones((r) => { const n = { ...r }; if (c) n[`cliente:${p.clave}`] = c.id; else delete n[`cliente:${p.clave}`]; return n; })} />

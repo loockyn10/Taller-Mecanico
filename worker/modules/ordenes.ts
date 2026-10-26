@@ -264,7 +264,7 @@ ordenes.get('/:id', async (c) => {
 /**
  * Rentabilidad de la orden: repuestos (venta contra costo) y mano de obra facturada. El costo de los repuestos es el que tenían al
  * descontarse del stock (no cambia si el costo del artículo se actualiza después); antes de descontarse es una estimación con el costo actual.
- * La mano de obra no tiene costo cargado en Fierro (no hay costo por hora): se muestra su venta y las horas cronometradas.
+ * La mano de obra no tiene costo cargado en ORVELAN (no hay costo por hora): se muestra su venta y las horas cronometradas.
  */
 ordenes.get('/:id/rentabilidad', requirePerm('ordenes.ver', 'margenes.ver', 'presupuestos.valorizados.ver'), async (c) => {
   const s = c.get('sesion');

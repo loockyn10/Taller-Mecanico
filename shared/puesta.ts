@@ -26,7 +26,7 @@ export interface InfoPaso {
 export const INFO_PASOS: Record<Paso, InfoPaso> = {
   negocio: { titulo: 'Datos del negocio', resumen: 'Nombre, domicilio, CUIT, teléfono, correo y logo. Salen impresos en tus presupuestos y comprobantes.', recomendado: true },
   horarios: { titulo: 'Zona horaria y horarios de atención', resumen: 'Para que los fichajes y los turnos usen tu hora y tus días de trabajo.', recomendado: false },
-  deposito: { titulo: 'Depósito principal y moneda', resumen: 'El lugar donde guardás los repuestos. Fierro trabaja en pesos argentinos.', recomendado: false },
+  deposito: { titulo: 'Depósito principal y moneda', resumen: 'El lugar donde guardás los repuestos. ORVELAN trabaja en pesos argentinos.', recomendado: false },
   catalogo: { titulo: 'Categorías y servicios iniciales', resumen: 'Rubros de repuestos, tipos de gastos y operaciones de mano de obra para arrancar sin tipear todo.', recomendado: true },
   tarifas: { titulo: 'Mano de obra y precios de servicios', resumen: 'El valor de tu hora de trabajo. Con ella se calculan los precios de las operaciones del tempario.', recomendado: true },
   listas: { titulo: 'Listas de precios', resumen: 'Opcional: precios distintos para mayoristas, flotas o aseguradoras.', recomendado: false },

@@ -1,6 +1,6 @@
 // Saldos de apertura de un taller que migra de otro sistema.
 //
-// Qué resuelve: una deuda con un proveedor que existía antes de empezar a usar Fierro no se puede cargar como una compra (entraría stock y pasaría por
+// Qué resuelve: una deuda con un proveedor que existía antes de empezar a usar ORVELAN no se puede cargar como una compra (entraría stock y pasaría por
 // resultados) ni conviene como una factura ficticia. Acá se registra UNA VEZ por proveedor, con su fecha de corte, el sistema de origen y quién la cargó.
 //  * Entra a la cuenta corriente del proveedor (se paga con los pagos de siempre, que se aplican al comprobante más antiguo) y al saldo total que se debe.
 //  * En contabilidad su contrapartida es el patrimonio ("Saldos iniciales y ajustes de apertura"): no es una compra ni un gasto y no toca el estado de resultados.
@@ -158,7 +158,7 @@ async function validarFilas(db: D1Database, tallerId: string, fechaCorte: string
       const mov = movimientos.get(prov.id) ?? 0;
       if (mov) {
         estado = 'aviso';
-        msgs.push(`Ya tiene ${mov} compra(s), factura(s) o pago(s) cargados en Fierro con fecha igual o anterior al corte: el saldo de apertura NO debe incluirlos, porque se suma a lo ya registrado`);
+        msgs.push(`Ya tiene ${mov} compra(s), factura(s) o pago(s) cargados en ORVELAN con fecha igual o anterior al corte: el saldo de apertura NO debe incluirlos, porque se suma a lo ya registrado`);
       }
     }
     res.push({ n: f.n, estado, proveedor_id: prov?.id ?? null, proveedor: prov?.nombre ?? null, importe, referencia, vencimiento, mensajes: msgs });

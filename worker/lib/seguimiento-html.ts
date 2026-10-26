@@ -2,6 +2,7 @@
 // Así no hay nada que pueda filtrar el enlace por cabeceras de referencia, la página carga rápido en cualquier celular y funciona aunque falle el resto de la aplicación.
 // Todo texto que viene de la base se escapa: el mensaje del taller es texto plano, nunca HTML.
 import type { SeguimientoPublico } from './seguimiento';
+import { ISOTIPO_ORVELAN_SVG } from './marca-orvelan';
 
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export const esc = (s: string | null | undefined) => (s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
@@ -30,8 +31,8 @@ export function fechaLarga(f: string): string {
 const fechaCorta = (f: string) => `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)}`;
 
 const CSS = `
-:root{color-scheme:light dark;--fondo:#eef2f5;--tarjeta:#fff;--texto:#14232b;--tenue:#5a6b75;--borde:#d9e1e7;--marca:#0e6b78;--marca-fondo:#e3f3f5;--ok:#1a7f4b;--ok-fondo:#e5f5ec;--aviso:#8a5a00;--aviso-fondo:#fff4db;--rojo:#a32a2a;--rojo-fondo:#fdeaea;--gris-paso:#c3ced6}
-@media (prefers-color-scheme:dark){:root{--fondo:#0f1a20;--tarjeta:#16262e;--texto:#e8eff3;--tenue:#9fb2bd;--borde:#2a3f4a;--marca:#5cc4d1;--marca-fondo:#12363d;--ok:#5fd495;--ok-fondo:#10301f;--aviso:#f1c261;--aviso-fondo:#33270c;--rojo:#f19a9a;--rojo-fondo:#3a1b1b;--gris-paso:#3c525e}}
+:root{color-scheme:light dark;--fondo:#eef2f5;--tarjeta:#fff;--texto:#14232b;--tenue:#5a6b75;--borde:#d9e1e7;--marca:#0658af;--marca-fondo:#e6f1fc;--ok:#1a7f4b;--ok-fondo:#e5f5ec;--aviso:#8a5a00;--aviso-fondo:#fff4db;--rojo:#a32a2a;--rojo-fondo:#fdeaea;--gris-paso:#c3ced6}
+@media (prefers-color-scheme:dark){:root{--fondo:#0f1a20;--tarjeta:#16262e;--texto:#e8eff3;--tenue:#9fb2bd;--borde:#2a3f4a;--marca:#5db4fb;--marca-fondo:#0f2a4a;--ok:#5fd495;--ok-fondo:#10301f;--aviso:#f1c261;--aviso-fondo:#33270c;--rojo:#f19a9a;--rojo-fondo:#3a1b1b;--gris-paso:#3c525e}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--fondo);color:var(--texto);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;overflow-wrap:anywhere}
@@ -83,6 +84,7 @@ details li span:last-child{flex:none;color:var(--tenue);font-size:.82rem;text-al
 .pie a.btn{display:inline-flex;align-items:center;justify-content:center;min-height:2.75rem;padding:0 1.2rem;margin:.6rem 0 .2rem;border:1px solid var(--marca);border-radius:.7rem;color:var(--marca);font-weight:700;text-decoration:none}
 .pie a.btn:focus-visible,details summary:focus-visible{outline:3px solid var(--marca);outline-offset:2px}
 .sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.orvelan{display:flex;align-items:center;justify-content:center;gap:.4rem;margin:1.5rem 0 .5rem;font-size:.75rem;color:var(--tenue)}.orvelan svg{flex:none}
 .nodisp{text-align:center;padding:2.5rem 1rem}
 .nodisp h1{font-size:1.4rem;margin:0 0 .6rem}
 .nodisp p{color:var(--tenue);margin:0}
@@ -99,7 +101,7 @@ function documento(titulo: string, cuerpo: string): string {
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#0e6b78">
+<meta name="theme-color" content="#081F41">
 <title>${esc(titulo)}</title>
 <meta property="og:title" content="Seguimiento de tu vehículo">
 <meta property="og:description" content="Consultá el estado de la reparación.">
@@ -109,6 +111,7 @@ function documento(titulo: string, cuerpo: string): string {
 <main>
 ${cuerpo}
 </main>
+<footer class="orvelan">${ISOTIPO_ORVELAN_SVG}<span>ORVELAN Sistemas · Taller Mecánico</span></footer>
 </body>
 </html>`;
 }

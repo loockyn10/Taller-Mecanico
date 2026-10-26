@@ -99,7 +99,7 @@ function FormCheque({ cuentas, onCerrar }: { cuentas: any[]; onCerrar: () => voi
   return (
     <Modal abierto onCerrar={onCerrar} titulo="Registrar cheque" ancho="lg" pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="primario" disabled={!valido} cargando={m.isPending} onClick={() => m.mutate()}>Registrar</Boton></>}>
       <div className="space-y-3">
-        <Aviso>Los cheques que recibís al cobrar y los que entregás al pagar se registran solos desde esas operaciones. Usá este formulario para cheques que no pasaron por Fierro.</Aviso>
+        <Aviso>Los cheques que recibís al cobrar y los que entregás al pagar se registran solos desde esas operaciones. Usá este formulario para cheques que no pasaron por ORVELAN.</Aviso>
         <div className="grid gap-3 sm:grid-cols-3">
           <Campo label="Dirección"><Select value={f.direccion} onChange={(e) => setF({ ...f, direccion: e.target.value })}><option value="recibido">Recibido</option><option value="emitido">Emitido (propio)</option></Select></Campo>
           <Campo label="Modalidad"><Select value={f.modalidad} onChange={(e) => setF({ ...f, modalidad: e.target.value })}><option value="fisico">Cheque físico</option><option value="echeq">eCheq</option></Select></Campo>
@@ -264,7 +264,7 @@ export function Cheques() {
           />
         )}
       </Tarjeta>
-      <p className="mt-3 text-xs text-tenue">Registro y control administrativo. Fierro no se conecta con plataformas bancarias: el estado de cada cheque lo actualizás vos al depositarlo, acreditarlo o rechazarlo.</p>
+      <p className="mt-3 text-xs text-tenue">Registro y control administrativo. ORVELAN no se conecta con plataformas bancarias: el estado de cada cheque lo actualizás vos al depositarlo, acreditarlo o rechazarlo.</p>
       {nuevo && <FormCheque cuentas={cuentas} onCerrar={() => setNuevo(false)} />}
       {accion && <ModalAccion cheque={accion.cheque} accion={accion.accion} cuentas={cuentas} onCerrar={() => setAccion(null)} />}
       {ver && <Detalle id={ver} onCerrar={() => setVer(null)} />}

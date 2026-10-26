@@ -83,7 +83,7 @@ export function App() {
   // Activación de un taller nuevo con el enlace de invitación (todavía no hay sesión).
   if (pathname === '/activar') return <Activar />;
   if (modoReloj()) return <Navigate to="/reloj" replace />;
-  if (cargando) return <Cargando texto="Iniciando Fierro…" />;
+  if (cargando) return <Cargando texto="Iniciando ORVELAN…" />;
   if (!me) {
     return (
       <Routes>

@@ -13,16 +13,16 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['favicon.svg', 'favicon.ico', 'icon.svg', 'brand/*.svg'],
       manifest: {
-        name: 'Fierro · Gestión de talleres',
-        short_name: 'Fierro',
+        name: 'ORVELAN Sistemas · Taller Mecánico',
+        short_name: 'ORVELAN Taller',
         description: 'Órdenes de trabajo, presupuestos, agenda, stock y cobros para talleres mecánicos.',
         lang: 'es-AR',
         start_url: '/',
         display: 'standalone',
-        background_color: '#edf1f5',
-        theme_color: '#13252d',
+        background_color: '#EFF6FD',
+        theme_color: '#081F41',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },

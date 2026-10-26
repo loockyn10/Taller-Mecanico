@@ -54,7 +54,7 @@ export function EstadoResultados({ desde, hasta }: { desde: string; hasta: strin
           <p className="text-sm">
             {est.renglones} renglón(es) de repuestos vendidos no tienen costo histórico. Valuados al <strong>costo actual</strong> costarían <strong>{money(est.costo_estimado)}</strong>; con esa estimación el resultado sería <strong>{money(est.resultado_con_estimacion)}</strong>.
           </p>
-          <p className="mt-2 text-xs text-tenue">Es solo una referencia: Fierro no inventa costos históricos, por eso no se incluye en el resultado de arriba.</p>
+          <p className="mt-2 text-xs text-tenue">Es solo una referencia: ORVELAN no inventa costos históricos, por eso no se incluye en el resultado de arriba.</p>
         </Tarjeta>
       )}
 

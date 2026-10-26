@@ -1,4 +1,4 @@
-// Registro único de la navegación de Fierro: lo usan el menú lateral, el buscador de secciones y las migas de pan.
+// Registro único de la navegación de ORVELAN: lo usan el menú lateral, el buscador de secciones y las migas de pan.
 // Para agregar una pantalla al menú se agrega una línea acá (con su permiso y sus palabras clave).
 import type { ReactNode } from 'react';
 import {

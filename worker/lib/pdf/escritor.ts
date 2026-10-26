@@ -170,7 +170,7 @@ export class Documento {
     const dd = (n: number) => String(n).padStart(2, '0');
     const pdfFecha = `D:${f.getUTCFullYear()}${dd(f.getUTCMonth() + 1)}${dd(f.getUTCDate())}${dd(f.getUTCHours())}${dd(f.getUTCMinutes())}${dd(f.getUTCSeconds())}Z`;
     // Metadatos: sólo título, asunto y herramienta. Sin autor ni datos de la persona que lo generó.
-    objeto(5, `<< /Title ${cadenaPdf(this.meta.titulo)} ${this.meta.asunto ? `/Subject ${cadenaPdf(this.meta.asunto)} ` : ''}/Creator (Fierro) /Producer (Fierro) /CreationDate (${pdfFecha}) >>`);
+    objeto(5, `<< /Title ${cadenaPdf(this.meta.titulo)} ${this.meta.asunto ? `/Subject ${cadenaPdf(this.meta.asunto)} ` : ''}/Creator (ORVELAN Sistemas) /Producer (ORVELAN Sistemas) /CreationDate (${pdfFecha}) >>`);
     this.jpegs.forEach((j, i) => {
       objeto(nImg(i), [
         enc.encode(`<< /Type /XObject /Subtype /Image /Width ${j.ancho} /Height ${j.alto} /ColorSpace /${j.componentes === 1 ? 'DeviceGray' : 'DeviceRGB'} /BitsPerComponent 8 /Filter /DCTDecode /Length ${j.bytes.length} >>\nstream\n`),

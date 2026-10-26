@@ -1,5 +1,5 @@
 // Historial técnico del vehículo. Se arma con las órdenes de trabajo (nada se duplica en tablas aparte) más los antecedentes
-// anteriores a Fierro, cargados a mano y claramente diferenciados. Quien no ve importes recibe el mismo historial sin ellos.
+// anteriores a ORVELAN, cargados a mano y claramente diferenciados. Quien no ve importes recibe el mismo historial sin ellos.
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
@@ -112,7 +112,7 @@ historial.get('/vehiculos/:id/historial-tecnico', requirePerm('vehiculos.ver'), 
   });
 });
 
-// ───────────── Antecedentes anteriores a Fierro ─────────────
+// ───────────── Antecedentes anteriores a ORVELAN ─────────────
 const zAntecedente = z.object({
   fecha: zFecha,
   km: z.number().int().min(0).max(5_000_000).nullish(),

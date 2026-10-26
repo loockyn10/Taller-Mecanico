@@ -189,7 +189,7 @@ export async function controles(db: D1Database, tallerId: string, opciones: { va
       detalle:
         diferencia === 0
           ? 'El inventario contable coincide con el stock valorizado.'
-          : `El stock valorizado (${(inv?.v ?? 0) / 100}) se calcula al último costo de cada artículo; los repuestos consumidos en órdenes aún sin comprobante (${(enOt?.v ?? 0) / 100}) todavía están en el inventario contable. La diferencia restante se explica por cambios de costo desde cada compra o por mercadería existente antes del uso de Fierro sin saldo inicial cargado. No se ajustó: si corresponde, registralo con un asiento manual.`,
+          : `El stock valorizado (${(inv?.v ?? 0) / 100}) se calcula al último costo de cada artículo; los repuestos consumidos en órdenes aún sin comprobante (${(enOt?.v ?? 0) / 100}) todavía están en el inventario contable. La diferencia restante se explica por cambios de costo desde cada compra o por mercadería existente antes del uso de ORVELAN sin saldo inicial cargado. No se ajustó: si corresponde, registralo con un asiento manual.`,
       items: [
         { concepto: 'Stock valorizado al costo actual', importe: inv?.v ?? 0 },
         { concepto: 'Repuestos en órdenes sin comprobante', importe: enOt?.v ?? 0 },
@@ -209,7 +209,7 @@ export async function controles(db: D1Database, tallerId: string, opciones: { va
   const p = await pendientesContabilizar(db, t);
   out.push({
     clave: 'saldos_iniciales', titulo: 'Saldos iniciales', estado: 'info',
-    detalle: `Los saldos iniciales de caja, de las cuentas bancarias y de las deudas con proveedores (Administración › Apertura de saldos) se toman de lo cargado. Los de clientes (deudas anteriores al uso de Fierro) todavía no tienen documento de apertura y no se inventan; el inventario existente se carga como entrada de stock inicial (queda a clasificar). ${p.sin_efecto ? `${p.sin_efecto} documento(s) sin importes no generan asiento.` : ''}`,
+    detalle: `Los saldos iniciales de caja, de las cuentas bancarias y de las deudas con proveedores (Administración › Apertura de saldos) se toman de lo cargado. Los de clientes (deudas anteriores al uso de ORVELAN) todavía no tienen documento de apertura y no se inventan; el inventario existente se carga como entrada de stock inicial (queda a clasificar). ${p.sin_efecto ? `${p.sin_efecto} documento(s) sin importes no generan asiento.` : ''}`,
   });
   return out;
 }

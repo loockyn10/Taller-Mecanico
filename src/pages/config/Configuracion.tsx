@@ -125,7 +125,7 @@ function DatosTaller() {
       </Tarjeta>
       {!ro && <div className="flex justify-end"><Boton variante="primario" cargando={m.isPending} onClick={() => m.mutate()}>Guardar configuración</Boton></div>}
       <Tarjeta titulo="Facturación electrónica (ARCA)">
-        <p className="text-sm text-tenue">No disponible en esta versión. Los comprobantes que emite Fierro son internos. El modelo de datos ya separa comprobantes internos y fiscales para incorporar la emisión con CAE sin modificar ventas ni cobros.</p>
+        <p className="text-sm text-tenue">No disponible en esta versión. Los comprobantes que emite ORVELAN son internos. El modelo de datos ya separa comprobantes internos y fiscales para incorporar la emisión con CAE sin modificar ventas ni cobros.</p>
       </Tarjeta>
     </div>
   );

@@ -33,7 +33,7 @@ export function Balance({ desde, hasta }: { desde: string; hasta: string }) {
           <ul className="mt-1 list-disc pl-5">{b.inconsistencias.map((i: string) => <li key={i}>{i}</li>)}</ul>
         </Aviso>
       )}
-      <Aviso>Los saldos iniciales son lo acumulado antes del {desde.split('-').reverse().join('/')}. Si el taller tenía inventario, deudas o créditos antes de usar Fierro, no figuran hasta que se carguen con un asiento manual de apertura.</Aviso>
+      <Aviso>Los saldos iniciales son lo acumulado antes del {desde.split('-').reverse().join('/')}. Si el taller tenía inventario, deudas o créditos antes de usar ORVELAN, no figuran hasta que se carguen con un asiento manual de apertura.</Aviso>
       <Tarjeta sinPadding titulo="Balance de sumas y saldos">
         {!b.cuentas.length ? <Vacio titulo="Sin movimientos" texto="No hay asientos hasta la fecha del período elegido." /> : (
           <TablaApilable>

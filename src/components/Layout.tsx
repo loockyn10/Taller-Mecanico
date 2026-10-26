@@ -8,16 +8,11 @@ import { buscarSecciones, gruposVisibles, resaltar, ubicar, type ItemNav } from 
 import type { Permiso } from '@shared/permisos';
 import { ROL_LABEL } from '@shared/permisos';
 import { Boton, cn, useDebounce } from './ui';
+import { Isotipo, MarcaProducto } from './Marca';
 
 function Marca() {
   return (
-    <div className="flex items-center gap-2.5">
-      <img src="/icon.svg" alt="" className="size-8" />
-      <div className="leading-tight">
-        <div className="text-[15px] font-extrabold tracking-tight text-white">Fierro</div>
-        <div className="text-micro text-petroleo-300">Gestión de talleres</div>
-      </div>
-    </div>
+    <MarcaProducto oscuro />
   );
 }
 
@@ -313,7 +308,7 @@ export function Layout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="no-print sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-borde bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-8">
           <Boton variante="fantasma" tam="sm" className="lg:hidden" onClick={() => setMenu(true)} icono={<Menu className="size-5" />} aria-label="Abrir menú" />
-          <div className="lg:hidden"><img src="/icon.svg" alt="Fierro" className="size-7" /></div>
+          <div className="lg:hidden"><Isotipo className="size-7" /></div>
           {puedeBuscar && (
             <button
               type="button"

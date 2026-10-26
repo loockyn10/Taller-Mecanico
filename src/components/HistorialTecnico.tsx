@@ -1,4 +1,4 @@
-// Historial técnico del vehículo: línea de tiempo con las intervenciones hechas en Fierro (se leen de las órdenes de trabajo)
+// Historial técnico del vehículo: línea de tiempo con las intervenciones hechas en ORVELAN (se leen de las órdenes de trabajo)
 // y los antecedentes anteriores cargados a mano, claramente diferenciados. Sin importes para quien no tiene permiso.
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -40,7 +40,7 @@ function FormAntecedente({ vehiculoId, inicial, onCerrar }: { vehiculoId: string
     <Modal abierto onCerrar={onCerrar} titulo={inicial ? 'Editar antecedente' : 'Cargar antecedente anterior'} ancho="lg"
       pie={<><Boton onClick={onCerrar}>Cancelar</Boton><Boton variante="primario" disabled={f.descripcion.trim().length < 3} cargando={guardar.isPending} onClick={() => guardar.mutate()}>Guardar</Boton></>}>
       <div className="grid gap-3 sm:grid-cols-3">
-        <p className="rounded-ctl bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:col-span-3">Para trabajos hechos antes de usar Fierro o en otro taller. Quedan marcados como “cargados manualmente”, separados de las órdenes de trabajo.</p>
+        <p className="rounded-ctl bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:col-span-3">Para trabajos hechos antes de usar ORVELAN o en otro taller. Quedan marcados como “cargados manualmente”, separados de las órdenes de trabajo.</p>
         <Campo label="Fecha" requerido><Input type="date" max={hoyISO()} value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Campo>
         <Campo label="Kilometraje"><Input value={f.km} onChange={(e) => setF({ ...f, km: e.target.value.replace(/\D/g, '') })} inputMode="numeric" /></Campo>
         <Campo label="Tipo"><Select value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>{Object.entries(TIPOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Campo>
@@ -67,7 +67,7 @@ function EntradaOrden({ e, puedeVerOrden }: { e: any; puedeVerOrden: boolean }) 
     <li>
       <span className="absolute -left-1.5 mt-1.5 size-3 rounded-full border-2 border-white bg-marca-500" />
       <div className="flex flex-wrap items-center gap-2">
-        <Insignia tono="azul"><Wrench className="size-3" />Hecho en Fierro</Insignia>
+        <Insignia tono="azul"><Wrench className="size-3" />Hecho en ORVELAN</Insignia>
         {puedeVerOrden ? <Link to={`/ordenes/${e.id}`} className="font-semibold text-marca-700">OT #{numero(e.numero)}</Link> : <span className="font-semibold">OT #{numero(e.numero)}</span>}
         <EstadoOTBadge estado={e.estado} />
         <span className="text-sm text-tenue">{fecha(e.fecha)} · {km(e.km)}</span>
@@ -160,19 +160,19 @@ export function HistorialTecnico({ vehiculoId, className }: { vehiculoId: string
   return (
     <Tarjeta
       titulo="Historial técnico"
-      subtitulo={data ? `${data.resumen.ordenes} órdenes en Fierro · ${data.resumen.antecedentes} antecedentes cargados` : undefined}
+      subtitulo={data ? `${data.resumen.ordenes} órdenes en ORVELAN · ${data.resumen.antecedentes} antecedentes cargados` : undefined}
       className={className}
       acciones={puedeEditar && <Boton tam="sm" icono={<Plus className="size-4" />} onClick={() => setForm({})}>Cargar antecedente</Boton>}
     >
       {dialogo}
       <div className="filtros mb-4 flex flex-wrap items-center gap-2">
         <Chip activo={filtro === 'todo'} onClick={() => setFiltro('todo')}>Todo</Chip>
-        <Chip activo={filtro === 'fierro'} onClick={() => setFiltro('fierro')}>Hechos en Fierro</Chip>
+        <Chip activo={filtro === 'fierro'} onClick={() => setFiltro('fierro')}>Hechos en ORVELAN</Chip>
         <Chip activo={filtro === 'manual'} onClick={() => setFiltro('manual')}>Cargados manualmente</Chip>
         <Check checked={canceladas} onChange={setCanceladas} label="Incluir canceladas" className="ml-auto text-xs" />
       </div>
       {isLoading ? <Cargando /> : error ? <ErrorCaja error={error} reintentar={refetch} /> : entradas.length === 0 ? (
-        <Vacio icono={<ClipboardList className="size-5" />} titulo="Sin intervenciones registradas" texto={puedeEditar ? 'Las órdenes de trabajo se suman solas. Podés cargar antecedentes anteriores a Fierro.' : 'Las órdenes de trabajo se suman solas.'} />
+        <Vacio icono={<ClipboardList className="size-5" />} titulo="Sin intervenciones registradas" texto={puedeEditar ? 'Las órdenes de trabajo se suman solas. Podés cargar antecedentes anteriores a ORVELAN.' : 'Las órdenes de trabajo se suman solas.'} />
       ) : (
         <ol className="relative space-y-6 border-l border-borde pl-5">
           {entradas.map((e: any) => e.origen === 'fierro'

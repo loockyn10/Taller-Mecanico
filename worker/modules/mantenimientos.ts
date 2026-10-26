@@ -64,7 +64,7 @@ const zPlan = z.object({
   intervalo_meses: z.number().int().min(1).max(240).nullish(),
   activo: z.boolean().default(true),
   notas: zTextoOpt(300),
-  /** Última vez que se hizo, si fue antes de usar Fierro: queda como antecedente del vehículo. */
+  /** Última vez que se hizo, si fue antes de usar ORVELAN: queda como antecedente del vehículo. */
   ultima: z.object({ fecha: zFecha, km: z.number().int().min(0).max(5_000_000).nullish() }).nullish(),
 });
 
@@ -88,7 +88,7 @@ mantenimientos.put('/vehiculos/:id/mantenimientos/:servicioId', requirePerm('man
     ...(d.ultima
       ? [
           c.env.DB.prepare(
-            "INSERT INTO vehiculo_antecedentes (id, taller_id, vehiculo_id, fecha, km, tipo, descripcion, servicio_id, realizado_por, created_by) VALUES (?, ?, ?, ?, ?, 'mantenimiento', ?, ?, 'Registro previo a Fierro', ?)",
+            "INSERT INTO vehiculo_antecedentes (id, taller_id, vehiculo_id, fecha, km, tipo, descripcion, servicio_id, realizado_por, created_by) VALUES (?, ?, ?, ?, ?, 'mantenimiento', ?, ?, 'Registro previo a ORVELAN', ?)",
           ).bind(uid(), s.tallerId, vid, d.ultima.fecha, d.ultima.km ?? null, `${srv.nombre} (última realización informada)`, sid, s.usuarioId),
         ]
       : []),

@@ -69,7 +69,7 @@ export function Controles() {
   return (
     <div className="space-y-5">
       <Aviso tono={dif ? 'rojo' : avisos ? 'ambar' : 'verde'}>
-        {dif ? `${dif} control(es) con diferencias` : avisos ? `Sin diferencias, pero ${avisos} aviso(s) para revisar` : 'Todos los controles están en orden'}. Estos controles solo comparan: Fierro nunca crea movimientos ni ajustes para hacer coincidir saldos.
+        {dif ? `${dif} control(es) con diferencias` : avisos ? `Sin diferencias, pero ${avisos} aviso(s) para revisar` : 'Todos los controles están en orden'}. Estos controles solo comparan: ORVELAN nunca crea movimientos ni ajustes para hacer coincidir saldos.
       </Aviso>
       <div className="grid gap-3 lg:grid-cols-2">
         {cs.map((c) => {

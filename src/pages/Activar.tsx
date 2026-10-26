@@ -4,6 +4,7 @@ import { CheckCircle2, ShieldCheck, Wrench } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Aviso, Boton, Campo, Cargando, Input } from '@/components/ui';
+import { MarcaProducto } from '@/components/Marca';
 
 /** El token viaja en el fragmento (#) del enlace: no se envía al servidor al abrir la página ni queda en registros o en el Referer. */
 function tokenDelEnlace(): string {
@@ -63,12 +64,9 @@ export function Activar() {
   return (
     <div className="grid min-h-full lg:grid-cols-2">
       <div className="hidden flex-col justify-between bg-petroleo-900 p-10 text-white lg:flex">
-        <div className="flex items-center gap-3">
-          <img src="/icon.svg" alt="" className="size-10 rounded-card ring-2 ring-white/15" />
-          <span className="text-xl font-extrabold">Fierro</span>
-        </div>
+        <MarcaProducto oscuro ancho="w-72" />
         <div className="max-w-md">
-          <h1 className="text-3xl font-bold leading-tight">Bienvenido a Fierro.</h1>
+          <h1 className="text-3xl font-bold leading-tight">Bienvenido a ORVELAN Taller Mecánico.</h1>
           <p className="mt-3 text-petroleo-200">En unos minutos tu taller queda listo para trabajar: creás tu acceso, completás los datos del negocio y te acompañamos con la configuración inicial.</p>
           <ul className="mt-6 space-y-2 text-sm text-petroleo-200">
             {['Creás tu contraseña', 'Cargás los datos de tu taller', 'Configurás servicios y precios a tu ritmo', 'Importás tus clientes y repuestos desde Excel'].map((t) => (
@@ -83,7 +81,7 @@ export function Activar() {
           <Cargando texto="Comprobando tu invitación…" />
         ) : problema || !info ? (
           <div className="w-full max-w-sm space-y-4 rounded-card border border-borde bg-white p-5 shadow-card sm:p-7">
-            <img src="/icon.svg" alt="" className="size-12" />
+            <MarcaProducto />
             <h2 className="text-2xl font-bold">No pudimos abrir tu invitación</h2>
             <Aviso tono="ambar">{problema ?? 'El enlace no es válido.'}</Aviso>
             <Boton onClick={() => nav('/', { replace: true })}>Ir al ingreso</Boton>
@@ -91,7 +89,7 @@ export function Activar() {
         ) : (
           <form className="w-full max-w-sm space-y-4 rounded-card border border-borde bg-white p-5 shadow-card sm:p-7" onSubmit={enviar}>
             <div>
-              <img src="/icon.svg" alt="" className="mb-4 size-12 lg:hidden" />
+              <MarcaProducto className="mb-4 lg:hidden" />
               <h2 className="text-2xl font-bold">Activá tu taller</h2>
               <p className="mt-1 text-sm text-tenue">Este enlace sirve una sola vez y vence el {new Date(info.vence_at).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}.</p>
             </div>
