@@ -1,18 +1,36 @@
+import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Banknote, CalendarDays, CheckCircle2, FileText, Package, Plus, Receipt, Wallet, Wrench } from 'lucide-react';
+import { AlertTriangle, Banknote, Barcode, CalendarDays, CheckCircle2, FileText, Package, Plus, Receipt, Wallet, Wrench, Zap } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { money, numero } from '@/lib/format';
 import { useEstadoCaja } from '@/lib/caja';
 import { usePuesta } from '@/lib/puesta';
+import { ConsultaPrecios } from '@/components/ConsultaPrecios';
 import { Boton, Cargando, Encabezado, ErrorCaja, Indicador, Tarjeta, Vacio } from '@/components/ui';
 import { EstadoOTBadge, EstadoTurnoBadge } from '@/components/estados';
 import { ESTADOS_OT_ABIERTOS, ESTADO_OT_LABEL, type EstadoOT } from '@shared/dominio';
 
+/** Acceso directo a una acción operativa (misma presencia que los indicadores del tablero). */
+function Accion({ titulo, detalle, icono, onClick }: { titulo: string; detalle: string; icono: ReactNode; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex w-full min-w-0 items-center gap-3 rounded-card border border-borde bg-white p-3 text-left shadow-card transition hover:border-marca-300 hover:shadow-pop sm:p-3.5">
+      <span className="grid size-10 shrink-0 place-items-center rounded-ctl bg-marca-50 text-marca-700 ring-1 ring-inset ring-marca-200">{icono}</span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold leading-snug">{titulo}</span>
+        <span className="block text-xs text-tenue">{detalle}</span>
+      </span>
+    </button>
+  );
+}
+
 export function Inicio() {
   const { me, puede } = useAuth();
   const nav = useNavigate();
+  const [consulta, setConsulta] = useState(false);
+  const puedeRapidas = (puede('ventas.emitir') && puede('precios.venta.ver')) || (puede('ordenes.modificar') && puede('presupuestos.valorizados.ver') && puede('precios.venta.ver')) || puede('stock.ajustar');
+  const hayAcciones = puede('ordenes.crear') || puede('catalogo.ver') || puede('presupuestos.gestionar') || puede('turnos.ver');
   const { data: caja } = useEstadoCaja();
   const { data: puesta } = usePuesta();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get('/dashboard'), refetchInterval: 60_000 });
@@ -28,13 +46,21 @@ export function Inicio() {
       <Encabezado
         titulo={`${saludo}, ${me?.usuario.nombre.split(' ')[0]}`}
         subtitulo={new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
-        acciones={
-          <>
-            {puede('presupuestos.gestionar') && <Boton icono={<FileText className="size-4" />} onClick={() => nav('/presupuestos/nuevo')}>Presupuesto</Boton>}
-            {puede('ordenes.crear') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/ordenes/nueva')}>Nueva OT</Boton>}
-          </>
-        }
       />
+
+      {hayAcciones && (
+        <section aria-label="Acciones rápidas" className="mb-5">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-tenue">Acciones rápidas</h2>
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(13rem,1fr))]">
+            {puede('ordenes.crear') && <Accion titulo="Nueva OT" detalle="Recibir un vehículo" icono={<Plus className="size-5" />} onClick={() => nav('/ordenes/nueva')} />}
+            {puede('catalogo.ver') && <Accion titulo="Consultar precios" detalle="Precio y stock al instante" icono={<Barcode className="size-5" />} onClick={() => setConsulta(true)} />}
+            {puedeRapidas && <Accion titulo="Operaciones rápidas" detalle="Venta, consumo en OT y bajas" icono={<Zap className="size-5" />} onClick={() => nav('/operaciones-rapidas')} />}
+            {puede('presupuestos.gestionar') && <Accion titulo="Presupuesto" detalle="Armar uno nuevo" icono={<FileText className="size-5" />} onClick={() => nav('/presupuestos/nuevo')} />}
+            {puede('turnos.ver') && <Accion titulo="Agenda" detalle="Turnos del taller" icono={<CalendarDays className="size-5" />} onClick={() => nav('/agenda')} />}
+          </div>
+        </section>
+      )}
+      <ConsultaPrecios abierto={consulta} onCerrar={() => setConsulta(false)} />
 
       {puesta && puesta.pendientes > 0 && (
         <Link to="/puesta-en-marcha" className="mb-4 block rounded-card border border-marca-200 bg-marca-50/60 px-4 py-3 hover:bg-marca-50">

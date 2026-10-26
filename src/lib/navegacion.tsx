@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import {
   Banknote, BarChart3, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, PackageSearch, Package, PiggyBank,
   Receipt, Scale, ScrollText, Settings, ShoppingCart, Tags, Truck, UserCog, Users, Wallet, Wrench, KeyRound, ShieldCheck, History, UserRound, BadgeDollarSign, ShoppingBasket,
-  Warehouse, Clock, MonitorSmartphone, Rocket, Upload, UsersRound, CalendarCheck, HardHat, Timer, Activity, BookOpen,
+  Warehouse, Zap, Clock, MonitorSmartphone, Rocket, Upload, UsersRound, CalendarCheck, HardHat, Timer, Activity, BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permiso } from '@shared/permisos';
@@ -70,6 +70,7 @@ export const GRUPOS: GrupoNav[] = [
     items: [
       item('ventas', 'Ventas y comprobantes', '/ventas', Receipt, 'facturacion comprobantes recibos mostrador', 'ventas.ver'),
       item('mostrador', 'Venta de mostrador', '/ventas/nueva', BadgeDollarSign, 'vender nueva venta rapida', 'ventas.emitir'),
+      item('rapidas', 'Operaciones rápidas', '/operaciones-rapidas', Zap, 'venta rapida carrito escanear codigo de barras consumo repuestos ot baja interna rotura perdida', undefined, undefined, (puede) => puede('catalogo.ver') && (puede('ventas.emitir') || puede('ordenes.modificar') || puede('stock.ajustar'))),
       item('cobros', 'Cobranzas', '/cobros', Wallet, 'cobros pagos recibos', 'ventas.ver'),
       item('cuentas', 'Cuentas corrientes', '/cuentas', ClipboardList, 'cliente deuda saldo deudores', 'ventas.ver'),
     ],

@@ -632,4 +632,33 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     db.close();
   });
+  it('0018 no toca ningún dato y la base protege las operaciones rápidas (claves únicas, sólo consumo en OT o baja con motivo, historial que no se reescribe)', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    for (const m of fs.readdirSync(path.join(RAIZ, 'migrations')).sort().filter((x) => x < '0018')) db.exec(leer('migrations', m));
+    db.exec(leer('tests', 'fixtures', 'datos-previos-0002.sql'));
+    db.exec("INSERT INTO vehiculos (id, taller_id, cliente_id, patente, km_actual) VALUES ('v1', 't1', 'c1', 'AB123CD', 1000)");
+    db.exec("INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, fecha_ingreso) VALUES ('o1', 't1', 1, 'c1', 'v1', '2026-10-26')");
+    const tablas = ['clientes', 'vehiculos', 'ordenes', 'articulos', 'stock_movimientos', 'ventas', 'cobros'];
+    const antes = tablas.map((t) => db.prepare(`SELECT * FROM ${t}`).all().map((r: any) => ({ ...r })));
+    db.exec(leer('migrations', '0018_operaciones_rapidas.sql'));
+    expect(tablas.map((t) => db.prepare(`SELECT * FROM ${t}`).all().map((r: any) => ({ ...r })))).toEqual(antes);
+    for (const t of ['operaciones_rapidas', 'operacion_rapida_items']) expect((db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as any).n).toBe(0);
+
+    const op = (id: string, extra: string) => `INSERT INTO operaciones_rapidas (id, taller_id, numero, tipo, fecha, ${extra.split('|')[0]}) VALUES ('${id}', 't1', 1, ${extra.split('|')[1]})`;
+    // El consumo exige una orden; la baja exige un motivo y no lleva orden
+    expect(() => db.exec(op('p0', "idem_key|'consumo_ot', '2026-10-26', 'clave-0001'"))).toThrow(/CHECK/);
+    expect(() => db.exec(op('p0', "motivo, idem_key|'baja_interna', '2026-10-26', NULL, 'clave-0001'"))).toThrow(/CHECK/);
+    expect(() => db.exec(op('p0', "orden_id, motivo, idem_key|'baja_interna', '2026-10-26', 'o1', 'rotura', 'clave-0001'"))).toThrow(/CHECK/);
+    expect(() => db.exec(op('p0', "motivo, idem_key|'venta', '2026-10-26', 'rotura', 'clave-0001'"))).toThrow(/CHECK/);
+    db.exec(op('p1', "orden_id, idem_key|'consumo_ot', '2026-10-26', 'o1', 'clave-0001'"));
+    // Una clave de idempotencia se usa una sola vez por taller; la orden no puede ser de otro taller
+    expect(() => db.exec("INSERT INTO operaciones_rapidas (id, taller_id, numero, tipo, fecha, orden_id, idem_key) VALUES ('p2', 't1', 2, 'consumo_ot', '2026-10-26', 'o1', 'clave-0001')")).toThrow(/UNIQUE/);
+    expect(() => db.exec("INSERT INTO operaciones_rapidas (id, taller_id, numero, tipo, fecha, orden_id, idem_key) VALUES ('p2', 't2', 2, 'consumo_ot', '2026-10-26', 'o1', 'clave-0002')")).toThrow(/FOREIGN/);
+    expect(() => db.exec("INSERT INTO operaciones_rapidas (id, taller_id, numero, tipo, fecha, orden_id, idem_key) VALUES ('p2', 't1', 2, 'consumo_ot', '2026-10-26', 'o1', 'corta')")).toThrow(/CHECK/);
+    // Lo registrado no se reescribe
+    expect(() => db.exec("UPDATE operaciones_rapidas SET notas = 'otra cosa' WHERE id = 'p1'")).toThrow(/inmutable/);
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    db.close();
+  });
 });

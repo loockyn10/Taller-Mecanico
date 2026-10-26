@@ -34,6 +34,7 @@ import { Reposicion } from './pages/stock/Reposicion';
 import { Reloj, modoReloj } from './pages/Reloj';
 import { MisTrabajos, MiTrabajo } from './pages/mecanico/MisTrabajos';
 import { Asistencia } from './pages/personal/Asistencia';
+import { OperacionesRapidas } from './pages/OperacionesRapidas';
 // Las pantallas administrativas se cargan bajo demanda para no inflar el paquete inicial.
 const Bancos = lazy(() => import('./pages/bancos/Bancos').then((m) => ({ default: m.Bancos })));
 const Cheques = lazy(() => import('./pages/bancos/Cheques').then((m) => ({ default: m.Cheques })));
@@ -98,6 +99,7 @@ export function App() {
         <Route index element={<Portada />} />
         <Route path="mis-trabajos" element={<Requiere permiso="ordenes.asignadas"><MisTrabajos /></Requiere>} />
         <Route path="mis-trabajos/:id" element={<Requiere permiso="ordenes.asignadas"><MiTrabajo /></Requiere>} />
+        <Route path="operaciones-rapidas" element={<Requiere permiso={['ventas.emitir', 'ordenes.modificar', 'stock.ajustar']}><OperacionesRapidas /></Requiere>} />
         <Route path="ordenes" element={<Requiere permiso="ordenes.ver"><Ordenes /></Requiere>} />
         <Route path="ordenes/nueva" element={<Requiere permiso="ordenes.crear"><NuevaOrden /></Requiere>} />
         <Route path="ordenes/:id" element={<Requiere permiso="ordenes.ver"><OrdenDetalle /></Requiere>} />
