@@ -71,7 +71,7 @@ export function Inicio() {
         </Link>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 xl:grid-cols-4">
         {puede('ordenes.ver') && <Indicador titulo="OT abiertas" valor={abiertas} detalle={`${cant('en_reparacion')} en reparación`} icono={<Wrench className="size-5" />} onClick={() => nav('/ordenes')} />}
         {puede('ordenes.ver') && <Indicador titulo="Listas p/ entregar" valor={cant('lista')} icono={<CheckCircle2 className="size-5" />} tono="verde" onClick={() => nav('/ordenes?estado=lista')} />}
         {puede('turnos.ver') && <Indicador titulo="Turnos hoy" valor={data.turnosHoy.length} icono={<CalendarDays className="size-5" />} tono="violeta" onClick={() => nav('/agenda')} />}
