@@ -8,6 +8,7 @@ import { duracion, fecha, fechaHora, km, money, numero } from '@/lib/format';
 import { FotosOrden } from '@/components/Fotos';
 import { ImprimirOrden } from '@/components/ImprimirOrden';
 import { BotonWhatsAppOrden, SeguimientoCliente, useSeguimiento } from '@/components/SeguimientoCliente';
+import { PagoCliente } from '@/components/PagoCliente';
 import { ChecklistOrden } from '@/components/checklist/Checklist';
 import { Aviso, Boton, Campo, Cargando, Chip, Dato, Encabezado, ErrorCaja, Input, Modal, Pestanas, Select, Tarjeta, Textarea, useConfirmar, useToast } from '@/components/ui';
 import { EstadoCobroBadge, EstadoOTBadge } from '@/components/estados';
@@ -312,6 +313,9 @@ export function OrdenDetalle() {
       <div className="mb-5">
         {puede('seguimiento.ver') ? <SeguimientoCliente orden={o} /> : <Aviso>El seguimiento del cliente no está disponible con tus permisos (hace falta «Consultar el seguimiento del cliente»).</Aviso>}
       </div>
+
+      {/* Pago del cliente (elección del medio y comprobantes de transferencia): información financiera, sólo para quien ve órdenes y ventas. */}
+      {verDinero && puede('ordenes.ver') && <div className="mb-5"><PagoCliente orden={o} onCobrar={() => setTab('cobro')} /></div>}
 
       <div className="grid gap-5 xl:grid-cols-3">
         <div className="xl:col-span-2">

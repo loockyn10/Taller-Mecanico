@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { ArrowLeftRight, Ban, Banknote, Download, Landmark, Pencil, Plus, Scale, Undo2 } from 'lucide-react';
+import { ArrowLeftRight, Ban, Banknote, Download, Globe, Landmark, Pencil, Plus, Scale, Undo2 } from 'lucide-react';
 import { api, nuevaClave, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { invalidarDinero } from '@/lib/caja';
@@ -126,8 +126,35 @@ function Cuentas({ cuentas, onOp }: { cuentas: any[]; onOp: (op: Operacion, cuen
   const visibles = cuentas.filter((c) => todas || c.activa);
   const totalARS = cuentas.filter((c) => c.activa && c.moneda === 'ARS').reduce((a, c) => a + c.saldo, 0);
   const usd = cuentas.filter((c) => c.activa && c.moneda === 'USD').reduce((a, c) => a + c.saldo, 0);
+  const toast = useToast();
+  const qc = useQueryClient();
+  const { confirmar, dialogo } = useConfirmar();
+  // Cuenta que se muestra a los clientes en la página de seguimiento para que le transfieran al taller (una sola por taller).
+  const portal = useMutation({
+    mutationFn: (p: { id: string; publicar: boolean }) => api.put(`/bancos/cuentas/${p.id}/portal`, { publicar: p.publicar }),
+    onSuccess: (_r, p) => {
+      toast.ok(p.publicar ? 'Cuenta publicada en el portal de los clientes' : 'La cuenta dejó de mostrarse a los clientes');
+      qc.invalidateQueries({ queryKey: ['bancos'] });
+    },
+    onError: toast.error,
+  });
+  const alternarPortal = async (c: any) => {
+    if (c.publica_en_portal) {
+      if (await confirmar('Dejar de publicar la cuenta', 'Los clientes ya no verán datos para transferir y no podrán enviar comprobantes hasta que publiques una cuenta.', true)) portal.mutate({ id: c.id, publicar: false });
+      return;
+    }
+    const otra = cuentas.find((x) => x.publica_en_portal && x.id !== c.id);
+    const aviso = (
+      <>
+        La página de seguimiento va a mostrar a los clientes el titular, el banco, el alias y el CBU/CVU de <strong>{c.nombre}</strong>, para que le transfieran al taller.
+        {otra ? <> Reemplaza a «{otra.nombre}», que dejará de mostrarse.</> : null}
+      </>
+    );
+    if (await confirmar('Publicar la cuenta para recibir transferencias de clientes', aviso)) portal.mutate({ id: c.id, publicar: true });
+  };
   return (
     <>
+      {dialogo}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Indicador titulo="Saldo en bancos (ARS)" valor={money(totalARS)} detalle={`${cuentas.filter((c) => c.activa && c.moneda === 'ARS').length} cuenta(s) en pesos`} icono={<Landmark className="size-5" />} />
         {usd !== 0 && <Indicador titulo="Saldo en dólares" valor={`US$ ${(usd / 100).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`} tono="cian" />}
@@ -159,6 +186,21 @@ function Cuentas({ cuentas, onOp }: { cuentas: any[]; onOp: (op: Operacion, cuen
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   <Boton tam="sm" onClick={() => onOp('manual', c.id)}>Movimiento</Boton>
                   {c.moneda === 'ARS' && <Boton tam="sm" onClick={() => onOp('deposito', c.id)}>Depositar</Boton>}
+                </div>
+              )}
+              {c.moneda === 'ARS' && c.activa && (
+                <div className="mt-3 border-t border-borde-suave pt-2.5">
+                  {c.publica_en_portal ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Insignia tono="verde"><Globe className="mr-1 inline size-3" />Publicada en el portal de clientes</Insignia>
+                      <Boton tam="sm" variante="fantasma" cargando={portal.isPending} onClick={() => alternarPortal(c)}>Dejar de publicar</Boton>
+                    </div>
+                  ) : puede('bancos.gestionar') ? (
+                    <div className="space-y-1">
+                      <Boton tam="sm" icono={<Globe className="size-4" />} cargando={portal.isPending} disabled={!c.titular?.trim() || (!c.alias && !c.cbu)} onClick={() => alternarPortal(c)}>Usar para transferencias de clientes</Boton>
+                      {(!c.titular?.trim() || (!c.alias && !c.cbu)) && <p className="text-xs text-tenue">Cargá el titular y el alias o CBU/CVU para poder publicarla.</p>}
+                    </div>
+                  ) : null}
                 </div>
               )}
             </Tarjeta>

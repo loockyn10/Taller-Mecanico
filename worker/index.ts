@@ -11,7 +11,9 @@ import { fotos } from './modules/fotos';
 import { checklists } from './modules/checklists';
 import { respaldoFotos } from './modules/respaldo-fotos';
 import { seguimiento } from './modules/seguimiento';
-import { paginaNoEncontrada, paginaPublica, seguimientoPublico } from './modules/seguimiento-publico';
+import { accionComprobante, accionMedio, logoPublico, paginaNoEncontrada, paginaPublica, seguimientoPublico } from './modules/seguimiento-publico';
+import { pagosOrden } from './modules/pagos-ot';
+import { limpiarComprobantes } from './lib/pago-cliente';
 import { limpiarFotos } from './lib/fotos';
 import { catalogo } from './modules/catalogo';
 import { presupuestos } from './modules/presupuestos';
@@ -115,6 +117,9 @@ app.route('/api/plataforma/fotos-respaldo', respaldoFotos);
 // Seguimiento público de órdenes: sin sesión, se entra con el enlace individual (token). Ver worker/modules/seguimiento-publico.ts y docs/SEGUIMIENTO.md.
 app.route('/api/seguimiento', seguimientoPublico);
 app.get('/seguimiento/:token', paginaPublica);
+app.get('/seguimiento/:token/logo', logoPublico);
+app.post('/seguimiento/:token/medio', accionMedio);
+app.post('/seguimiento/:token/comprobante', accionComprobante);
 app.all('/seguimiento/*', () => paginaNoEncontrada());
 
 // Pantalla del reloj compartido: se autentica con el token del dispositivo, no con una sesión de usuario.
@@ -153,6 +158,7 @@ api.route('/', catalogo);
 api.route('/presupuestos', presupuestos);
 api.route('/ordenes', ordenes);
 api.route('/ordenes', seguimiento);
+api.route('/ordenes', pagosOrden);
 api.route('/', comercial);
 api.route('/', anticipos);
 api.route('/', devoluciones);
@@ -204,5 +210,6 @@ export default {
   async scheduled(_evento: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(ejecutarMantenimiento(env, mantenimientoContable));
     ctx.waitUntil(limpiarFotos(env.DB, env.FIERRO_FOTOS).catch(() => undefined));
+    ctx.waitUntil(limpiarComprobantes(env.DB, env.FIERRO_FOTOS).catch(() => undefined));
   },
 } satisfies ExportedHandler<Env>;

@@ -119,9 +119,9 @@ async function validarCabecera(db: D1Database, s: Sesion, d: { cliente_id: strin
 
 ordenes.get('/', async (c) => {
   const s = c.get('sesion');
-  const { estado, q, mecanico_id, desde, hasta, limite } = query(
+  const { estado, q, mecanico_id, desde, hasta, comprobantes, limite } = query(
     c,
-    z.object({ estado: z.string().optional(), q: z.string().optional(), mecanico_id: z.string().optional(), desde: z.string().optional(), hasta: z.string().optional(), limite: z.coerce.number().int().min(1).max(500).default(300) }),
+    z.object({ estado: z.string().optional(), q: z.string().optional(), mecanico_id: z.string().optional(), desde: z.string().optional(), hasta: z.string().optional(), comprobantes: z.enum(['pendientes']).optional(), limite: z.coerce.number().int().min(1).max(500).default(300) }),
   );
   const ac = alcance(s);
   const cond = ['o.taller_id = ?', ...ac.cond];
@@ -135,6 +135,11 @@ ordenes.get('/', async (c) => {
     params.push(...(porCliente ? [like(q)] : []), like(normalizarPatente(q) || q), q.replace(/\D/g, ''));
   }
   if (mecanico_id) (cond.push('o.mecanico_id = ?'), params.push(mecanico_id));
+  // Órdenes con comprobantes de transferencia esperando verificación (aviso del personal administrativo). Es información financiera: exige ver ventas.
+  if (comprobantes === 'pendientes') {
+    if (!tiene(s, 'ventas.ver')) throw forbidden();
+    cond.push("EXISTS (SELECT 1 FROM pago_comprobantes pc WHERE pc.taller_id = o.taller_id AND pc.orden_id = o.id AND pc.estado = 'pendiente')");
+  }
   if (desde) (cond.push('o.fecha_ingreso >= ?'), params.push(desde));
   if (hasta) (cond.push('o.fecha_ingreso <= ?'), params.push(`${hasta}T23:59:59.999Z`));
   return c.json((await all(c.env.DB, `${SELECT} WHERE ${cond.join(' AND ')} ORDER BY o.numero DESC LIMIT ?`, ...params, limite)).map((o) => vistaOrden(s, o)));
@@ -185,7 +190,7 @@ ordenes.get('/:id/pdf', async (c) => {
     if (!VARIANTES[v].permisos.every((p) => tiene(s, p))) throw forbidden(`No tenés permiso para imprimir la ${VARIANTES[v].rotulo.toLowerCase()}`);
   }
   // El cliente sólo se lee si alguna de las copias pedidas lo muestra (la del mecánico nunca, quien la imprima).
-  const datos = await datosHojaOrden(c.env.DB, s, c.req.param('id'), alcance(s), c.env.FIERRO_FOTOS, { cliente: muestraCliente(variantes) });
+  const datos = await datosHojaOrden(c.env.DB, s, c.req.param('id'), alcance(s), c.env.FIERRO_FOTOS, { cliente: muestraCliente(variantes), pago: variantes.some((v) => VARIANTES[v].datosPago) });
   if (!datos) throw notFound('Orden de trabajo');
   const { pdf, hojas } = generarHojaOrden(datos, variantes);
   // La impresión queda registrada (quién, qué orden y qué copia); si el registro falla, no se le niega el documento a quien lo pidió.

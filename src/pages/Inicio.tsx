@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth';
 import { money, numero } from '@/lib/format';
 import { useEstadoCaja } from '@/lib/caja';
 import { usePuesta } from '@/lib/puesta';
+import { usePagosPendientes } from '@/components/PagoCliente';
 import { ConsultaPrecios } from '@/components/ConsultaPrecios';
 import { Boton, Cargando, Encabezado, ErrorCaja, Indicador, Tarjeta, Vacio } from '@/components/ui';
 import { EstadoOTBadge, EstadoTurnoBadge } from '@/components/estados';
@@ -33,6 +34,7 @@ export function Inicio() {
   const hayAcciones = puede('ordenes.crear') || puede('catalogo.ver') || puede('presupuestos.gestionar');
   const { data: caja } = useEstadoCaja();
   const { data: puesta } = usePuesta();
+  const { data: pagos } = usePagosPendientes();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get('/dashboard'), refetchInterval: 60_000 });
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
@@ -60,6 +62,13 @@ export function Inicio() {
         </section>
       )}
       <ConsultaPrecios abierto={consulta} onCerrar={() => setConsulta(false)} />
+
+      {pagos && pagos.total > 0 && (
+        <Link to="/ordenes?comprobantes=pendientes" className="mb-4 flex items-center justify-between gap-3 rounded-card border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 hover:bg-amber-100">
+          <span><strong>{pagos.total}</strong> {pagos.total === 1 ? 'comprobante pendiente' : 'comprobantes pendientes'} de verificar</span>
+          <span className="font-medium">Ver →</span>
+        </Link>
+      )}
 
       {puesta && puesta.pendientes > 0 && (
         <Link to="/puesta-en-marcha" className="mb-4 block rounded-card border border-marca-200 bg-marca-50/60 px-4 py-3 hover:bg-marca-50">

@@ -1227,3 +1227,35 @@ Detalle funcional y técnico en `docs/MOVIMIENTOS_PERSONAS.md`; privacidad en `d
 
 ## Dominio oficial taller.orvelan.com.ar
 - `urlPublica` centraliza el origen de los enlaces absolutos (seguimiento, PDF de la OT, invitaciones); `routes` con `custom_domain` en `wrangler.jsonc`; `configLocal` quita `routes` para desarrollo/pruebas. Detalle y pendientes en `docs/DOMINIO.md`.
+
+## 140. Sprint 25: portal de seguimiento con pago del cliente, comprobantes de transferencia y rediseño (2026-10-28)
+Detalle funcional y técnico en `docs/PAGOS_CLIENTE.md`; privacidad en `docs/PRIVACIDAD.md`; el portal en `docs/SEGUIMIENTO.md`.
+
+**Qué hay.** El portal público (el mismo del Sprint 20) muestra ahora el logotipo y el nombre del taller como protagonistas, el cliente responsable **de la OT** (sólo el nombre), el vehículo y el estado, y un **resumen de pago** con importe total, abonado y saldo (globales, sin desglose). El cliente elige **efectivo** (confirma que pagará al retirar: no genera cobro) o **transferencia** (ve titular, banco, alias y CBU de la cuenta de **su taller**, copia el alias con confirmación visual y adjunta el comprobante: JPG/PNG/WEBP/PDF). En la OT, la tarjeta **«Pago del cliente»** muestra importe, abonado, saldo, medio elegido, estado y comprobantes (ver / descargar), con **Confirmar cobro** y **Rechazar comprobante** (motivo visible para el cliente). El pie dejó de ocupar media pantalla: «Gestionado con ORVELAN» con el isotipo de 20 px. Aviso discreto «N comprobantes pendientes de verificar» en Inicio y Órdenes.
+
+**Qué se reutilizó (nada paralelo).** Portal y tokens (`seguimiento_enlaces`, revocación y regeneración), `lib/cobros.ts › sentenciasCobro` (cobro + caja + banco + asiento derivado), `cuentas_bancarias` (+1 columna), el bucket R2 privado de las fotos (otro prefijo), `validarImagen`, `limites_intentos`, `auditar`, la hoja PDF de la OT, los permisos existentes (**ninguno nuevo**).
+
+**Decisiones que no se ven en el código.**
+- **Importe «confirmado»** = comprobante interno emitido **o** informado por el taller (botón explícito; `seguimiento.gestionar` + `ventas.ver`). Antes de eso la página dice «Importe pendiente de confirmación» y el servidor rechaza elegir medio o enviar comprobantes. Evita publicar el total de una OT que todavía se está armando.
+- **Abonado** sale del módulo financiero (comprobante interno + anticipos de la OT disponibles), nunca de los comprobantes del portal. Elegir medio y subir comprobante no mueven dinero.
+- **Confirmar** usa el mismo `sentenciasCobro` en **un batch** con una guarda sobre el estado del comprobante: con comprobante interno emitido el cobro se aplica a él; sin comprobante queda como **anticipo de la OT**. Doble clic, reintentos y confirmaciones simultáneas dan un solo cobro (probado). **Enlazar** un cobro ya registrado no crea nada. Índice único: un cobro respalda a lo sumo un comprobante.
+- **Los comprobantes resueltos son inmutables** (disparadores); el cliente reenvía otro. La elección del medio es un historial inmutable con el saldo del momento.
+- **Cuenta receptora:** una por taller (índice único parcial), la publica quien gestiona los bancos; el visitante no elige cuenta ni importe.
+- **Página sin dependencias de JavaScript** (formularios + 303); un script con *nonce* sólo agrega comodidades. CSP: `connect-src 'none'`, `form-action 'self'`.
+- **Trampa encontrada en la verificación visual:** con `Referrer-Policy: no-referrer` el navegador manda `Origin: null` en los envíos al mismo sitio; la primera versión del control de origen los rechazaba (las pruebas por API no lo detectaban). Ahora decide `Sec-Fetch-Site` y se prueba `Origin: null`.
+- Los comprobantes **no** están en el respaldo programado de fotos (pendiente documentado).
+
+**Migración `0021_pagos_cliente_portal.sql` (expansiva).** `cuentas_bancarias.publica_en_portal` + índice, `pago_importe_ot`, `pago_elecciones`, `pago_comprobantes` y sus disparadores. No reconstruye ni modifica ninguna tabla: el código del Sprint 24 sigue funcionando con el esquema nuevo (se migró primero, se publica después; **sin ventana de incompatibilidad**).
+
+| Estado | Resultado |
+|---|---|
+| **Migración versionada** | `migrations/0021_pagos_cliente_portal.sql` (commit del Sprint 25). |
+| **Migración aplicada en la D1 remota** | **Sí**, 2026-10-28 ~19:25 (hora de Argentina), `wrangler d1 migrations apply DB --remote` («Executed 15 commands», ✅). Antes de aplicar, `migrations list` mostraba **sólo la 0021 pendiente** (sin divergencias). Después: las 3 tablas nuevas existen vacías, `publica_en_portal = 0` en las 5 cuentas existentes, última migración registrada `0021`. |
+| **Código desplegado** | Ver §141. |
+| **Funcionalidad verificada** | Ver §141: lo probado localmente (840 pruebas y verificación en un navegador a 375–1920 px) se distingue de lo verificado en producción. |
+
+**Procedimiento previo.** Respaldo remoto `respaldos/d1-antes-sprint25-20261028-2219.sql` (fuera de git): 117 tablas, 13.255 filas, 5 talleres, integridad ok, 0 claves foráneas rotas, SHA-256 `821152cb…a18a`, **bookmark Time Travel `000006eb-00000000-00005112-35c47353dcb0ba3dfef66769161161d6`**. Ensayo en copia en memoria (`ensayar-migraciones`, con transacción y claves foráneas activas): 117 tablas y 13.255 filas **idénticas**, +3 tablas, +1 columna, integridad ok. La migración también se aplica sin error en cada corrida de la suite de API (D1 local en workerd).
+
+**Pruebas.** `npm run build` OK. Unitarias: **235** (+40: `pago-portal` 34, `pago-cliente-db` 6; se adaptó `seguimiento`). Integración: **605** (+40: `pago-cliente` 39, `migracion-0021` 1; se adaptó `seguimiento`). Cubren los 36 puntos pedidos (portal, comprobantes, finanzas, privacidad, visual); ver §11 de `docs/PAGOS_CLIENTE.md`.
+
+**Verificación visual** (instancia local aislada, datos de ensayo, navegador del escritorio): flujo completo en un navegador real (elegir transferencia, ver datos, copiar, elegir archivo con vista previa, enviar, ver «pendiente de verificación», confirmar desde la OT, ver «paga»); **375, 430, 768, 1024, 1366, 1440 y 1920 px sin desplazamiento horizontal**, pie de 61 px de alto con el isotipo de 20 px y botones de al menos 46 px. Se corrigió «TRANSFERENCIA» partida en 375 px y el alias partido junto al botón de copiar. **No** se probó en teléfonos físicos ni con transferencias bancarias reales.

@@ -45,3 +45,12 @@ Los aportes, préstamos y adelantos de sueldo son datos **sensibles** (dinero qu
 - Aislamiento entre empresas: toda consulta lleva el `taller_id` de la sesión y la base usa claves foráneas compuestas; un identificador de otra empresa responde 404/400.
 - **Libro de caja y de bancos**: sin `movpersonas.ver`, las filas de estos movimientos (y sus reversos) se devuelven como «Movimiento con personas (reservado)», sin referencia, y **no se pueden buscar por texto** (la búsqueda delataría quién es). El monto y el medio siguen visibles: el arqueo y el cierre de caja tienen que contar ese efectivo.
 - **Límites**: quien tiene `contabilidad.ver` ve la descripción de los asientos («Adelanto de sueldo #5 · nombre: motivo»); es un permiso financiero (no está en ninguna plantilla operativa). El texto libre de un movimiento (motivo, referencia) lo ve cualquiera con `movpersonas.ver`.
+
+## Pago del cliente y portal público (Sprint 25)
+
+Detalle en `docs/PAGOS_CLIENTE.md`.
+
+- **Mecánico:** no accede a nada del pago del cliente. La tarjeta «Pago del cliente» y todos los endpoints de comprobantes exigen `ordenes.ver` + `ventas.ver` (el mecánico sólo tiene `ordenes.asignadas`); la copia del mecánico del PDF recibe los datos de la orden **sin** la sección de pago por tipo de copia (`DefVariante.datosPago`), imprima quien imprima. Probado con el rol mecánico (detalle de la OT, PDF y endpoints).
+- **Recepción** ve el pago (tiene `ventas.ver`) pero no confirma ni rechaza (hace falta `cobros.registrar`); caja confirma. No se agregaron permisos.
+- **Portal público:** muestra sólo el nombre del cliente **de esa orden** (no el titular del vehículo ni otros vinculados), importes globales y, si el cliente eligió transferencia, los datos de la cuenta receptora **de su taller** (titular, banco, alias, CBU/CVU; nunca el CUIT, el saldo ni el nombre interno de la cuenta). El cliente no puede ver archivos, ni de otros ni propios.
+- **Comprobantes:** bucket R2 privado, acceso sólo con sesión y permisos, clave armada con el taller de la sesión; vista y descarga auditadas.

@@ -9,6 +9,7 @@ import { zonaDelTaller } from './zona';
 import type { DatosHoja } from './hoja-orden';
 import { claveMiniatura, sha256 } from './fotos';
 import { leerJpeg } from './pdf/escritor';
+import { resumenPagoParaHoja } from './pago-cliente';
 
 const LOGO_JPEG = /^data:image\/jpe?g;base64,([A-Za-z0-9+/=]+)$/;
 
@@ -62,7 +63,7 @@ export async function fotoParaHoja(db: D1Database, bucket: R2Bucket | undefined,
 
 /** Devuelve los datos operativos de la orden, o null si no existe, es de otro taller o la sesión no tiene acceso a ella. */
 /** `alcance`: condición SQL (sobre el alias `o`) y parámetros que limitan las órdenes a las que la sesión tiene acceso. `bucket`: R2 de fotos; sólo se pasa en las hojas que llevan la foto del vehículo. */
-export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string, alcance: { cond: string[]; params: unknown[] }, bucket?: R2Bucket, opciones: { cliente?: boolean } = {}): Promise<DatosHoja | null> {
+export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string, alcance: { cond: string[]; params: unknown[] }, bucket?: R2Bucket, opciones: { cliente?: boolean; pago?: boolean } = {}): Promise<DatosHoja | null> {
   // Los datos del cliente se leen únicamente si la copia pedida los muestra (`opciones.cliente`) Y la sesión puede ver clientes. En la copia del mecánico
   // (y en la del cliente, que no los lleva) la consulta ni siquiera selecciona esas columnas: no pueden filtrarse por error.
   const verCliente = !!opciones.cliente && tiene(s, 'clientes.ver');
@@ -84,7 +85,9 @@ export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string,
   );
   if (!o) return null;
 
-  const [items, participantes, taller, zona, foto] = await Promise.all([
+  // El pago del cliente se lee únicamente si la copia pedida lo muestra (`opciones.pago`) Y la sesión puede ver ventas: la copia del mecánico no lo pide jamás.
+  const verPago = !!opciones.pago && tiene(s, 'ventas.ver');
+  const [items, participantes, taller, zona, foto, pago] = await Promise.all([
     all<{ tipo: string; descripcion: string; cantidad: number; unidad: string | null }>(
       db,
       `SELECT oi.tipo, oi.descripcion, oi.cantidad, a.unidad FROM orden_items oi
@@ -106,6 +109,7 @@ export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string,
     ),
     zonaDelTaller(db, s.tallerId),
     fotoParaHoja(db, bucket, s, o.vehiculo_id, o.id),
+    verPago ? resumenPagoParaHoja(db, s.tallerId, o.id) : Promise.resolve(null),
   ]);
 
   return {
@@ -128,6 +132,7 @@ export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string,
     observaciones: o.observaciones,
     trabajos: items.filter((i) => i.tipo !== 'articulo').map((i) => ({ descripcion: i.descripcion, cantidad: i.cantidad })),
     repuestos: items.filter((i) => i.tipo === 'articulo').map((i) => ({ descripcion: i.descripcion, cantidad: i.cantidad, unidad: i.unidad })),
+    pago,
     zonaHoraria: zona,
     impresoAt: new Date(),
   };

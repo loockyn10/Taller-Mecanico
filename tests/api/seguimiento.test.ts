@@ -399,26 +399,30 @@ describe('9. aislamiento entre talleres', () => {
 });
 
 describe('10. ausencia de datos privados y financieros', () => {
-  it('ni la página ni el JSON traen cliente, teléfono, dirección, precios, notas, diagnósticos, kilometraje, mecánico ni identificadores', async () => {
+  it('ni la página ni el JSON traen teléfono, dirección, precios, notas, diagnósticos, kilometraje, mecánico ni identificadores (del cliente sólo el nombre, Sprint 25)', async () => {
     const p = (await pagina(T.url)).texto;
     const j = JSON.stringify((await jsonDe(T.url)).json);
     const prohibidos = [
-      'Rosario', 'Ñañez', '555-7788', 'Calle Falsa', 'FALLA-PRIVADA', 'DIAGNOSTICO-PRIVADO', 'OBSERVACION-PRIVADA', 'NOTA-INTERNA-RESERVADA', 'NOTA-DEL-CAMBIO-INTERNA',
+      '555-7788', 'Calle Falsa', 'FALLA-PRIVADA', 'DIAGNOSTICO-PRIVADO', 'OBSERVACION-PRIVADA', 'NOTA-INTERNA-RESERVADA', 'NOTA-DEL-CAMBIO-INTERNA',
       'SEG123', '98765', '98.765', '8765432', '87654', '3456789', 'pastillas', 'Alineación', T.ot.id, T.a.tallerId, T.cli.id, T.veh.id, T.mecId, T.rec.id, 'recepcion',
     ];
     for (const x of prohibidos) {
       expect(p, `HTML: ${x}`).not.toContain(x);
       expect(j, `JSON: ${x}`).not.toContain(x);
     }
-    expect(p.toLowerCase()).not.toMatch(/\bprecio|\btotal\b|\bcosto|margen|\bcuit|\bfoto|firma/);
+    expect(p.toLowerCase()).not.toMatch(/\bprecio|\btotal\b|\bcosto|margen|\bcuit|\bfoto|\bfirma/);
+    // Sprint 25: el cliente responsable de la OT es lo único personal que se muestra, y sólo su nombre.
+    expect(p).toContain('Rosario Ñañez');
+    expect((await jsonDe(T.url)).json.cliente).toEqual({ nombre: 'Rosario Ñañez' });
   });
 
   it('el JSON tiene exactamente los campos previstos (ningún campo privado oculto)', async () => {
     const j = (await jsonDe(T.url)).json;
-    expect(Object.keys(j).sort()).toEqual(['actualizado_at', 'entrega', 'estado', 'historial', 'mensaje', 'orden', 'recorrido', 'taller', 'vehiculo', 'zona_horaria']);
+    expect(Object.keys(j).sort()).toEqual(['actualizado_at', 'cliente', 'entrega', 'estado', 'historial', 'mensaje', 'orden', 'pago', 'recorrido', 'taller', 'vehiculo', 'zona_horaria']);
     expect(Object.keys(j.vehiculo).sort()).toEqual(['marca', 'modelo', 'patente']);
     expect(Object.keys(j.orden)).toEqual(['referencia']);
-    expect(Object.keys(j.taller)).toEqual(['nombre']);
+    expect(Object.keys(j.taller).sort()).toEqual(['logo', 'nombre']);
+    expect(Object.keys(j.cliente)).toEqual(['nombre']);
     for (const h of j.historial) expect(Object.keys(h).sort()).toEqual(['at', 'titulo']);
     for (const p of j.recorrido) expect(Object.keys(p).sort()).toEqual(['at', 'detalle', 'situacion', 'titulo']);
   });

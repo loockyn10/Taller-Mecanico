@@ -6,6 +6,7 @@
 import { ahora, all, auditar, first, uid, type Stmt } from './db';
 import { tokenAleatorio } from './crypto';
 import { zonaDelTaller, fechaLocal } from './zona';
+import { pagoPublico, type PagoPublico } from './pago-cliente';
 import { ESTADOS_OT, type EstadoOT } from '../../shared/dominio';
 import { ESTADO_PUBLICO, RUTA_PUBLICA, enmascararPatente, entregaEstimada, recorrido, tituloTransicion, tokenConFormato, type EntregaEstimada, type EstadoPublico, type EventoVisible, type PasoRecorrido } from '../../shared/seguimiento';
 
@@ -38,7 +39,10 @@ export async function tokenActivo(db: D1Database, tallerId: string, ordenId: str
 }
 
 export interface SeguimientoPublico {
-  taller: { nombre: string };
+  /** `logo`: el taller tiene logotipo cargado (la imagen se pide aparte, con el mismo token). */
+  taller: { nombre: string; logo: boolean };
+  /** Cliente responsable DE ESTA ORDEN (no el titular del vehículo). Sólo el nombre: nunca teléfono, dirección, DNI/CUIT ni correo. Null para «Consumidor final». */
+  cliente: { nombre: string } | null;
   orden: { referencia: string };
   vehiculo: { marca: string | null; modelo: string | null; patente: string };
   estado: EstadoPublico & { clave: EstadoOT; listo: boolean; cerrado: boolean };
@@ -49,6 +53,8 @@ export interface SeguimientoPublico {
   actualizado_at: string;
   /** Zona horaria del taller: la página muestra las horas en ella. */
   zona_horaria: string;
+  /** Resumen de pago: importe global y saldo (sin desglose), medio elegido y verificación de los comprobantes. */
+  pago: PagoPublico;
 }
 
 const numeroReferencia = (n: number) => String(n).padStart(4, '0');
@@ -80,15 +86,17 @@ export async function transiciones(db: D1Database, tallerId: string, ordenId: st
 
 /** Arma lo que ve el cliente a partir del estado actual y de las transiciones (ya filtradas por visibilidad). Pura: se prueba sin base. */
 export function proyectar(
-  d: { taller: string; numero: number; estado: EstadoOT; patente: string; marca: string | null; modelo: string | null; fechaPrometida: string | null; fechaIngreso: string; mostrarFecha: boolean; zona: string },
+  d: { taller: string; logo: boolean; cliente: string | null; numero: number; estado: EstadoOT; patente: string; marca: string | null; modelo: string | null; fechaPrometida: string | null; fechaIngreso: string; mostrarFecha: boolean; zona: string },
   visibles: readonly EventoVisible[],
   mensaje: { texto: string; at: string } | null,
   hoy: string,
+  pago: PagoPublico,
 ): SeguimientoPublico {
   const base = ESTADO_PUBLICO[d.estado];
   const fechas = [...visibles.map((v) => v.at), ...(mensaje ? [mensaje.at] : [])];
   return {
-    taller: { nombre: d.taller },
+    taller: { nombre: d.taller, logo: d.logo },
+    cliente: d.cliente ? { nombre: d.cliente } : null,
     orden: { referencia: numeroReferencia(d.numero) },
     vehiculo: { marca: d.marca, modelo: d.modelo, patente: enmascararPatente(d.patente) },
     estado: { ...base, clave: d.estado, listo: d.estado === 'lista', cerrado: d.estado === 'entregada' || d.estado === 'cancelada' },
@@ -99,7 +107,29 @@ export function proyectar(
     mensaje,
     actualizado_at: fechas.length ? fechas.reduce((a, b) => (a > b ? a : b)) : d.fechaIngreso,
     zona_horaria: d.zona,
+    pago,
   };
+}
+
+/** Taller y orden a los que apunta un enlace ACTIVO (inexistente, desactivado o reemplazado: null). Es lo único que las acciones públicas toman del token. */
+export async function enlaceActivo(db: D1Database, token: string): Promise<{ tallerId: string; ordenId: string } | null> {
+  if (!tokenConFormato(token)) return null;
+  const r = await first<{ taller_id: string; orden_id: string }>(db, 'SELECT taller_id, orden_id FROM seguimiento_enlaces WHERE token = ? AND activo = 1', token);
+  return r ? { tallerId: r.taller_id, ordenId: r.orden_id } : null;
+}
+
+/** Logotipo del taller dueño del enlace (PNG/JPEG/WebP en base64 dentro de la configuración), o null. */
+export async function logoDelEnlace(db: D1Database, token: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  const e = await enlaceActivo(db, token);
+  if (!e) return null;
+  const r = await first<{ logo: string | null }>(db, 'SELECT logo FROM taller_config WHERE taller_id = ?', e.tallerId);
+  const m = r?.logo ? /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(r.logo) : null;
+  if (!m) return null;
+  try {
+    return { bytes: Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)), mime: `image/${m[1]}` };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -110,13 +140,16 @@ export async function consultarSeguimiento(db: D1Database, token: string): Promi
   if (!tokenConFormato(token)) return null;
   const r = await first<{
     taller_id: string; orden_id: string; mostrar: number; taller: string; numero: number; estado: string; fecha_prometida: string | null; fecha_ingreso: string;
-    patente: string; marca: string | null; modelo: string | null;
+    patente: string; marca: string | null; modelo: string | null; logo: number; cliente: string | null;
   }>(
     db,
     `SELECT s.taller_id, s.orden_id, s.mostrar_fecha_estimada AS mostrar, t.nombre AS taller, o.numero, o.estado, o.fecha_prometida, o.fecha_ingreso,
-            v.patente, ma.nombre AS marca, mo.nombre AS modelo
+            v.patente, ma.nombre AS marca, mo.nombre AS modelo,
+            EXISTS (SELECT 1 FROM taller_config tc WHERE tc.taller_id = s.taller_id AND tc.logo IS NOT NULL) AS logo,
+            CASE WHEN cl.codigo = 0 THEN NULL ELSE cl.nombre END AS cliente
        FROM seguimiento_enlaces s
        JOIN ordenes o ON o.taller_id = s.taller_id AND o.id = s.orden_id
+       JOIN clientes cl ON cl.taller_id = o.taller_id AND cl.id = o.cliente_id
        JOIN talleres t ON t.id = s.taller_id
        JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
        LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id
@@ -125,12 +158,13 @@ export async function consultarSeguimiento(db: D1Database, token: string): Promi
     token,
   );
   if (!r || !(ESTADOS_OT as readonly string[]).includes(r.estado)) return null;
-  const [trans, mensaje, zona] = await Promise.all([transiciones(db, r.taller_id, r.orden_id), mensajeVigente(db, r.taller_id, r.orden_id), zonaDelTaller(db, r.taller_id)]);
+  const [trans, mensaje, zona, pago] = await Promise.all([transiciones(db, r.taller_id, r.orden_id), mensajeVigente(db, r.taller_id, r.orden_id), zonaDelTaller(db, r.taller_id), pagoPublico(db, r.taller_id, r.orden_id)]);
   const visibles: EventoVisible[] = trans.filter((t) => !t.oculto).map((t) => ({ estado: t.estado, anterior: t.anterior, at: t.at }));
   return proyectar(
-    { taller: r.taller, numero: r.numero, estado: r.estado as EstadoOT, patente: r.patente, marca: r.marca, modelo: r.modelo, fechaPrometida: r.fecha_prometida, fechaIngreso: r.fecha_ingreso, mostrarFecha: !!r.mostrar, zona },
+    { taller: r.taller, logo: !!r.logo, cliente: r.cliente, numero: r.numero, estado: r.estado as EstadoOT, patente: r.patente, marca: r.marca, modelo: r.modelo, fechaPrometida: r.fecha_prometida, fechaIngreso: r.fecha_ingreso, mostrarFecha: !!r.mostrar, zona },
     visibles,
     mensaje,
     fechaLocal(ahora(), zona),
+    pago,
   );
 }

@@ -37,9 +37,9 @@ No se creó ningún sistema paralelo. `ordenes.estado` sigue siendo la única fu
 
 ## 3. Qué muestra la página (y qué no)
 
-Muestra: nombre del taller, referencia de la orden (N° con ceros), marca y modelo, **patente parcialmente oculta** (`AB•••CD`, `ABC123` → `AB•••3`), estado actual con explicación breve, recorrido, historial, última actualización (último cambio de estado visible o mensaje publicado), fecha estimada de entrega (si existe y corresponde) y el mensaje público vigente.
+Muestra: nombre y logotipo del taller, **el cliente responsable de esa orden (sólo el nombre; Sprint 25)**, referencia de la orden (N° con ceros), marca y modelo, **patente parcialmente oculta** (`AB•••CD`, `ABC123` → `AB•••3`), estado actual con explicación breve, recorrido, historial, última actualización (último cambio de estado visible o mensaje publicado), fecha estimada de entrega (si existe y corresponde), el mensaje público vigente y —desde el Sprint 25— el **resumen de pago** (importe total, abonado y saldo globales, elección del medio, datos bancarios del taller y comprobantes; ver `docs/PAGOS_CLIENTE.md`).
 
-**Nunca** muestra ni devuelve: nombre del cliente, teléfono, dirección, datos fiscales, precios, costos, márgenes, notas internas, la nota del cambio de estado, diagnósticos, fotografías, firmas, kilometraje, mecánico ni identificadores internos (ids de orden, taller, cliente, vehículo o evento). La consulta pública es **propia y acotada** (`consultarSeguimiento` en `worker/lib/seguimiento.ts`): lee sólo las columnas que se muestran y arma un objeto con campos fijos; no reutiliza el detalle de la OT. Dos pruebas automáticas lo verifican: buscan datos privados sembrados a propósito en la página y en el JSON, y comparan las claves del JSON contra la lista prevista.
+**Nunca** muestra ni devuelve: teléfono, dirección, DNI/CUIT ni correo del cliente, otros clientes vinculados al vehículo, desglose de precios, repuestos o mano de obra, costos, márgenes, notas internas, la nota del cambio de estado, diagnósticos, fotografías, firmas, kilometraje, mecánico ni identificadores internos (ids de orden, taller, cliente, vehículo, evento o comprobante). El cliente que se muestra es el de **la orden** (`ordenes.cliente_id`), no el titular actual del vehículo (el sistema admite varios clientes y cambios de titular). La consulta pública es **propia y acotada** (`consultarSeguimiento` en `worker/lib/seguimiento.ts`): lee sólo las columnas que se muestran y arma un objeto con campos fijos; no reutiliza el detalle de la OT. Dos pruebas automáticas lo verifican: buscan datos privados sembrados a propósito en la página y en el JSON, y comparan las claves del JSON contra la lista prevista.
 
 **Fecha estimada.** Se reutiliza `ordenes.fecha_prometida` (no se modificó ningún cálculo ni planificación). Sólo se muestra mientras la orden está en curso, si el taller no la ocultó, y siempre como *estimación* («puede cambiar»). Una fecha **vencida** no se presenta como compromiso vigente: aparece «Estaba prevista para el dd/mm/aaaa… consultá con el taller».
 
@@ -57,8 +57,8 @@ Muestra: nombre del taller, referencia de la orden (N° con ceros), marca y mode
 | Rate limiting | Por origen (`cf-connecting-ip`), con el mecanismo de `limites_intentos` ya existente: 20 intentos fallidos en 10 minutos → bloqueo de 15 (429). Los accesos válidos no escriben nada en la base. |
 | Sin indexación | `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet`, `<meta name="robots">` y `public/robots.txt` con `Disallow: /seguimiento/`. |
 | Sin caché | `Cache-Control: private, no-store, max-age=0` + `Pragma: no-cache` (página, JSON y errores); sin cookies. |
-| Token fuera de cabeceras de referencia | `Referrer-Policy: no-referrer`; la página no carga ningún recurso externo (ni tipografías, ni imágenes, ni scripts) y no tiene JavaScript. |
-| CSP | `default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` + `X-Frame-Options: DENY`. |
+| Token fuera de cabeceras de referencia | `Referrer-Policy: no-referrer`; la página no carga ningún recurso externo (ni tipografías, ni imágenes de terceros, ni scripts de terceros). Desde el Sprint 25 tiene **un único script en línea** (copiar alias, vista previa del archivo, evitar el doble envío), autorizado por un *nonce* distinto en cada respuesta; el resto funciona con formularios comunes sin JavaScript. |
+| CSP | `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' blob:; script-src 'nonce-…'; connect-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'` + `X-Frame-Options: DENY` (Sprint 25; antes era `form-action 'none'` y sin script). |
 | Token fuera de los registros | La aplicación no lo imprime ni lo guarda en auditoría, errores ni límites (probado). Los errores se guardan con la ruta normalizada (`/seguimiento/:id`). |
 | Aislamiento por `taller_id` | Todas las operaciones de gestión toman el taller de la sesión; con dos talleres se prueba que cada uno recibe 404 en todo lo del otro. |
 
@@ -85,7 +85,7 @@ La copia del cliente del PDF (`GET /api/ordenes/:id/pdf?copia=cliente`) exige `o
 
 ## 7. Endpoints
 
-Públicos (sin sesión): `GET /seguimiento/:token` (página HTML) y `GET /api/seguimiento/:token` (JSON). El Worker atiende `/seguimiento/*` antes que los assets (`run_worker_first` en `wrangler.jsonc`).
+Públicos (sin sesión): `GET /seguimiento/:token` (página HTML), `GET /seguimiento/:token/logo` (logotipo del taller), `POST /seguimiento/:token/medio` y `POST /seguimiento/:token/comprobante` (formularios de pago, Sprint 25; **no generan cobros**) y `GET /api/seguimiento/:token` (JSON). El Worker atiende `/seguimiento/*` antes que los assets (`run_worker_first` en `wrangler.jsonc`). Todas las acciones vuelven a resolver el token con `activo = 1`: desactivar o regenerar el enlace las corta al instante.
 
 Con sesión, bajo `/api/ordenes/:id/seguimiento`: `GET` · `POST /activar` · `POST /desactivar` · `POST /regenerar` · `PATCH` (`mostrar_fecha_estimada`) · `PUT /transiciones/:eventoId` (`visible`) · `POST /mensajes` · `DELETE /mensajes/:mid`. Todas devuelven el estado completo y ninguna incluye precios, costos, notas ni datos del cliente.
 

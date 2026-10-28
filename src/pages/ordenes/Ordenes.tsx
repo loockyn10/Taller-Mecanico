@@ -8,6 +8,7 @@ import { fecha, money, numero } from '@/lib/format';
 import { Boton, Buscador, Cargando, cn, Encabezado, ErrorCaja, Segmentado, Select, Tabla, Tarjeta, useDebounce, Vacio } from '@/components/ui';
 import { EstadoOTBadge, TONO_OT } from '@/components/estados';
 import { useMecanicos } from '@/components/selectores';
+import { usePagosPendientes } from '@/components/PagoCliente';
 import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADO_OT_LABEL } from '@shared/dominio';
 
 const BORDE: Record<string, string> = {
@@ -19,24 +20,39 @@ export function Ordenes() {
   const { puede } = useAuth();
   const [sp, setSp] = useSearchParams();
   const estado = sp.get('estado') ?? 'abiertas';
+  // Filtro de los comprobantes de transferencia pendientes de verificar (se abre desde el aviso discreto de esta pantalla y de Inicio).
+  const comprobantes = sp.get('comprobantes') === 'pendientes' ? 'pendientes' : '';
+  const { data: pagos } = usePagosPendientes();
   const [vista, setVista] = useState<'tablero' | 'lista'>(() => (localStorage.getItem('fierro.vistaOT') as 'tablero' | 'lista') ?? 'tablero');
   const [q, setQ] = useState('');
   const [mecanico, setMecanico] = useState('');
   const dq = useDebounce(q);
   const { data: mecanicos = [] } = useMecanicos();
   const { data = [], isLoading, error, refetch } = useQuery({
-    queryKey: ['ordenes', { estado, dq, mecanico }],
-    queryFn: () => api.get<any[]>(`/ordenes${qs({ estado, q: dq, mecanico_id: mecanico })}`),
+    queryKey: ['ordenes', { estado, dq, mecanico, comprobantes }],
+    queryFn: () => api.get<any[]>(`/ordenes${qs({ estado: comprobantes ? 'todas' : estado, q: dq, mecanico_id: mecanico, comprobantes })}`),
   });
   const cambiarVista = (v: 'tablero' | 'lista') => {
     setVista(v);
     localStorage.setItem('fierro.vistaOT', v);
   };
-  const tablero = vista === 'tablero' && estado === 'abiertas';
+  const tablero = vista === 'tablero' && estado === 'abiertas' && !comprobantes;
 
   return (
     <>
       <Encabezado titulo="Órdenes de trabajo" subtitulo="Seguimiento de los vehículos en el taller" acciones={puede('ordenes.crear') && <Boton variante="primario" icono={<Plus className="size-4" />} onClick={() => nav('/ordenes/nueva')}>Nueva OT</Boton>} />
+      {pagos && pagos.total > 0 && !comprobantes && (
+        <Link to="/ordenes?comprobantes=pendientes" className="mb-3 flex items-center justify-between gap-3 rounded-card border border-amber-200 bg-amber-50 px-3.5 py-2 text-sm text-amber-900 hover:bg-amber-100">
+          <span><strong>{pagos.total}</strong> {pagos.total === 1 ? 'comprobante pendiente' : 'comprobantes pendientes'} de verificar</span>
+          <span className="font-medium">Ver órdenes →</span>
+        </Link>
+      )}
+      {comprobantes && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-card border border-amber-200 bg-amber-50 px-3.5 py-2 text-sm text-amber-900">
+          <span>Mostrando las órdenes con comprobantes de transferencia pendientes de verificar</span>
+          <button type="button" className="font-medium underline" onClick={() => setSp({})}>Quitar filtro</button>
+        </div>
+      )}
       <div className="filtros mb-4 flex flex-wrap items-center gap-2">
         <Buscador value={q} onChange={setQ} placeholder="Patente, cliente o N° de OT" className="min-w-56 flex-1" />
         <Select value={estado} onChange={(e) => setSp(e.target.value === 'abiertas' ? {} : { estado: e.target.value })} className="w-auto">

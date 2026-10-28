@@ -10,6 +10,7 @@
 import type { Permiso } from '../../shared/permisos';
 import { Documento, MM, type ImagenJpeg, type Pagina } from './pdf/escritor';
 import { anchoTexto, envolver, recortar, type Fuente } from './pdf/metricas';
+import { dineroAR } from '../../shared/pago-portal';
 
 // ───────────────────────── Datos ─────────────────────────
 
@@ -29,6 +30,11 @@ export interface DatosHoja {
   observaciones: string | null;
   trabajos: Array<{ descripcion: string; cantidad: number }>;
   repuestos: Array<{ descripcion: string; cantidad: number; unidad: string | null }>;
+  /**
+   * Pago del cliente (medio elegido, estado y saldo). Sólo lo llevan las copias con `datosPago` y sólo se lee con permiso de ver ventas: la copia del mecánico
+   * nunca lo recibe, quien la imprima. Sin elección ni comprobantes (o sin importe informado) llega vacío y la copia no dibuja la sección.
+   */
+  pago?: { medio: string | null; estado: string; saldo: number | null } | null;
   zonaHoraria: string;
   impresoAt: Date;
 }
@@ -36,7 +42,7 @@ export interface DatosHoja {
 // ───────────────────────── Variantes ─────────────────────────
 
 export type VarianteId = 'mecanico' | 'administracion';
-export type SeccionId = 'identidad' | 'datos' | 'motivo' | 'trabajos' | 'repuestos' | 'diagnostico' | 'observaciones';
+export type SeccionId = 'identidad' | 'datos' | 'motivo' | 'trabajos' | 'repuestos' | 'diagnostico' | 'observaciones' | 'pago';
 
 export interface DefVariante {
   id: VarianteId;
@@ -52,6 +58,8 @@ export interface DefVariante {
   anotaciones: { titulo: string } | null;
   /** Si la copia muestra los datos del cliente. La del mecánico nunca (privacidad por tipo de documento, no por quién imprime). */
   datosCliente: boolean;
+  /** Si la copia muestra el pago del cliente (sólo administración; la del mecánico nunca lleva información financiera). */
+  datosPago: boolean;
 }
 
 /**
@@ -67,15 +75,17 @@ export const VARIANTES: Record<VarianteId, DefVariante> = {
     secciones: ['identidad', 'datos', 'motivo', 'trabajos', 'repuestos', 'diagnostico', 'observaciones'],
     anotaciones: { titulo: 'ANOTACIONES DEL MECÁNICO' },
     datosCliente: false,
+    datosPago: false,
   },
   administracion: {
     id: 'administracion',
     rotulo: 'COPIA ADMINISTRACIÓN',
     archivo: 'administracion',
     permisos: ['ordenes.imprimir', 'ordenes.imprimir_administracion'],
-    secciones: ['identidad', 'datos', 'motivo', 'trabajos', 'repuestos', 'diagnostico', 'observaciones'],
+    secciones: ['identidad', 'datos', 'motivo', 'trabajos', 'repuestos', 'diagnostico', 'observaciones', 'pago'],
     anotaciones: { titulo: 'ANOTACIONES DEL MECÁNICO' },
     datosCliente: true,
+    datosPago: true,
   },
 };
 
@@ -392,6 +402,21 @@ function seccionRepuestos(titulo: string, filas: Array<{ cant: string; texto: st
   return [tituloSeccion(titulo), ...elementos, separador()];
 }
 
+/** Pago del cliente (copia de administración): medio elegido, estado del pago y saldo pendiente. No se dibuja si el cliente todavía no eligió nada. */
+function seccionPago({ d }: Contexto): Elemento[] {
+  const p = d.pago;
+  if (!p) return [];
+  return [
+    tituloSeccion('PAGO DEL CLIENTE'),
+    filaDatos([
+      { etiqueta: 'MEDIO ELEGIDO', valor: p.medio ?? 'Sin elegir', x: PAGINA.izq, ancho: 46 },
+      { etiqueta: 'ESTADO DEL PAGO', valor: p.estado, x: 64, ancho: 92 },
+      { etiqueta: 'SALDO PENDIENTE', valor: p.saldo != null ? dineroAR(p.saldo) : '', x: 158, ancho: PAGINA.der - 158, negrita: true },
+    ]),
+    separador(3),
+  ];
+}
+
 const SECCIONES: Record<SeccionId, (c: Contexto) => Elemento[]> = {
   identidad: seccionIdentidad,
   datos: seccionDatos,
@@ -400,6 +425,7 @@ const SECCIONES: Record<SeccionId, (c: Contexto) => Elemento[]> = {
   repuestos: ({ d }) => seccionRepuestos('REPUESTOS Y MATERIALES', d.repuestos.map((r) => ({ texto: r.descripcion, cant: `${cantidadTexto(r.cantidad)}${r.unidad && r.unidad !== 'un' ? ` ${r.unidad}` : ''}` }))),
   diagnostico: ({ d }) => seccionTexto('DIAGNÓSTICO PREVIO', d.diagnostico),
   observaciones: ({ d }) => seccionTexto('OBSERVACIONES', d.observaciones),
+  pago: seccionPago,
 };
 
 // ── Encabezado compacto de las hojas de continuación ──
@@ -482,7 +508,9 @@ function zonaAnotaciones(p: Pagina, titulo: string, desde: number) {
 
 function dibujarVariante(doc: Documento, datos: DatosHoja, v: DefVariante, logo: ImagenJpeg | null, foto: ImagenJpeg | null): number {
   // Defensa en profundidad: una copia sin datos del cliente recibe una versión de los datos donde el cliente ya no existe.
-  const d: DatosHoja = v.datosCliente ? datos : { ...datos, cliente: { visible: false, nombre: null, telefono: null } };
+  const sinCliente: DatosHoja = v.datosCliente ? datos : { ...datos, cliente: { visible: false, nombre: null, telefono: null } };
+  // Lo mismo con la información financiera: una copia que no la lleva recibe los datos sin ella.
+  const d: DatosHoja = v.datosPago ? sinCliente : { ...sinCliente, pago: null };
   const ctx: Contexto = { d, v, logo, foto };
   const elementos = v.secciones.flatMap((s) => SECCIONES[s](ctx));
   const hojas = paginar(elementos, encabezadoContinuacion(ctx));

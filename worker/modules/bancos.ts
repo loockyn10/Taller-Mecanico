@@ -93,9 +93,11 @@ bancos.put('/cuentas/:id', async (c) => {
     const pend = await first<{ n: number }>(c.env.DB, "SELECT COUNT(*) AS n FROM cheques WHERE taller_id = ? AND cuenta_id = ? AND estado = 'depositado'", s.tallerId, id);
     if (pend?.n) throw conflict('La cuenta tiene cheques depositados pendientes de acreditar', 'cuenta_con_cheques');
   }
-  const cols = ['nombre', 'banco', 'tipo', 'alias', 'cbu', 'titular', 'cuit_titular', 'moneda', 'saldo_inicial', 'fecha_saldo_inicial', 'notas', 'activa'] as const;
+  const cols = ['nombre', 'banco', 'tipo', 'alias', 'cbu', 'titular', 'cuit_titular', 'moneda', 'saldo_inicial', 'fecha_saldo_inicial', 'notas', 'activa', 'publica_en_portal'] as const;
   const datos: Record<string, unknown> = { ...d };
   if (d.activa !== undefined) datos.activa = d.activa ? 1 : 0;
+  // Una cuenta desactivada deja de publicarse en el portal de los clientes (no se les muestra una cuenta que el taller ya no usa).
+  if (d.activa === false) datos.publica_en_portal = 0;
   const keys = cols.filter((k) => datos[k] !== undefined);
   if (!keys.length) return c.json({ ok: true });
   await c.env.DB.batch([
@@ -103,6 +105,35 @@ bancos.put('/cuentas/:id', async (c) => {
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'cuenta_bancaria', id, 'modificar', d),
   ]);
   return c.json({ ok: true });
+});
+
+/**
+ * Cuenta que el taller publica en el portal de seguimiento para que sus clientes le transfieran (Sprint 25). Se reutiliza la cuenta ya cargada: titular, banco, alias y CBU
+ * son los de siempre. Una sola por taller (la base lo garantiza); publicar otra reemplaza a la anterior. Solo quien gestiona los bancos puede cambiarla; el público nunca elige cuenta.
+ */
+bancos.put('/cuentas/:id/portal', async (c) => {
+  const s = c.get('sesion');
+  const id = c.req.param('id');
+  const { publicar } = await body(c, z.object({ publicar: z.boolean() }));
+  const cuenta = await first<{ nombre: string; activa: number; moneda: string; alias: string | null; cbu: string | null; titular: string | null }>(
+    c.env.DB, 'SELECT nombre, activa, moneda, alias, cbu, titular FROM cuentas_bancarias WHERE taller_id = ? AND id = ?', s.tallerId, id,
+  );
+  if (!cuenta) throw notFound('Cuenta bancaria');
+  if (publicar) {
+    if (!cuenta.activa) throw badRequest('La cuenta está desactivada: no se puede publicar');
+    if (cuenta.moneda !== 'ARS') throw badRequest('Solo una cuenta en pesos puede recibir transferencias de clientes');
+    if (!cuenta.alias && !cuenta.cbu) throw badRequest('Cargá el alias o el CBU/CVU de la cuenta antes de publicarla: es lo que el cliente necesita para transferir');
+    if (!cuenta.titular?.trim()) throw badRequest('Cargá el titular de la cuenta antes de publicarla: el cliente lo ve para verificar la transferencia');
+  }
+  await c.env.DB.batch([
+    // Primero se libera la que estaba publicada, después se marca la nueva (el índice único parcial impide dos a la vez).
+    publicar
+      ? c.env.DB.prepare('UPDATE cuentas_bancarias SET publica_en_portal = 0 WHERE taller_id = ? AND publica_en_portal = 1 AND id <> ?').bind(s.tallerId, id)
+      : c.env.DB.prepare('UPDATE cuentas_bancarias SET publica_en_portal = 0 WHERE taller_id = ? AND id = ?').bind(s.tallerId, id),
+    ...(publicar ? [c.env.DB.prepare('UPDATE cuentas_bancarias SET publica_en_portal = 1 WHERE taller_id = ? AND id = ?').bind(s.tallerId, id)] : []),
+    auditar(c.env.DB, s.tallerId, s.usuarioId, 'cuenta_bancaria', id, publicar ? 'publicar_portal' : 'despublicar_portal', { nombre: cuenta.nombre }),
+  ]);
+  return c.json({ ok: true, publica_en_portal: publicar });
 });
 
 // ───────────── Movimientos ─────────────

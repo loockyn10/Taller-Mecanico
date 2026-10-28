@@ -48,6 +48,7 @@ export function traducirErrorDb(e: unknown): ApiError | null {
     if (msg.includes('patente')) return conflict('Ya existe un vehículo con esa patente en el taller', 'duplicado');
     if (msg.includes('email')) return conflict('Ya existe un usuario con ese email', 'duplicado');
     if (msg.includes('idem_key')) return conflict('La operación ya fue registrada', 'duplicado');
+    if (msg.includes('idx_pago_comprobantes_cobro') || msg.includes('pago_comprobantes.taller_id, pago_comprobantes.cobro_id')) return conflict('Ese cobro ya respalda otro comprobante', 'cobro_ya_vinculado');
     if (msg.includes('idx_ordenes_presupuesto') || msg.includes('ordenes.taller_id, ordenes.presupuesto_id'))
       return conflict('El presupuesto ya fue convertido en una OT', 'duplicado');
     if (msg.includes('ventas.taller_id, ventas.orden_id')) return conflict('La OT ya tiene un comprobante vigente', 'duplicado');
@@ -66,6 +67,8 @@ export function traducirErrorDb(e: unknown): ApiError | null {
     return conflict('Registro duplicado', 'duplicado');
   }
   if (msg.includes('ck_registro_confirmado_inmutable') || msg.includes('ck_firma_inmutable') || msg.includes('ck_foto_inmutable')) return conflict('El registro está confirmado y no se puede modificar: creá una corrección (revisión) para conservar el original', 'confirmado');
+  if (msg.includes('pago_comprobante_resuelto')) return conflict('Ese comprobante ya fue resuelto (confirmado o rechazado) y no se puede modificar', 'comprobante_resuelto');
+  if (msg.includes('pago_comprobante_inmutable') || msg.includes('pago_eleccion_inmutable')) return conflict('El historial de pagos del cliente no se modifica ni se borra', 'inmutable');
   if (msg.includes('ck_mp_regularizado')) return conflict('El importe supera el saldo pendiente de la obligación: otra operación ya lo regularizó', 'saldo_excedido');
   if (msg.includes('ck_mp_origen_invalido')) return conflict('La obligación que se regulariza no existe, está anulada o no corresponde a esa persona', 'obligacion_invalida');
   if (msg.includes('ck_mp_con_regularizaciones')) return conflict('El movimiento tiene devoluciones o aplicaciones vigentes: anulalas primero', 'tiene_regularizaciones');
