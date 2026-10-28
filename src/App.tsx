@@ -57,6 +57,7 @@ const Productividad = lazy(() => import('./pages/Productividad').then((m) => ({ 
 const PuestaEnMarcha = lazy(() => import('./pages/config/PuestaEnMarcha').then((m) => ({ default: m.PuestaEnMarcha })));
 const Importar = lazy(() => import('./pages/config/Importar').then((m) => ({ default: m.Importar })));
 const Contabilidad = lazy(() => import('./pages/Contabilidad').then((m) => ({ default: m.Contabilidad })));
+const MovimientosPersonas = lazy(() => import('./pages/finanzas/MovimientosPersonas').then((m) => ({ default: m.MovimientosPersonas })));
 
 /** Información técnica general: la ve quien trabaja con vehículos, consulta el catálogo o tiene órdenes asignadas (sin exigir precios, finanzas ni estadísticas). */
 const PERMISOS_CATALOGO_AUTO: Permiso[] = ['vehiculos.ver', 'catalogo.ver', 'ordenes.asignadas'];
@@ -141,6 +142,7 @@ export function App() {
         <Route path="reposicion" element={<Requiere permiso="stock.ver"><Reposicion /></Requiere>} />
         <Route path="reportes" element={<Requiere permiso="reportes.ver"><Reportes /></Requiere>} />
         <Route path="informes" element={<Requiere permiso="reportes.ver"><Informes /></Requiere>} />
+        <Route path="movimientos-personas" element={<Requiere permiso="movpersonas.ver"><MovimientosPersonas /></Requiere>} />
         <Route path="contabilidad" element={<Requiere permiso="contabilidad.ver"><Contabilidad /></Requiere>} />
         <Route path="tesoreria" element={<Requiere permiso="tesoreria.ver"><Tesoreria /></Requiere>} />
         <Route path="bancos" element={<Requiere permiso="bancos.ver"><Bancos /></Requiere>} />

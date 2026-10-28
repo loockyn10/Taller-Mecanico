@@ -146,6 +146,18 @@ export async function controles(db: D1Database, tallerId: string, opciones: { va
   );
   out.push(cmp('cheques_emitidos', 'Cheques propios pendientes = cheques emitidos entregados sin acreditar', saldoRol('cheques_emitidos'), emi?.v ?? 0, 'Los cheques propios pendientes coinciden con la cartera de cheques emitidos.'));
 
+  // ── Movimientos con personas: cada obligación pendiente (saldo = importe − regularizado, sin anulados) debe coincidir con su cuenta contable.
+  const obl = await all<{ tipo_fin: string; v: number }>(
+    db,
+    `SELECT tipo_fin, COALESCE(SUM(importe - regularizado), 0) AS v FROM movimientos_personas
+      WHERE taller_id = ? AND estado = 'registrado' AND moneda = 'ARS' AND tipo_fin IN ('prestamo_recibido','prestamo_otorgado','adelanto_sueldo') GROUP BY tipo_fin`,
+    t,
+  );
+  const pendTf = (tf: string) => obl.find((x) => x.tipo_fin === tf)?.v ?? 0;
+  out.push(cmp('prestamos_personal', 'Préstamos otorgados = lo que las personas deben a la empresa por préstamos', saldoRol('prestamos_al_personal'), pendTf('prestamo_otorgado'), 'La cuenta contable coincide con los saldos pendientes de préstamos otorgados.', 'Revisá movimientos con personas sin contabilizar o asientos manuales sobre esa cuenta.'));
+  out.push(cmp('adelantos_personal', 'Adelantos de sueldo = adelantos pendientes de aplicar', saldoRol('adelantos_personal'), pendTf('adelanto_sueldo'), 'La cuenta contable coincide con los adelantos de sueldo pendientes de aplicar.', 'Revisá movimientos con personas sin contabilizar o asientos manuales sobre esa cuenta.'));
+  out.push(cmp('prestamos_de_personas', 'Préstamos recibidos = lo que la empresa debe a socios y otras personas', saldoRol('prestamos_de_personas'), pendTf('prestamo_recibido'), 'La cuenta contable coincide con los saldos pendientes de préstamos recibidos.', 'Revisá movimientos con personas sin contabilizar o asientos manuales sobre esa cuenta.'));
+
   const trans = saldoRol('transferencias_transito');
   out.push({ clave: 'transferencias', titulo: 'Transferencias entre cuentas propias compensadas', estado: trans === 0 ? 'ok' : 'diferencia', contable: trans, operativo: 0, diferencia: trans, detalle: trans === 0 ? 'Cada transferencia tiene su salida y su entrada: no generó ingresos ni gastos.' : 'Hay transferencias con una sola pata registrada.' });
   const ajb = saldoRol('ajustes_bancarios');

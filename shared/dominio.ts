@@ -130,7 +130,7 @@ export const FRECUENCIA_GASTO_LABEL: Record<FrecuenciaGasto, string> = {
   anual: 'Anual',
 };
 
-export const RUBROS_CAJA = ['cobro', 'pago_proveedor', 'gasto', 'otro_ingreso', 'traspaso', 'devolucion'] as const;
+export const RUBROS_CAJA = ['cobro', 'pago_proveedor', 'gasto', 'otro_ingreso', 'traspaso', 'devolucion', 'persona'] as const;
 export type RubroCaja = (typeof RUBROS_CAJA)[number];
 export const RUBRO_CAJA_LABEL: Record<RubroCaja, string> = {
   cobro: 'Cobros de clientes',
@@ -139,6 +139,7 @@ export const RUBRO_CAJA_LABEL: Record<RubroCaja, string> = {
   otro_ingreso: 'Otros ingresos',
   traspaso: 'Traspasos con bancos',
   devolucion: 'Reintegros a clientes',
+  persona: 'Movimientos con personas',
 };
 
 export const DESTINOS_PRECIO_BASE = ['costo', 'precio'] as const;

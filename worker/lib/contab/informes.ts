@@ -310,7 +310,7 @@ export async function estadoResultados(db: D1Database, tallerId: string, desde: 
 export async function flujoDeCaja(db: D1Database, tallerId: string, desde: string, hasta: string) {
   const [rubros, banco] = await Promise.all([
     all<{ rubro: string; neto: number }>(
-      db, `SELECT rubro, SUM(CASE tipo WHEN 'ingreso' THEN importe ELSE -importe END) AS neto FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro <> 'traspaso' GROUP BY rubro`, tallerId, desde, hasta,
+      db, `SELECT rubro, SUM(CASE tipo WHEN 'ingreso' THEN importe ELSE -importe END) AS neto FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro NOT IN ('traspaso','persona') GROUP BY rubro`, tallerId, desde, hasta,
     ),
     first<{ ingresos: number; egresos: number }>(
       db,

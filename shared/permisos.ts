@@ -73,6 +73,13 @@ export const PERMISOS = [
   'tesoreria.ver', // tablero de tesorería
   'contabilidad.ver', // contabilidad de gestión: plan de cuentas, asientos, libros, balance, resultados y controles
   'contabilidad.gestionar', // administrar el plan de cuentas y registrar, revertir y corregir asientos manuales
+  // ── Movimientos financieros con personas (aportes, préstamos, adelantos): información sensible, nunca se otorga por defecto a personal operativo
+  'movpersonas.ver', // consultar movimientos, saldos pendientes y personas
+  'movpersonas.registrar', // registrar aportes, retiros, préstamos y devoluciones, y dar de alta personas
+  'movpersonas.regularizar', // aplicar un adelanto de sueldo contra una liquidación (requiere autorización y deja constancia)
+  'movpersonas.anular', // anular un movimiento (contra-asiento en caja, bancos y contabilidad)
+  'movpersonas.administrar', // categorías propias y datos de las personas
+  'movpersonas.reportes', // totales y resúmenes por persona, categoría y período
   // ── Informes
   'reportes.ver', // estadísticas e informes
   'productividad.ver', // indicadores operativos de mecánicos y taller (horas, tareas, carga de trabajo)
@@ -135,6 +142,11 @@ export const REQUIERE: Partial<Record<Permiso, readonly Permiso[]>> = {
   'bancos.gestionar': ['bancos.ver'],
   'bancos.ajustar': ['bancos.gestionar'],
   'contabilidad.gestionar': ['contabilidad.ver'],
+  'movpersonas.registrar': ['movpersonas.ver'],
+  'movpersonas.regularizar': ['movpersonas.registrar'],
+  'movpersonas.anular': ['movpersonas.ver'],
+  'movpersonas.administrar': ['movpersonas.ver'],
+  'movpersonas.reportes': ['movpersonas.ver'],
   'aperturas.gestionar': ['compras.ver'],
   'permisos.gestionar': ['usuarios.gestionar'],
   'asistencia.corregir': ['asistencia.ver'],
@@ -334,6 +346,12 @@ export const INFO_PERMISOS: Record<Permiso, InfoPermiso> = {
   'tesoreria.ver': { etiqueta: 'Ver tesorería' },
   'contabilidad.ver': { etiqueta: 'Ver la contabilidad', ayuda: 'Plan de cuentas, libro diario y mayor, balance, estado de resultados, controles y registros internos. Información de gestión: no son libros fiscales' },
   'contabilidad.gestionar': { etiqueta: 'Gestionar la contabilidad', ayuda: 'Modificar el plan de cuentas y registrar, revertir y corregir asientos manuales' },
+  'movpersonas.ver': { etiqueta: 'Ver movimientos con personas', ayuda: 'Aportes de capital, préstamos de socios, préstamos y adelantos al personal, y lo que cada persona debe. Información sensible' },
+  'movpersonas.registrar': { etiqueta: 'Registrar movimientos con personas', ayuda: 'Aportes, retiros, préstamos, devoluciones y adelantos de sueldo; también dar de alta socios y otras personas' },
+  'movpersonas.regularizar': { etiqueta: 'Aplicar adelantos de sueldo', ayuda: 'Regularizar un adelanto contra una liquidación. Exige indicar quién autorizó el descuento; no es una autorización legal por sí sola' },
+  'movpersonas.anular': { etiqueta: 'Anular movimientos con personas', ayuda: 'Genera el contra-asiento en caja, bancos y contabilidad; queda quién, cuándo y por qué' },
+  'movpersonas.administrar': { etiqueta: 'Administrar categorías y personas', ayuda: 'Categorías propias (sobre los tipos financieros admitidos) y datos de las personas' },
+  'movpersonas.reportes': { etiqueta: 'Ver totales y resúmenes de personas', ayuda: 'Cuánto aportó, retiró, debe o recibió cada persona y total por categoría y período' },
   'reportes.ver': { etiqueta: 'Ver estadísticas e informes' },
   'informes.exportar': { etiqueta: 'Exportar informes' },
   'productividad.ver': { etiqueta: 'Ver productividad', ayuda: 'Horas, tareas y carga de trabajo del taller y de cada mecánico. Los importes requieren además ver presupuestos valorizados' },
@@ -362,6 +380,7 @@ export const GRUPOS_PERMISOS: Array<{ titulo: string; permisos: Permiso[] }> = [
   { titulo: 'Ventas y cobranzas', permisos: ['ventas.ver', 'ventas.emitir', 'ventas.anular', 'cobros.registrar', 'cobros.anular'] },
   { titulo: 'Compras', permisos: ['compras.ver', 'compras.gestionar'] },
   { titulo: 'Caja, bancos y finanzas', permisos: ['caja.operar', 'finanzas.ver', 'gastos.gestionar', 'bancos.ver', 'bancos.gestionar', 'bancos.ajustar', 'cheques.gestionar', 'tesoreria.ver', 'contabilidad.ver', 'contabilidad.gestionar'] },
+  { titulo: 'Movimientos con personas (socios y personal)', permisos: ['movpersonas.ver', 'movpersonas.registrar', 'movpersonas.regularizar', 'movpersonas.anular', 'movpersonas.administrar', 'movpersonas.reportes'] },
   { titulo: 'Informes', permisos: ['reportes.ver', 'informes.exportar', 'productividad.ver'] },
   { titulo: 'Personal y asistencia', permisos: ['usuarios.gestionar', 'permisos.gestionar', 'asistencia.fichar', 'asistencia.ver', 'asistencia.corregir', 'reloj.administrar'] },
   { titulo: 'Administración', permisos: ['config.editar', 'datos.importar', 'aperturas.gestionar', 'licencia.ver', 'registros.eliminar', 'fechas.retroactivas'] },

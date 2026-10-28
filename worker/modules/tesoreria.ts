@@ -54,7 +54,7 @@ tesoreria.get('/resumen', async (c) => {
     efectivoEnCaja(db, t),
     all<any>(db, 'SELECT id, nombre, banco, moneda, activa FROM cuentas_bancarias WHERE taller_id = ? ORDER BY activa DESC, nombre', t),
     saldosCuentas(db, t),
-    all<{ rubro: string; neto: number }>(db, `SELECT rubro, SUM(${IMPORTE_FIRMADO_SQL}) AS neto FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro <> 'traspaso' GROUP BY rubro`, t, desde, hasta),
+    all<{ rubro: string; neto: number }>(db, `SELECT rubro, SUM(${IMPORTE_FIRMADO_SQL}) AS neto FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro NOT IN ('traspaso','persona') GROUP BY rubro`, t, desde, hasta),
     first<{ ingresos: number; egresos: number }>(
       db,
       `SELECT COALESCE(SUM(CASE WHEN m.tipo = 'ingreso' THEN m.importe END), 0) AS ingresos, COALESCE(SUM(CASE WHEN m.tipo = 'egreso' THEN m.importe END), 0) AS egresos
@@ -88,7 +88,7 @@ tesoreria.get('/resumen', async (c) => {
          FROM cheques WHERE taller_id = ? AND estado IN ('en_cartera','depositado','entregado') GROUP BY direccion, estado`,
       h, sumarDias(h, alerta), h, sumarDias(h, alerta), h, sumarDias(h, alerta), t,
     ),
-    all(db, `SELECT fecha, SUM(CASE WHEN tipo = 'ingreso' THEN importe ELSE 0 END) AS ingresos, SUM(CASE WHEN tipo = 'egreso' THEN importe ELSE 0 END) AS egresos FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro <> 'traspaso' GROUP BY fecha ORDER BY fecha`, t, desde, hasta),
+    all(db, `SELECT fecha, SUM(CASE WHEN tipo = 'ingreso' THEN importe ELSE 0 END) AS ingresos, SUM(CASE WHEN tipo = 'egreso' THEN importe ELSE 0 END) AS egresos FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro NOT IN ('traspaso','persona') GROUP BY fecha ORDER BY fecha`, t, desde, hasta),
     all(
       db,
       `SELECT m.fecha, SUM(CASE WHEN m.tipo = 'ingreso' THEN m.importe ELSE 0 END) AS ingresos, SUM(CASE WHEN m.tipo = 'egreso' THEN m.importe ELSE 0 END) AS egresos

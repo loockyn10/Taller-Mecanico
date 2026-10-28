@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import {
   Banknote, BarChart3, Bell, Boxes, Calculator, CalendarDays, Car, ClipboardCheck, ClipboardList, FileSpreadsheet, FileText, Gauge, Landmark, PackageSearch, Package, PiggyBank,
   Receipt, Scale, ScrollText, Settings, ShoppingCart, Tags, Truck, UserCog, Users, Wallet, Wrench, KeyRound, ShieldCheck, History, UserRound, BadgeDollarSign, ShoppingBasket,
-  Warehouse, Zap, Clock, MonitorSmartphone, Rocket, Upload, UsersRound, CalendarCheck, HardHat, Timer, Activity, BookOpen,
+  Warehouse, Zap, HandCoins, Clock, MonitorSmartphone, Rocket, Upload, UsersRound, CalendarCheck, HardHat, Timer, Activity, BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 import type { Permiso } from '@shared/permisos';
@@ -92,6 +92,7 @@ export const GRUPOS: GrupoNav[] = [
       item('bancos', 'Bancos', '/bancos', Landmark, 'cuentas conciliacion transferencias depositos', 'bancos.ver'),
       item('cheques', 'Cheques y eCheq', '/cheques', ScrollText, 'cheque echeq cartera', 'cheques.gestionar'),
       item('gastos', 'Gastos y finanzas', '/finanzas', PiggyBank, 'gastos egresos resultado recurrentes', 'finanzas.ver'),
+      item('mov-personas', 'Movimientos con personas', '/movimientos-personas', HandCoins, 'aportes capital socios prestamos adelantos sueldo personal empleados devoluciones retiros deuda propietario', 'movpersonas.ver'),
     ],
   },
   {

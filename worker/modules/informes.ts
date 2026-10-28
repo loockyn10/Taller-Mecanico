@@ -216,7 +216,7 @@ async function ordenesInforme({ db, t, f }: Ctx): Promise<Informe> {
 async function actividadFinanciera({ db, t, f }: Ctx): Promise<Informe> {
   const clave = f.agrupar === 'mes' ? 'substr(fecha,1,7)' : 'fecha';
   const [caja, banco] = await Promise.all([
-    all<any>(db, `SELECT ${clave} AS periodo, SUM(CASE WHEN tipo = 'ingreso' THEN importe ELSE 0 END) AS ingresos, SUM(CASE WHEN tipo = 'egreso' THEN importe ELSE 0 END) AS egresos FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro <> 'traspaso' GROUP BY periodo`, t, f.desde, f.hasta),
+    all<any>(db, `SELECT ${clave} AS periodo, SUM(CASE WHEN tipo = 'ingreso' THEN importe ELSE 0 END) AS ingresos, SUM(CASE WHEN tipo = 'egreso' THEN importe ELSE 0 END) AS egresos FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro NOT IN ('traspaso','persona') GROUP BY periodo`, t, f.desde, f.hasta),
     all<any>(db, `SELECT ${clave.replace('fecha', 'm.fecha')} AS periodo, SUM(CASE WHEN m.tipo = 'ingreso' THEN m.importe ELSE 0 END) AS ingresos, SUM(CASE WHEN m.tipo = 'egreso' THEN m.importe ELSE 0 END) AS egresos FROM banco_movimientos m JOIN cuentas_bancarias cb ON cb.taller_id = m.taller_id AND cb.id = m.cuenta_id WHERE m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.afecta_resultado = 1 AND cb.moneda = 'ARS' GROUP BY periodo`, t, f.desde, f.hasta),
   ]);
   const mapa = new Map<string, { periodo: string; ingresos: number; egresos: number }>();
@@ -458,12 +458,12 @@ informes.get('/contabilidad/resumen', requirePerm('contabilidad.ver'), async (c)
   const f = query(c, z.object({ desde: zFecha, hasta: zFecha }));
   const t = s.tallerId;
   const [rubros, bancarios, ventas, ivaCompras, ivaFacturas, porMes, devs] = await Promise.all([
-    all<{ rubro: string; neto: number }>(c.env.DB, `SELECT rubro, SUM(${IMPORTE_FIRMADO_SQL}) AS neto FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro <> 'traspaso' GROUP BY rubro`, t, f.desde, f.hasta),
+    all<{ rubro: string; neto: number }>(c.env.DB, `SELECT rubro, SUM(${IMPORTE_FIRMADO_SQL}) AS neto FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro NOT IN ('traspaso','persona') GROUP BY rubro`, t, f.desde, f.hasta),
     first<{ ingresos: number; egresos: number }>(c.env.DB, `SELECT COALESCE(SUM(CASE WHEN m.tipo='ingreso' THEN m.importe END),0) AS ingresos, COALESCE(SUM(CASE WHEN m.tipo='egreso' THEN m.importe END),0) AS egresos FROM banco_movimientos m JOIN cuentas_bancarias cb ON cb.taller_id=m.taller_id AND cb.id=m.cuenta_id WHERE m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.afecta_resultado = 1 AND cb.moneda='ARS'`, t, f.desde, f.hasta),
     first<any>(c.env.DB, "SELECT COALESCE(SUM(neto),0) AS neto, COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(total),0) AS total, COUNT(*) AS n FROM ventas WHERE taller_id = ? AND estado = 'emitida' AND fecha BETWEEN ? AND ?", t, f.desde, f.hasta),
     first<any>(c.env.DB, "SELECT COALESCE(SUM(neto),0) AS neto, COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(total),0) AS total, COUNT(*) AS n FROM compras WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?", t, f.desde, f.hasta),
     first<any>(c.env.DB, "SELECT COALESCE(SUM(CASE WHEN tipo LIKE 'nota_credito%' THEN -(iva_21+iva_10_5+iva_27) ELSE iva_21+iva_10_5+iva_27 END),0) AS iva, COALESCE(SUM(CASE WHEN tipo LIKE 'nota_credito%' THEN -neto_gravado ELSE neto_gravado END),0) AS neto, COUNT(*) AS n FROM facturas_proveedor WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ? AND (compra_id IS NULL OR tipo LIKE 'nota_credito%')", t, f.desde, f.hasta),
-    all(c.env.DB, `SELECT substr(fecha,1,7) AS mes, SUM(CASE WHEN tipo='ingreso' THEN importe ELSE 0 END) AS ingresos, SUM(CASE WHEN tipo='egreso' THEN importe ELSE 0 END) AS egresos FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro <> 'traspaso' GROUP BY mes ORDER BY mes`, t, f.desde, f.hasta),
+    all(c.env.DB, `SELECT substr(fecha,1,7) AS mes, SUM(CASE WHEN tipo='ingreso' THEN importe ELSE 0 END) AS ingresos, SUM(CASE WHEN tipo='egreso' THEN importe ELSE 0 END) AS egresos FROM caja_movimientos WHERE taller_id = ? AND fecha BETWEEN ? AND ? AND rubro NOT IN ('traspaso','persona') GROUP BY mes ORDER BY mes`, t, f.desde, f.hasta),
     first<any>(c.env.DB, "SELECT COALESCE(SUM(neto),0) AS neto, COALESCE(SUM(iva),0) AS iva, COALESCE(SUM(total),0) AS total FROM devoluciones WHERE taller_id = ? AND estado = 'registrada' AND fecha BETWEEN ? AND ?", t, f.desde, f.hasta),
   ]);
   const neto = (r: string) => rubros.find((x) => x.rubro === r)?.neto ?? 0;

@@ -733,4 +733,119 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(todos('PRAGMA foreign_key_check')).toEqual([]);
     db.close();
   });
+
+  it('0020 conserva el libro de caja y sus triggers contables, no toca ningún dato y la base protege los movimientos con personas', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    for (const m of fs.readdirSync(path.join(RAIZ, 'migrations')).sort().filter((x) => x < '0020')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all().map((r: any) => ({ ...r })) as Array<Record<string, any>>;
+    // Datos como los de producción: dos talleres (uno con contabilidad activada), una caja con movimientos de varios orígenes, un banco y personal.
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Uno'), ('t2', 'Taller Dos');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x'), ('u2', 't2', 'b@b.com', 'Otro', 'propietario', 'propietario', 'x');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash, acceso_erp) VALUES ('u3', 't1', 'sin-acceso@fierro.invalid', 'Martín', 'empleado', 'mecanico', 'sin-acceso', 0);
+      INSERT INTO contab_config (taller_id) VALUES ('t1');
+      INSERT INTO caja_sesiones (id, taller_id, numero, fecha, saldo_inicial, abierta_por) VALUES ('s1', 't1', 1, '2026-10-01', 1000, 'u1');
+      INSERT INTO caja_movimientos (id, taller_id, sesion_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES
+        ('cm1', 't1', 's1', 'ingreso', 'otro_ingreso', 'efectivo', 5000, 'Ingreso manual', 'manual', 'cm1', '2026-10-02'),
+        ('cm2', 't1', 's1', 'egreso', 'traspaso', 'efectivo', 700, 'Depósito', 'banco', 'dep1', '2026-10-03'),
+        ('cm3', 't1', NULL, 'ingreso', 'devolucion', 'efectivo', 300, 'Reintegro', 'reintegro', 'r1', '2026-10-04');
+      INSERT INTO cuentas_bancarias (id, taller_id, nombre, banco, saldo_inicial) VALUES ('cb1', 't1', 'Banco Uno', 'Banco', 0), ('cb2', 't2', 'Banco Dos', 'Banco', 0);
+    `);
+    const antesCaja = todos('SELECT * FROM caja_movimientos ORDER BY id');
+    const tablas = ['usuarios', 'cuentas_bancarias', 'caja_sesiones', 'talleres'];
+    const antes = tablas.map((t) => todos(`SELECT * FROM ${t} ORDER BY id`));
+    // D1 aplica cada migración dentro de una transacción: así se ensaya.
+    db.exec('BEGIN');
+    db.exec(leer('migrations', '0020_movimientos_personas.sql'));
+    db.exec('COMMIT');
+
+    // El libro de caja se reconstruyó sin perder ni cambiar una sola fila; los demás datos quedaron idénticos.
+    expect(todos('SELECT * FROM caja_movimientos ORDER BY id')).toEqual(antesCaja);
+    expect(tablas.map((t) => todos(`SELECT * FROM ${t} ORDER BY id`))).toEqual(antes);
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    expect(uno('PRAGMA integrity_check').integrity_check).toBe('ok');
+    // Sus índices antiduplicación y los triggers contables (que se pierden con el DROP) siguen vigentes.
+    expect(() => db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('x', 't1', 'ingreso', 'otro_ingreso', 'efectivo', 1, 'Dup', 'manual', 'cm1', '2026-10-05')")).toThrow(/UNIQUE/);
+    db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('cm4', 't1', 'ingreso', 'otro_ingreso', 'efectivo', 1, 'Manual nuevo', 'manual', 'cm4', '2026-10-05')");
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE taller_id = 't1' AND origen_tipo = 'caja_manual' AND origen_id = 'cm4'").n).toBe(1);
+    db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('cm5', 't1', 'egreso', 'otro_ingreso', 'efectivo', 1, 'Anulación', 'reverso', 'cm4', '2026-10-05')");
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE origen_id = 'cm4' AND evento = 'anulacion'").n).toBe(1);
+    // Admite el rubro y el origen nuevos, y sigue rechazando cualquier otro.
+    db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('cm6', 't1', 'ingreso', 'persona', 'efectivo', 100, 'Aporte', 'persona_mov', 'mp-x', '2026-10-05')");
+    expect(() => db.exec("INSERT INTO caja_movimientos (id, taller_id, tipo, rubro, medio, importe, concepto, origen_tipo, origen_id, fecha) VALUES ('cm7', 't1', 'ingreso', 'inventado', 'efectivo', 100, 'Mal', 'manual', 'cm7', '2026-10-05')")).toThrow(/CHECK/);
+    // un movimiento con personas se contabiliza desde el movimiento, no desde la fila de caja
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE origen_id = 'cm6'").n).toBe(0);
+
+    // Personas: el personal sin acceso al ERP puede tener ficha; un socio no necesita usuario; cada taller sólo ve a los suyos.
+    db.exec(`
+      INSERT INTO personas_financieras (id, taller_id, tipo, usuario_id) VALUES ('u:u3', 't1', 'empleado', 'u3');
+      INSERT INTO personas_financieras (id, taller_id, tipo, nombre) VALUES ('p1', 't1', 'socio', 'Juan Pérez'), ('p2', 't2', 'socio', 'Socio Ajeno');
+      INSERT INTO categorias_movimiento (id, taller_id, clave, nombre, tipo_fin, sistema) VALUES ('t1:cat:prestamo_a_persona', 't1', 'prestamo_a_persona', 'Préstamo de empresa a persona', 'prestamo_otorgado', 1);
+      INSERT INTO categorias_movimiento (id, taller_id, nombre, tipo_fin) VALUES ('c-aporte', 't1', 'Aporte propio', 'aporte_capital'), ('c-ajena', 't2', 'Aporte ajeno', 'aporte_capital');
+    `);
+    expect(() => db.exec("INSERT INTO personas_financieras (id, taller_id, tipo, usuario_id) VALUES ('p9', 't1', 'empleado', 'u3')")).toThrow(/UNIQUE/); // un empleado, una ficha
+    expect(() => db.exec("INSERT INTO personas_financieras (id, taller_id, tipo, usuario_id) VALUES ('p9', 't1', 'empleado', 'u2')")).toThrow(/FOREIGN KEY/); // usuario de otro taller
+    expect(() => db.exec("INSERT INTO personas_financieras (id, taller_id, tipo, nombre) VALUES ('p9', 't1', 'empleado', 'Sin vínculo')")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO personas_financieras (id, taller_id, tipo, nombre) VALUES ('p9', 't1', 'socio', '')")).toThrow(/CHECK/);
+    expect(() => db.exec("UPDATE personas_financieras SET tipo = 'otra' WHERE id = 'p1'")).toThrow(/ck_pf_inmutable/);
+    db.exec("UPDATE personas_financieras SET nombre = 'Juan P. Pérez', activa = 0 WHERE id = 'p1'");
+    db.exec("UPDATE personas_financieras SET activa = 1 WHERE id = 'p1'");
+    // una categoría no define asientos propios: sólo elige uno de los tipos financieros admitidos
+    expect(() => db.exec("INSERT INTO categorias_movimiento (id, taller_id, nombre, tipo_fin) VALUES ('c9', 't1', 'Libre', 'gasto_varios')")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO categorias_movimiento (id, taller_id, nombre, tipo_fin) VALUES ('c9', 't1', 'aporte PROPIO', 'retiro_capital')")).toThrow(/UNIQUE/);
+
+    const nuevo = (id: string, extra: Record<string, unknown> = {}) => {
+      const v = { taller: 't1', n: 1, persona: 'p1', cat: 'c-aporte', tipo: 'aporte_capital', dir: 'entrada', imp: 1000, via: 'caja', cuenta: null, reg: null, ...extra } as Record<string, any>;
+      db.exec(`INSERT INTO movimientos_personas (id, taller_id, numero, persona_id, categoria_id, tipo_fin, direccion, importe, fecha, via, cuenta_id, motivo, regulariza_id, idem_key, usuario_id)
+               VALUES ('${id}', '${v.taller}', ${v.n}, '${v.persona}', '${v.cat}', '${v.tipo}', '${v.dir}', ${v.imp}, '2026-10-05', '${v.via}', ${v.cuenta ? `'${v.cuenta}'` : 'NULL'}, 'Motivo', ${v.reg ? `'${v.reg}'` : 'NULL'}, 'k-${id}', 'u1')`);
+    };
+    nuevo('m1');
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE origen_tipo = 'mov_persona' AND origen_id = 'm1' AND evento = 'alta'").n).toBe(1);
+    // La dirección tiene que ser coherente con el tipo financiero, y el dinero con la vía.
+    expect(() => nuevo('m2', { n: 2, dir: 'salida' })).toThrow(/ck_mp_direccion/);
+    expect(() => nuevo('m2', { n: 2, via: 'banco' })).toThrow(/ck_mp_via/);
+    expect(() => nuevo('m2', { n: 2, via: 'banco', cuenta: 'cb2' })).toThrow(/FOREIGN KEY/); // banco de otro taller
+    expect(() => nuevo('m2', { n: 2, imp: 0 })).toThrow(/CHECK/);
+    expect(() => nuevo('m2', { n: 2, imp: -5 })).toThrow(/CHECK/);
+    expect(() => nuevo('m2', { n: 2, persona: 'p2' })).toThrow(/FOREIGN KEY/); // persona de otro taller
+    expect(() => nuevo('m2', { n: 2, cat: 'c-ajena' })).toThrow(/FOREIGN KEY/); // categoría de otro taller
+    expect(() => nuevo('m2', { n: 1 })).toThrow(/UNIQUE/); // número repetido
+    expect(() =>
+      db.exec("INSERT INTO movimientos_personas (id, taller_id, numero, persona_id, categoria_id, tipo_fin, direccion, importe, fecha, via, motivo, idem_key, usuario_id) VALUES ('m3', 't1', 3, 'p1', 'c-aporte', 'aporte_capital', 'entrada', 1, '2026-10-05', 'caja', 'x', 'k-m1', 'u1')"),
+    ).toThrow(/UNIQUE/); // misma clave de idempotencia
+    // Préstamo y devolución: sólo se regulariza una obligación vigente de la misma persona y tipo, hasta su importe.
+    nuevo('pr1', { n: 4, persona: 'p1', cat: 't1:cat:prestamo_a_persona', tipo: 'prestamo_otorgado', dir: 'salida', imp: 1000 });
+    expect(() => nuevo('d0', { n: 5, tipo: 'devolucion_prestamo_otorgado', dir: 'entrada' })).toThrow(/ck_mp_regulariza/); // una devolución sin obligación
+    expect(() => nuevo('d0', { n: 5, persona: 'u:u3', tipo: 'devolucion_prestamo_otorgado', dir: 'entrada', reg: 'pr1' })).toThrow(/ck_mp_origen_invalido/); // otra persona
+    expect(() => nuevo('d0', { n: 5, tipo: 'devolucion_prestamo_recibido', dir: 'salida', reg: 'pr1' })).toThrow(/ck_mp_origen_invalido/); // obligación de otro tipo
+    nuevo('d1', { n: 5, tipo: 'devolucion_prestamo_otorgado', dir: 'entrada', imp: 400, reg: 'pr1' });
+    db.exec("UPDATE movimientos_personas SET regularizado = regularizado + 400 WHERE id = 'pr1'");
+    expect(() => db.exec("UPDATE movimientos_personas SET regularizado = regularizado + 700 WHERE id = 'pr1'")).toThrow(/ck_mp_regularizado/); // no se devuelve de más
+    expect(() => db.exec("UPDATE movimientos_personas SET regularizado = 1 WHERE id = 'm1'")).toThrow(/ck_mp_regularizado/); // un aporte no abre obligación
+    // Un movimiento no se edita ni se borra; sólo se anula, y no si tiene devoluciones vigentes.
+    expect(() => db.exec("UPDATE movimientos_personas SET importe = 1 WHERE id = 'm1'")).toThrow(/ck_mp_inmutable/);
+    expect(() => db.exec("UPDATE movimientos_personas SET motivo = 'otro' WHERE id = 'm1'")).toThrow(/ck_mp_inmutable/);
+    expect(() => db.exec("DELETE FROM movimientos_personas WHERE id = 'm1'")).toThrow(/ck_mp_inmutable/);
+    expect(() => db.exec("UPDATE movimientos_personas SET estado = 'anulado', anulado_motivo = 'x', anulado_at = '2026-10-06', anulado_por = 'u1' WHERE id = 'pr1'")).toThrow(/ck_mp_con_regularizaciones/);
+    expect(() => db.exec("UPDATE movimientos_personas SET estado = 'anulado' WHERE id = 'm1'")).toThrow(/CHECK/); // una anulación exige motivo y momento
+    db.exec("UPDATE movimientos_personas SET estado = 'anulado', anulado_motivo = 'Error', anulado_at = '2026-10-06', anulado_por = 'u1' WHERE id = 'm1'");
+    expect(uno("SELECT COUNT(*) AS n FROM contab_cola WHERE origen_id = 'm1' AND evento = 'anulacion'").n).toBe(1);
+    expect(() => db.exec("UPDATE movimientos_personas SET estado = 'registrado' WHERE id = 'm1'")).toThrow(/ck_mp_inmutable/); // una anulación no se deshace
+    // Adelantos: la aplicación exige liquidación y autorización.
+    nuevo('ad1', { n: 6, persona: 'u:u3', cat: 't1:cat:prestamo_a_persona', tipo: 'adelanto_sueldo', dir: 'salida', imp: 500 });
+    expect(() => nuevo('ap0', { n: 7, persona: 'u:u3', tipo: 'aplicacion_adelanto', dir: 'sin_dinero', via: 'ninguna', imp: 100, reg: 'ad1' })).toThrow(/ck_mp_aplicacion/);
+    db.exec(`INSERT INTO movimientos_personas (id, taller_id, numero, persona_id, categoria_id, tipo_fin, direccion, importe, fecha, via, motivo, regulariza_id, liquidacion_ref, autorizado_por, idem_key, usuario_id)
+             VALUES ('ap1', 't1', 7, 'u:u3', 't1:cat:prestamo_a_persona', 'aplicacion_adelanto', 'sin_dinero', 100, '2026-10-06', 'ninguna', 'Descuento', 'ad1', 'Octubre', 'Ana', 'k-ap1', 'u1')`);
+    // Una categoría con movimientos, o del sistema, conserva su tipo y no se elimina; una sin uso sí se puede cambiar y borrar.
+    expect(() => db.exec("UPDATE categorias_movimiento SET tipo_fin = 'retiro_capital' WHERE id = 'c-aporte'")).toThrow(/ck_cm_inmutable/);
+    expect(() => db.exec("DELETE FROM categorias_movimiento WHERE id = 'c-aporte'")).toThrow(/ck_cm_con_movimientos/);
+    expect(() => db.exec("DELETE FROM categorias_movimiento WHERE id = 't1:cat:prestamo_a_persona'")).toThrow(/ck_cm_con_movimientos/);
+    db.exec("INSERT INTO categorias_movimiento (id, taller_id, nombre, tipo_fin) VALUES ('c-libre', 't1', 'Sin uso', 'aporte_capital')");
+    db.exec("UPDATE categorias_movimiento SET tipo_fin = 'retiro_capital' WHERE id = 'c-libre'");
+    db.exec("DELETE FROM categorias_movimiento WHERE id = 'c-libre'");
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    db.close();
+  });
 });

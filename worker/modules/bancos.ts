@@ -106,7 +106,7 @@ bancos.put('/cuentas/:id', async (c) => {
 });
 
 // ───────────── Movimientos ─────────────
-const SELECT_MOV = `SELECT m.*, cb.nombre AS cuenta, cb.moneda, u.nombre AS usuario,
+const SELECT_MOV = `SELECT m.*, cb.nombre AS cuenta, cb.moneda, u.nombre AS usuario, (m.origen_tipo = 'persona_mov' OR o.origen_tipo = 'persona_mov') AS es_persona,
     CASE m.origen_tipo WHEN 'cobro_medio' THEN 'cobro' WHEN 'reverso' THEN o.categoria ELSE m.categoria END AS ref_tipo,
     CASE WHEN m.origen_tipo = 'cobro_medio' THEN cm.cobro_id WHEN m.origen_tipo = 'reverso' THEN COALESCE(cmo.cobro_id, o.origen_id) ELSE m.origen_id END AS ref_id,
     EXISTS (SELECT 1 FROM banco_movimientos r WHERE r.taller_id = m.taller_id AND r.origen_tipo = 'reverso' AND r.origen_id = m.id) AS revertido
@@ -134,8 +134,12 @@ bancos.get('/movimientos', async (c) => {
   if (f.tipo) (cond.push('m.tipo = ?'), params.push(f.tipo));
   if (f.categoria) (cond.push('m.categoria = ?'), params.push(f.categoria));
   if (f.conciliado) (cond.push('m.conciliado = ?'), params.push(Number(f.conciliado)));
-  if (f.q) (cond.push('(m.concepto LIKE ? OR m.referencia LIKE ?)'), params.push(like(f.q), like(f.q)));
-  return c.json(await all(c.env.DB, `${SELECT_MOV} WHERE ${cond.join(' AND ')} ORDER BY m.fecha DESC, m.created_at DESC, m.id LIMIT ?`, ...params, f.limite));
+  // Los movimientos con personas (aportes, préstamos, adelantos) son reservados: sin `movpersonas.ver` se ven como un monto sin nombre ni motivo y no se buscan por texto.
+  const verPersonas = tiene(s, 'movpersonas.ver');
+  const esPersona = (alias: string) => `${alias}.origen_tipo = 'persona_mov'`;
+  if (f.q) (cond.push(`(m.concepto LIKE ? OR m.referencia LIKE ?)${verPersonas ? '' : ` AND NOT ${esPersona('m')} AND COALESCE(o.origen_tipo, '') <> 'persona_mov'`}`), params.push(like(f.q), like(f.q)));
+  const filas = await all<any>(c.env.DB, `${SELECT_MOV} WHERE ${cond.join(' AND ')} ORDER BY m.fecha DESC, m.created_at DESC, m.id LIMIT ?`, ...params, f.limite);
+  return c.json(verPersonas ? filas : filas.map((m) => (m.es_persona ? { ...m, concepto: 'Movimiento con personas (reservado)', referencia: null } : m)));
 });
 
 /** Operación ya registrada con esa clave. Para una transferencia devuelve el id de la transferencia (no el del asiento). */

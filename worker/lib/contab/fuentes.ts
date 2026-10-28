@@ -9,6 +9,7 @@
 import { all, lotes } from '../db';
 import { repartir } from '../../../shared/devoluciones';
 import { rolDeGasto, type RolCuenta } from '../../../shared/contabilidad';
+import { DEF_TIPOS_FIN, type TipoFin } from '../../../shared/movpersonas';
 import type { LineaIn } from './asientos';
 
 export interface Ctx {
@@ -513,6 +514,53 @@ const gasto: FuenteDef = {
   cobertura: { sql: 'SELECT COUNT(*) AS docs FROM gastos WHERE taller_id = ?' },
 };
 
+// ───────────────────────── Movimientos con personas (aportes, préstamos, adelantos) ─────────────────────────
+// Nunca tocan ventas, cuentas corrientes comerciales ni gastos: el dinero se cuenta una sola vez (el libro de caja o el banco es el mismo hecho) y la
+// contrapartida es patrimonio o una cuenta a cobrar/pagar con la persona. Sólo la aplicación de un adelanto reconoce el costo de sueldos, y no mueve dinero.
+const movPersona: FuenteDef = {
+  tipo: 'mov_persona', prioridad: 105, etiqueta: 'Movimientos con personas',
+  async pendientes(ctx, limite) {
+    const ms = await all<{ id: string; numero: number; fecha: string; created_at: string; usuario_id: string | null; tipo_fin: TipoFin; importe: number; via: string; cuenta_id: string | null; motivo: string; persona: string }>(
+      ctx.db,
+      `SELECT m.id, m.numero, m.fecha, m.created_at, m.usuario_id, m.tipo_fin, m.importe, m.via, m.cuenta_id, m.motivo,
+              CASE WHEN p.usuario_id IS NOT NULL THEN TRIM(u.nombre || ' ' || COALESCE(u.apellido, '')) ELSE p.nombre END AS persona
+         FROM movimientos_personas m JOIN personas_financieras p ON p.taller_id = m.taller_id AND p.id = m.persona_id
+         LEFT JOIN usuarios u ON u.taller_id = p.taller_id AND u.id = p.usuario_id
+        WHERE m.taller_id = ? AND m.moneda = 'ARS' AND ${sinAsiento(ctx, 'm', 'mov_persona', 'alta')} ORDER BY m.fecha, m.created_at LIMIT ?`,
+      ctx.tallerId, limite,
+    );
+    return ms.map((m) => {
+      const base = { origenTipo: 'mov_persona', origenId: m.id, fecha: m.fecha, usuarioId: m.usuario_id, orden: m.created_at, createdAt: m.created_at, descripcion: `${DEF_TIPOS_FIN[m.tipo_fin].etiqueta} #${m.numero} · ${m.persona}: ${m.motivo}` };
+      let dinero: string | null = null;
+      if (m.via === 'banco') {
+        dinero = ctx.banco(m.cuenta_id);
+        if (!dinero) return { kind: 'omision', origenTipo: 'mov_persona', origenId: m.id, evento: 'alta', tipo: 'error', motivo: 'La cuenta bancaria no tiene cuenta contable' } as Omision;
+      } else if (m.via === 'caja') dinero = ctx.rol('caja_efectivo');
+      const d = dinero ?? '';
+      switch (m.tipo_fin) {
+        case 'aporte_capital': return armar(ctx, base, [debe(d, m.importe), haber(ctx.rol('capital'), m.importe)]);
+        case 'retiro_capital': return armar(ctx, base, [debe(ctx.rol('retiros_capital'), m.importe), haber(d, m.importe)]);
+        case 'prestamo_recibido': return armar(ctx, base, [debe(d, m.importe), haber(ctx.rol('prestamos_de_personas'), m.importe)]);
+        case 'devolucion_prestamo_recibido': return armar(ctx, base, [debe(ctx.rol('prestamos_de_personas'), m.importe), haber(d, m.importe)]);
+        case 'prestamo_otorgado': return armar(ctx, base, [debe(ctx.rol('prestamos_al_personal'), m.importe), haber(d, m.importe)]);
+        case 'devolucion_prestamo_otorgado': return armar(ctx, base, [debe(d, m.importe), haber(ctx.rol('prestamos_al_personal'), m.importe)]);
+        case 'adelanto_sueldo': return armar(ctx, base, [debe(ctx.rol('adelantos_personal'), m.importe), haber(d, m.importe)]);
+        case 'aplicacion_adelanto': return armar(ctx, base, [debe(ctx.rol('costo_mano_obra'), m.importe), haber(ctx.rol('adelantos_personal'), m.importe)]);
+      }
+    });
+  },
+  anulados: async (ctx, limite) => {
+    const filas = await all<{ id: string; anulado_at: string; anulado_por: string | null; created_at: string }>(
+      ctx.db,
+      `SELECT t.id, t.anulado_at, t.anulado_por, t.created_at FROM movimientos_personas t
+        WHERE t.taller_id = ? AND t.estado = 'anulado' AND t.moneda = 'ARS' AND ${sinAsiento(ctx, 't', 'mov_persona', 'anulacion')} ORDER BY t.anulado_at LIMIT ?`,
+      ctx.tallerId, limite,
+    );
+    return filas.map((f) => ({ origenId: f.id, fecha: fechaAR(f.anulado_at), usuarioId: f.anulado_por, orden: f.anulado_at }));
+  },
+  cobertura: { sql: "SELECT COUNT(*) AS docs FROM movimientos_personas WHERE taller_id = ? AND moneda = 'ARS'" },
+};
+
 // ───────────────────────── Movimientos manuales de caja ─────────────────────────
 // Sólo los ingresos manuales ("otros ingresos"): los cobros, pagos, gastos y reintegros ya generan su propio asiento y sus filas del libro de caja
 // son el mismo hecho; los traspasos con bancos se contabilizan desde el movimiento bancario.
@@ -698,6 +746,6 @@ async function anuladosPorReverso(ctx: Ctx, tipo: string, tabla: string, condici
 }
 
 export const FUENTES: FuenteDef[] = [
-  aperturaBanco, aperturaCaja, aperturaProveedores, venta, cobro, creditoAplicacion, devolucion, reintegro, compra, recepcion, facturaProveedor, pagoProveedor, gasto, cajaManual, bancoMov, stockAjuste,
+  aperturaBanco, aperturaCaja, aperturaProveedores, venta, cobro, creditoAplicacion, devolucion, reintegro, compra, recepcion, facturaProveedor, pagoProveedor, gasto, movPersona, cajaManual, bancoMov, stockAjuste,
 ];
 export const fuentePorTipo = (t: string) => FUENTES.find((f) => f.tipo === t);

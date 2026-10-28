@@ -284,7 +284,7 @@ finanzas.get('/resumen', requirePerm('finanzas.ver'), async (c) => {
   if (desde > hasta) throw badRequest('El período es inválido');
   const db = c.env.DB;
   // Los traspasos con bancos (depósitos/extracciones de efectivo) mueven plata entre lugares: no son ingresos ni egresos.
-  const rango = "m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.rubro <> 'traspaso'";
+  const rango = "m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.rubro NOT IN ('traspaso','persona')";
   const p = [s.tallerId, desde, hasta];
   const [rubros, porMedio, porMes, porDia, gastosCat, devengado] = await Promise.all([
     all<{ rubro: string; neto: number }>(db, `SELECT m.rubro, SUM(CASE m.tipo WHEN 'ingreso' THEN m.importe ELSE -m.importe END) AS neto FROM caja_movimientos m WHERE ${rango} GROUP BY m.rubro`, ...p),

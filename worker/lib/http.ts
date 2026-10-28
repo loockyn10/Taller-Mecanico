@@ -66,6 +66,11 @@ export function traducirErrorDb(e: unknown): ApiError | null {
     return conflict('Registro duplicado', 'duplicado');
   }
   if (msg.includes('ck_registro_confirmado_inmutable') || msg.includes('ck_firma_inmutable') || msg.includes('ck_foto_inmutable')) return conflict('El registro está confirmado y no se puede modificar: creá una corrección (revisión) para conservar el original', 'confirmado');
+  if (msg.includes('ck_mp_regularizado')) return conflict('El importe supera el saldo pendiente de la obligación: otra operación ya lo regularizó', 'saldo_excedido');
+  if (msg.includes('ck_mp_origen_invalido')) return conflict('La obligación que se regulariza no existe, está anulada o no corresponde a esa persona', 'obligacion_invalida');
+  if (msg.includes('ck_mp_con_regularizaciones')) return conflict('El movimiento tiene devoluciones o aplicaciones vigentes: anulalas primero', 'tiene_regularizaciones');
+  if (msg.includes('ck_mp_inmutable') || msg.includes('ck_pf_inmutable') || msg.includes('ck_cm_inmutable')) return conflict('Un movimiento registrado no se modifica: para corregirlo, anulalo y registralo de nuevo', 'inmutable');
+  if (msg.includes('ck_cm_con_movimientos')) return conflict('La categoría es del sistema o tiene movimientos registrados: no se puede eliminar', 'categoria_con_movimientos');
   if (msg.includes('ck_firma_contenido_distinto')) return conflict('La firma no corresponde al contenido confirmado del registro', 'firma_contenido');
   if (msg.includes('foto_en_checklist')) return conflict('Esta fotografía forma parte de una recepción o entrega confirmada y no se puede eliminar', 'foto_en_checklist');
   if (msg.includes('FOREIGN KEY constraint failed')) {

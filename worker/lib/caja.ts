@@ -52,7 +52,7 @@ export interface MovimientoManual {
   importe: number;
   concepto: string;
   referencia?: string | null;
-  origenTipo: 'pago_proveedor' | 'gasto' | 'manual' | 'banco';
+  origenTipo: 'pago_proveedor' | 'gasto' | 'manual' | 'banco' | 'persona_mov';
   origenId: string;
   fecha: string;
   idemKey?: string | null;

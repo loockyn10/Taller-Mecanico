@@ -36,3 +36,12 @@ Todo lo anterior está cubierto por `tests/api/vehiculos-clientes.test.ts` (reco
 - **Texto libre**: el motivo, el diagnóstico, las observaciones de la OT, las tareas y las notas internas son texto que escribe el personal y que el mecánico asignado ve (en la hoja y en «Mis trabajos»). Si alguien escribe ahí un nombre, un teléfono o un dato de cobro, el sistema **no puede filtrarlo**. Por eso el campo «Observaciones internas» de la nueva OT aclara que lo ve el mecánico. No hay hoy un campo «nota administrativa privada» separado: haría falta si el taller lo necesita (migración nueva).
 - La fotografía del vehículo puede mostrar una patente o a una persona: es la única imagen que lleva la hoja.
 - Los permisos son granulares: un mecánico al que el propietario le otorgue `clientes.ver` volverá a ver clientes en pantalla y en la API (la **hoja del mecánico seguirá sin ellos**).
+
+## Movimientos financieros con personas (Sprint 24)
+Los aportes, préstamos y adelantos de sueldo son datos **sensibles** (dinero que una persona le debe a la empresa o al revés). Ver el detalle en `docs/MOVIMIENTOS_PERSONAS.md`; acá, las reglas de privacidad:
+- Seis permisos propios `movpersonas.*`. Los tienen por defecto el propietario y el administrador; **ninguna plantilla operativa** (recepción, mecánico, depósito, caja, empleado) ni quien sólo ficha. Se verifican en cada ruta del servidor.
+- No aparecen en ningún PDF (hoja del mecánico, hoja de administración), en el seguimiento público ni en consultas públicas. Los endpoints de personal (`/api/taller/usuarios`) no los incluyen.
+- La lista de personas del módulo sólo expone nombre, relación y si la persona usa el sistema: **nunca** correo, PIN, hash ni documento del personal.
+- Aislamiento entre empresas: toda consulta lleva el `taller_id` de la sesión y la base usa claves foráneas compuestas; un identificador de otra empresa responde 404/400.
+- **Libro de caja y de bancos**: sin `movpersonas.ver`, las filas de estos movimientos (y sus reversos) se devuelven como «Movimiento con personas (reservado)», sin referencia, y **no se pueden buscar por texto** (la búsqueda delataría quién es). El monto y el medio siguen visibles: el arqueo y el cierre de caja tienen que contar ese efectivo.
+- **Límites**: quien tiene `contabilidad.ver` ve la descripción de los asientos («Adelanto de sueldo #5 · nombre: motivo»); es un permiso financiero (no está en ninguna plantilla operativa). El texto libre de un movimiento (motivo, referencia) lo ve cualquiera con `movpersonas.ver`.

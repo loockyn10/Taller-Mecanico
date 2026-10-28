@@ -46,6 +46,7 @@ import { activacion } from './modules/activacion';
 import { puesta } from './modules/puesta';
 import { importaciones } from './modules/importaciones';
 import { aperturas } from './modules/aperturas';
+import { movpersonas } from './modules/movpersonas';
 import { mantenimientoContable, sincronizarTrasOperacion } from './lib/contab/sync';
 import { ejecutarMantenimiento, latido, limpiarMensaje, medirD1, normalizarRuta, registrarErrorWorker, type Medicion } from './lib/observabilidad';
 import { exigirNoBloqueado, limpiarFallos, registrarFallo } from './lib/limites';
@@ -125,7 +126,7 @@ api.use('*', requireAuth);
 
 // Contabilidad al día: después de una operación que mueve plata, stock o deudas (y salió bien) se contabiliza lo nuevo. Sólo en talleres que ya activaron la
 // contabilidad (la activación y la generación histórica son explícitas); nunca altera la respuesta de la operación y los GET no escriben nada.
-const OPERACIONES_CONTABLES = /^\/api\/(ventas|cobros|anticipos|credito-aplicaciones|devoluciones|reintegros|compras|pagos-proveedor|facturas-proveedor|recepciones|ordenes-compra|gastos|gastos-recurrentes|caja|bancos|cheques|stock|inventario|articulos|ordenes|depositos|transferencias|aperturas|importaciones)(\/|$)/;
+const OPERACIONES_CONTABLES = /^\/api\/(ventas|cobros|anticipos|credito-aplicaciones|devoluciones|reintegros|compras|pagos-proveedor|facturas-proveedor|recepciones|ordenes-compra|gastos|gastos-recurrentes|caja|bancos|cheques|stock|inventario|articulos|ordenes|depositos|transferencias|aperturas|importaciones|movimientos-personas)(\/|$)/;
 api.use('*', async (c, next) => {
   await next();
   if (c.req.method === 'GET' || c.res.status >= 400 || !OPERACIONES_CONTABLES.test(c.req.path)) return;
@@ -174,6 +175,7 @@ api.route('/contabilidad', contabilidad);
 api.route('/puesta-en-marcha', puesta);
 api.route('/importaciones', importaciones);
 api.route('/aperturas', aperturas);
+api.route('/movimientos-personas', movpersonas);
 app.route('/api', api);
 
 app.all('/api/*', (c) => c.json({ error: { code: 'no_encontrado', message: 'Ruta inexistente' } }, 404));

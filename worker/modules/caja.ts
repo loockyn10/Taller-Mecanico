@@ -147,8 +147,12 @@ caja.get('/movimientos', requirePerm('caja.operar'), async (c) => {
   if (f.medio) (cond.push('m.medio = ?'), params.push(f.medio));
   if (f.tipo) (cond.push('m.tipo = ?'), params.push(f.tipo));
   if (f.rubro) (cond.push('m.rubro = ?'), params.push(f.rubro));
-  if (f.q) (cond.push('(m.concepto LIKE ? OR m.referencia LIKE ?)'), params.push(like(f.q), like(f.q)));
-  return c.json(await all(c.env.DB, `${SELECT_MOV} WHERE ${cond.join(' AND ')} ORDER BY m.created_at DESC, m.id LIMIT ?`, ...params, f.limite));
+  // Los movimientos con personas (aportes, préstamos, adelantos) son reservados: quien opera la caja sin permiso para verlos los ve como un monto sin nombre ni motivo,
+  // y no puede buscarlos por texto (la búsqueda delataría quién es).
+  const verPersonas = tiene(s, 'movpersonas.ver');
+  if (f.q) (cond.push(`(m.concepto LIKE ? OR m.referencia LIKE ?)${verPersonas ? '' : " AND m.rubro <> 'persona'"}`), params.push(like(f.q), like(f.q)));
+  const filas = await all<any>(c.env.DB, `${SELECT_MOV} WHERE ${cond.join(' AND ')} ORDER BY m.created_at DESC, m.id LIMIT ?`, ...params, f.limite);
+  return c.json(verPersonas ? filas : filas.map((m) => (m.rubro === 'persona' ? { ...m, concepto: 'Movimiento con personas (reservado)', referencia: null } : m)));
 });
 
 /** Ingreso manual (aporte, venta no registrada, sobrante…). Los egresos manuales se cargan como gastos. */
@@ -326,7 +330,7 @@ caja.get('/sesiones/:id', requirePerm('caja.operar'), async (c) => {
 caja.get('/reportes', requirePerm('finanzas.ver'), async (c) => {
   const s = c.get('sesion');
   const { desde, hasta } = query(c, z.object({ desde: zFecha, hasta: zFecha }));
-  const base = "m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.rubro <> 'traspaso'";
+  const base = "m.taller_id = ? AND m.fecha BETWEEN ? AND ? AND m.rubro NOT IN ('traspaso','persona')";
   const p = [s.tallerId, desde, hasta];
   const [porMedio, porRubro, porDia, porUsuario, sesiones, totales] = await Promise.all([
     all(c.env.DB, `SELECT m.medio, COALESCE(SUM(CASE m.tipo WHEN 'ingreso' THEN m.importe END),0) AS ingresos, COALESCE(SUM(CASE m.tipo WHEN 'egreso' THEN m.importe END),0) AS egresos FROM caja_movimientos m WHERE ${base} GROUP BY m.medio ORDER BY ingresos DESC`, ...p),
