@@ -6,6 +6,7 @@
 //   · el servicio tiene intervalo (km o meses) y se realizó alguna vez en el vehículo (OT o antecedente) y no hay un plan pausado.
 // Los intervalos del plan, si los tiene, reemplazan a los del servicio.
 import { all } from './db';
+import { CLIENTE_PRINCIPAL_SQL } from './vehiculo-clientes';
 
 export type EstadoMantenimiento = 'vencido' | 'proximo' | 'al_dia' | 'sin_registro';
 
@@ -14,8 +15,9 @@ export type Mantenimiento = {
   patente: string;
   marca: string | null;
   modelo: string | null;
-  cliente_id: string;
-  cliente: string;
+  /** Cliente de contacto: el titular vigente del vehículo (o el vinculado más antiguo). Null si el vehículo no tiene clientes vinculados. */
+  cliente_id: string | null;
+  cliente: string | null;
   cliente_telefono: string | null;
   km_actual: number;
   servicio_id: string;
@@ -124,10 +126,10 @@ export async function estadoMantenimientos(db: D1Database, tallerId: string, opt
   const planPor = new Map(planes.map((p) => [`${p.vehiculo_id}|${p.servicio_id}`, p]));
   const servicios = await all<{ id: string; nombre: string; intervalo_km: number | null; intervalo_meses: number | null }>(db, 'SELECT id, nombre, intervalo_km, intervalo_meses FROM servicios WHERE taller_id = ?', tallerId);
   const servPor = new Map(servicios.map((s) => [s.id, s]));
-  const vehiculos = await all<{ id: string; patente: string; km_actual: number; marca: string | null; modelo: string | null; cliente_id: string; cliente: string; cliente_telefono: string | null }>(
+  const vehiculos = await all<{ id: string; patente: string; km_actual: number; marca: string | null; modelo: string | null; cliente_id: string | null; cliente: string | null; cliente_telefono: string | null }>(
     db,
-    `SELECT v.id, v.patente, v.km_actual, v.cliente_id, ma.nombre AS marca, mo.nombre AS modelo, c.nombre AS cliente, c.telefono AS cliente_telefono
-       FROM vehiculos v JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
+    `SELECT v.id, v.patente, v.km_actual, c.id AS cliente_id, ma.nombre AS marca, mo.nombre AS modelo, c.nombre AS cliente, c.telefono AS cliente_telefono
+       FROM vehiculos v LEFT JOIN clientes c ON c.taller_id = v.taller_id AND c.id = ${CLIENTE_PRINCIPAL_SQL}
        LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id
       WHERE v.taller_id = ? AND v.activo = 1 ${filtroVeh}`,
     tallerId, ...pv,

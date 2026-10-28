@@ -144,7 +144,17 @@ function firmaEstado(r: Pick<Fila, 'estado'>, firmas: Array<Pick<FilaFirma, 'res
   return ultima ? ultima.resultado : 'pendiente';
 }
 
-function serializar(r: Fila, firmas: FilaFirma[], verFirmas: boolean) {
+function contextoVisible(ctx: ContextoConfirmado, verCliente: boolean): ContextoConfirmado | Omit<ContextoConfirmado, 'cliente'> {
+  if (verCliente) return ctx;
+  const { cliente: _omitido, ...resto } = ctx;
+  return resto;
+}
+
+/**
+ * `verCliente`: el contexto confirmado guarda el nombre del cliente (parte de lo que se firmó y de su huella). Sin permiso para ver clientes
+ * (por ejemplo un mecánico) la respuesta lo omite; la verificación de integridad se calcula en el servidor sobre el contexto completo guardado.
+ */
+function serializar(r: Fila, firmas: FilaFirma[], verFirmas: boolean, verCliente: boolean) {
   return {
     id: r.id,
     orden_id: r.orden_id,
@@ -158,7 +168,7 @@ function serializar(r: Fila, firmas: FilaFirma[], verFirmas: boolean) {
     version: r.version,
     checklist_version: r.checklist_version,
     datos: JSON.parse(r.datos) as ContenidoChecklist,
-    contexto: r.contexto ? (JSON.parse(r.contexto) as ContextoConfirmado) : null,
+    contexto: r.contexto ? contextoVisible(JSON.parse(r.contexto) as ContextoConfirmado, verCliente) : null,
     contenido_sha256: r.contenido_sha256,
     responsable_nombre: r.responsable_nombre,
     created_at: r.created_at,
@@ -196,7 +206,7 @@ async function firmasDe(c: Context<AppEnv>, tallerId: string, ids: string[]): Pr
 async function devolver(c: Context<AppEnv>, s: Sesion, id: string, status: 200 | 201 = 200) {
   const r = await cargarRegistro(c, s, id);
   const f = await firmasDe(c, s.tallerId, [id]);
-  return c.json(serializar(r, f.get(id) ?? [], tiene(s, 'checklists.firmas')), status);
+  return c.json(serializar(r, f.get(id) ?? [], tiene(s, 'checklists.firmas'), tiene(s, 'clientes.ver')), status);
 }
 
 /** Todas las fotografías indicadas deben ser de esta OT, de este taller y estar listas. */
@@ -235,7 +245,7 @@ checklists.get('/ordenes/:id/checklists', requirePerm('checklists.ver'), async (
   const filas = await all<Fila>(c.env.DB, `SELECT ${COLS} FROM ck_registros WHERE taller_id = ? AND orden_id = ? ORDER BY tipo, revision`, s.tallerId, id);
   const firmas = await firmasDe(c, s.tallerId, filas.map((f) => f.id));
   const verFirmas = tiene(s, 'checklists.firmas');
-  return c.json({ registros: filas.map((f) => serializar(f, firmas.get(f.id) ?? [], verFirmas)) });
+  return c.json({ registros: filas.map((f) => serializar(f, firmas.get(f.id) ?? [], verFirmas, tiene(s, 'clientes.ver'))) });
 });
 
 /** Historial del vehículo: los checklists de todas sus órdenes (sólo las propias para quien únicamente ve las asignadas). */

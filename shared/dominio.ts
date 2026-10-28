@@ -277,3 +277,14 @@ export function estadoAnticipo(a: { estado: string; total: number; credito_aplic
   if (libre > 0) return 'parcial';
   return a.credito_aplicado > 0 ? 'utilizado' : 'devuelto';
 }
+
+/** Relación de un cliente con un vehículo (opcional). Un vehículo puede tener varios clientes vinculados a la vez. */
+export const RELACIONES_VEHICULO = ['titular', 'familiar', 'conductor', 'responsable_comercial', 'otro'] as const;
+export type RelacionVehiculo = (typeof RELACIONES_VEHICULO)[number];
+export const RELACION_VEHICULO_LABEL: Record<RelacionVehiculo, string> = {
+  titular: 'Titular',
+  familiar: 'Familiar',
+  conductor: 'Conductor',
+  responsable_comercial: 'Responsable comercial',
+  otro: 'Otro',
+};

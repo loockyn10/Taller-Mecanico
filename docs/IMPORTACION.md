@@ -25,7 +25,7 @@ El taller nace **sin servicios con precios**: las operaciones del tempario se ca
 | Tipo | Identificadores (para detectar repetidos) | Vínculos | Notas |
 |---|---|---|---|
 | Clientes | Documento (DNI 6-8 dígitos o CUIT/CUIL de 11 con dígito verificador) y/o código del sistema anterior | — | Los documentos de relleno (000000, 11111111) se ignoran |
-| Vehículos | Patente (se normaliza: `ab 123 cd` → `AB123CD`) | Cliente por documento, por código del sistema anterior o, solo sin ninguno de los dos, por nombre exacto **único** | Crea marcas y modelos que falten (opcional). Nunca cambia de titular ni baja el kilometraje |
+| Vehículos | Patente (se normaliza: `ab 123 cd` → `AB123CD`) | **Opcional** (Sprint 23): cliente por documento, por código del sistema anterior o, solo sin ninguno de los dos, por nombre exacto **único**; se vincula como titular al vehículo nuevo. Sin referencia, el vehículo se carga sin clientes. Una referencia que no se resuelve sigue siendo un error | Crea marcas y modelos que falten (opcional). En vehículos que ya existen actualiza datos pero **no modifica los vínculos con clientes** (avisa) y nunca baja el kilometraje |
 | Artículos | Código interno y/o código de barras (sin distinguir mayúsculas) | Categoría por nombre (opcional crear); proveedor por CUIT, código o nombre exacto único | Catálogo ≠ existencias (ver 4) |
 | Proveedores | CUIT (con dígito verificador) y/o código del sistema anterior | — | |
 

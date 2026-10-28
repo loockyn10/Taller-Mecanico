@@ -16,12 +16,13 @@ import { nombreUsuarioSql, sentenciaTareasDesdeTrabajos } from '../lib/tareas';
 import { estimarManoObra, rentabilidadOrdenes } from '../lib/rentabilidad';
 import { sentenciasAplicarCredito, validarOrigenCredito } from '../lib/creditos';
 import { ESTADOS_TAREA } from '../../shared/tempario';
+import { validarResponsable } from '../lib/vehiculo-clientes';
 import { datosHojaOrden } from '../lib/hoja-orden-datos';
 import { generarHojaCliente } from '../lib/hoja-cliente';
 import { urlPublica } from '../lib/url-publica';
 import { sentenciasEnlaceInicial, tokenActivo, urlSeguimiento } from '../lib/seguimiento';
-import { COPIAS, VARIANTES, generarHojaOrden, numeroOrden, variantesDeCopia } from '../lib/hoja-orden';
-import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, TRANSICIONES_OT, normalizarPatente, type EstadoOT } from '../../shared/dominio';
+import { COPIAS, VARIANTES, generarHojaOrden, muestraCliente, numeroOrden, variantesDeCopia } from '../lib/hoja-orden';
+import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADOS_OT_CON_STOCK, ESTADOS_OT_EDITABLES, ESTADO_OT_LABEL, RELACIONES_VEHICULO, TRANSICIONES_OT, normalizarPatente, type EstadoOT, type RelacionVehiculo } from '../../shared/dominio';
 
 export const ordenes = new Hono<AppEnv>();
 // Quien solo tiene "órdenes asignadas" (mecánicos) ve y trabaja únicamente las OT donde figura como mecánico.
@@ -49,6 +50,16 @@ async function autorizarTrabajo(db: D1Database, s: Sesion, ordenId: string) {
   if (tiene(s, 'ordenes.trabajar_asignadas') && (await esAsignadaAMi(db, s, ordenId))) return;
   throw forbidden('No tenés permiso para modificar esta orden de trabajo');
 }
+/**
+ * Orden tal como la ve esta sesión. `limpiarDocumento` quita importes, costos y datos del cliente según los permisos; además, quien sólo ve las órdenes
+ * asignadas (mecánicos) no recibe ni el identificador del cliente: el backend devuelve únicamente lo que necesita para reparar el vehículo.
+ */
+function vistaOrden<T extends Record<string, unknown>>(s: Sesion, o: T): T {
+  const r = limpiarDocumento(s, o);
+  if (tiene(s, 'ordenes.ver') || tiene(s, 'clientes.ver')) return r;
+  const { cliente_id: _cliente, ...resto } = r as Record<string, unknown>;
+  return resto as T;
+}
 const ESTADOS_DE_TALLER = ['diagnostico', 'en_reparacion', 'esperando_repuestos', 'lista'];
 
 const SELECT = `SELECT o.*, c.nombre AS cliente, c.codigo AS cliente_codigo, c.telefono AS cliente_telefono, v.patente, v.anio, ma.nombre AS marca, mo.nombre AS modelo,
@@ -73,8 +84,12 @@ const SELECT = `SELECT o.*, c.nombre AS cliente, c.codigo AS cliente_codigo, c.t
 const zOrden = zParametrosTotales.extend({
   /** Depósito del que se descuentan los repuestos al dejar la orden lista (sin indicar: el principal). */
   deposito_id: zId.nullish(),
+  /** Cliente responsable de ESTA orden: cualquiera del taller, esté o no vinculado al vehículo. Cada OT conserva el suyo. */
   cliente_id: zId,
   vehiculo_id: zId,
+  /** Vincula además al cliente con el vehículo (si todavía no lo está), en la misma operación. */
+  vincular_cliente: z.boolean().nullish(),
+  vinculo_relacion: z.enum(RELACIONES_VEHICULO).nullish(),
   mecanico_id: zId.nullish(),
   km_ingreso: z.number().int().min(0).max(5_000_000).nullish(),
   falla_reportada: zTextoOpt(2000),
@@ -86,14 +101,20 @@ const zOrden = zParametrosTotales.extend({
   items: z.array(zItem).max(200).default([]),
 });
 
-async function validarCabecera(db: D1Database, tallerId: string, d: { cliente_id: string; vehiculo_id: string; mecanico_id?: string | null; km_ingreso?: number | null }, kmAnteriorPropio?: number | null) {
-  const v = await first<{ cliente_id: string; km_actual: number }>(db, 'SELECT cliente_id, km_actual FROM vehiculos WHERE taller_id = ? AND id = ?', tallerId, d.vehiculo_id);
+/**
+ * Valida la cabecera y devuelve las sentencias de vinculación pedidas (cliente ↔ vehículo). El cliente responsable es de la OT, no del vehículo:
+ * no hace falta que esté vinculado; si no lo está, se puede vincular en la misma operación.
+ */
+async function validarCabecera(db: D1Database, s: Sesion, d: { cliente_id: string; vehiculo_id: string; vincular_cliente?: boolean | null; vinculo_relacion?: RelacionVehiculo | null; mecanico_id?: string | null; km_ingreso?: number | null }, kmAnteriorPropio?: number | null, clienteActual?: string): Promise<Stmt[]> {
+  const tallerId = s.tallerId;
+  const v = await first<{ km_actual: number }>(db, 'SELECT km_actual FROM vehiculos WHERE taller_id = ? AND id = ?', tallerId, d.vehiculo_id);
   if (!v) throw badRequest('Vehículo inexistente');
-  if (v.cliente_id !== d.cliente_id) throw badRequest('El vehículo no pertenece al cliente');
+  const vinculo = await validarResponsable(db, s, d.cliente_id, d.vehiculo_id, { vincular: d.vincular_cliente, relacion: d.vinculo_relacion }, { puedeVincular: tiene(s, 'vehiculos.editar') && tiene(s, 'clientes.ver'), conservaActual: clienteActual === d.cliente_id });
   if (d.mecanico_id && !(await first(db, 'SELECT 1 FROM mecanicos WHERE taller_id = ? AND id = ? AND activo = 1', tallerId, d.mecanico_id))) throw badRequest('Mecánico inexistente o inactivo');
   // Regla observada en la referencia: el km de ingreso no puede ser menor al último registrado.
   const minimo = kmAnteriorPropio != null ? Math.min(v.km_actual, kmAnteriorPropio) : v.km_actual;
   if (d.km_ingreso != null && d.km_ingreso < minimo) throw badRequest(`El kilometraje no puede ser menor al último registrado (${v.km_actual} km)`);
+  return vinculo;
 }
 
 ordenes.get('/', async (c) => {
@@ -116,7 +137,7 @@ ordenes.get('/', async (c) => {
   if (mecanico_id) (cond.push('o.mecanico_id = ?'), params.push(mecanico_id));
   if (desde) (cond.push('o.fecha_ingreso >= ?'), params.push(desde));
   if (hasta) (cond.push('o.fecha_ingreso <= ?'), params.push(`${hasta}T23:59:59.999Z`));
-  return c.json((await all(c.env.DB, `${SELECT} WHERE ${cond.join(' AND ')} ORDER BY o.numero DESC LIMIT ?`, ...params, limite)).map((o) => limpiarDocumento(s, o)));
+  return c.json((await all(c.env.DB, `${SELECT} WHERE ${cond.join(' AND ')} ORDER BY o.numero DESC LIMIT ?`, ...params, limite)).map((o) => vistaOrden(s, o)));
 });
 
 /** Mi cronómetro en marcha (si lo hay) y en qué orden y tarea: lo usa la barra de la vista del mecánico. */
@@ -163,7 +184,8 @@ ordenes.get('/:id/pdf', async (c) => {
   for (const v of variantes) {
     if (!VARIANTES[v].permisos.every((p) => tiene(s, p))) throw forbidden(`No tenés permiso para imprimir la ${VARIANTES[v].rotulo.toLowerCase()}`);
   }
-  const datos = await datosHojaOrden(c.env.DB, s, c.req.param('id'), alcance(s), c.env.FIERRO_FOTOS);
+  // El cliente sólo se lee si alguna de las copias pedidas lo muestra (la del mecánico nunca, quien la imprima).
+  const datos = await datosHojaOrden(c.env.DB, s, c.req.param('id'), alcance(s), c.env.FIERRO_FOTOS, { cliente: muestraCliente(variantes) });
   if (!datos) throw notFound('Orden de trabajo');
   const { pdf, hojas } = generarHojaOrden(datos, variantes);
   // La impresión queda registrada (quién, qué orden y qué copia); si el registro falla, no se le niega el documento a quien lo pidió.
@@ -247,7 +269,7 @@ ordenes.get('/:id', async (c) => {
   const miCronometro = tiempos.find((t) => t.usuario_id === s.usuarioId && !t.fin_at) ?? null;
   const tareasEstimadoMin = tareas.reduce((a: number, t: any) => a + (t.tiempo_estimado_min ?? 0), 0);
   return c.json({
-    ...limpiarDocumento(s, o),
+    ...vistaOrden(s, o),
     items: limpiarItems(s, items),
     eventos,
     checklist: checklist ? { ...checklist, datos: JSON.parse(String(checklist.datos)) } : null,
@@ -305,7 +327,7 @@ ordenes.post('/', requirePerm('ordenes.crear'), async (c) => {
   const s = c.get('sesion');
   const d = await body(c, zOrden);
   if (d.items.length) exigirValorizado(s);
-  await validarCabecera(c.env.DB, s.tallerId, d);
+  const vinculo = await validarCabecera(c.env.DB, s, d);
   if (d.turno_id && !(await first(c.env.DB, 'SELECT 1 FROM turnos WHERE taller_id = ? AND id = ? AND orden_id IS NULL', s.tallerId, d.turno_id))) {
     throw badRequest('Turno inexistente o ya vinculado a otra OT');
   }
@@ -329,6 +351,7 @@ ordenes.post('/', requirePerm('ordenes.crear'), async (c) => {
     c.env.DB.prepare("INSERT INTO orden_eventos (id, taller_id, orden_id, estado_nuevo, usuario_id) VALUES (?, ?, ?, 'recibida', ?)").bind(uid(), s.tallerId, id, s.usuarioId),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'crear', { total: t.total }),
     ...sentenciasEnlaceInicial(c.env.DB, s.tallerId, id, s.usuarioId),
+    ...vinculo,
   ];
   if (d.km_ingreso != null) stmts.push(c.env.DB.prepare('UPDATE vehiculos SET km_actual = MAX(km_actual, ?) WHERE taller_id = ? AND id = ?').bind(d.km_ingreso, s.tallerId, d.vehiculo_id));
   if (d.turno_id) {
@@ -347,16 +370,16 @@ ordenes.put('/:id', requirePerm('ordenes.modificar'), async (c) => {
   const id = c.req.param('id');
   exigirValorizado(s);
   const d = await body(c, zOrden.omit({ turno_id: true }).extend({ version: z.number().int().min(1) }));
-  const o = await first<{ estado: EstadoOT; version: number; km_ingreso: number | null; vehiculo_id: string; lista_precio_id: string | null }>(
+  const o = await first<{ estado: EstadoOT; version: number; km_ingreso: number | null; vehiculo_id: string; cliente_id: string; lista_precio_id: string | null }>(
     c.env.DB,
-    'SELECT estado, version, km_ingreso, vehiculo_id, lista_precio_id FROM ordenes WHERE taller_id = ? AND id = ?',
+    'SELECT estado, version, km_ingreso, vehiculo_id, cliente_id, lista_precio_id FROM ordenes WHERE taller_id = ? AND id = ?',
     s.tallerId,
     id,
   );
   if (!o) throw notFound('Orden de trabajo');
   if (!ESTADOS_OT_EDITABLES.includes(o.estado)) throw conflict(`No se puede editar una OT en estado "${ESTADO_OT_LABEL[o.estado]}". Volvela a "En reparación" para modificarla.`);
   if (o.version !== d.version) throw conflict('La OT fue modificada por otra persona. Recargá para ver los cambios.', 'version');
-  await validarCabecera(c.env.DB, s.tallerId, d, o.vehiculo_id === d.vehiculo_id ? o.km_ingreso : null);
+  const vinculo = await validarCabecera(c.env.DB, s, d, o.vehiculo_id === d.vehiculo_id ? o.km_ingreso : null, o.cliente_id);
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
   const t = totales(items, d);
   const lista = await resolverLista(c.env.DB, s.tallerId, d.lista_precio_id, o.lista_precio_id);
@@ -374,6 +397,7 @@ ordenes.put('/:id', requirePerm('ordenes.modificar'), async (c) => {
     ...sentenciasItems(c.env.DB, 'orden_items', 'orden_id', s.tallerId, id, items, t.subtotales),
     sentenciaListaEnDocumento(c.env.DB, 'ordenes', s.tallerId, id, lista),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'orden', id, 'modificar', { total: t.total }),
+    ...vinculo,
   ];
   if (d.km_ingreso != null) stmts.push(c.env.DB.prepare('UPDATE vehiculos SET km_actual = MAX(km_actual, ?) WHERE taller_id = ? AND id = ?').bind(d.km_ingreso, s.tallerId, d.vehiculo_id));
   await c.env.DB.batch(stmts);

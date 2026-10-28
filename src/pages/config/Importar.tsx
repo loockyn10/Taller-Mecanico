@@ -16,7 +16,7 @@ import {
 
 const DESCRIPCION: Record<TipoImportacion, { texto: string; antes?: string }> = {
   clientes: { texto: 'Nombre, documento, contacto y condición frente al IVA.' },
-  vehiculos: { texto: 'Patente, marca, modelo, año y kilometraje, vinculados a su cliente.', antes: 'Importá primero los clientes.' },
+  vehiculos: { texto: 'Patente, marca, modelo, año y kilometraje. Si el archivo trae el cliente, el vehículo se vincula a él; si no, queda sin clientes.', antes: 'Si vas a vincularlos a sus clientes, importá primero los clientes.' },
   articulos: { texto: 'Repuestos e insumos con códigos, categoría, unidad, costo y precio.', antes: 'Si tienen proveedor, importá primero los proveedores.' },
   proveedores: { texto: 'Razón social, CUIT y datos de contacto.' },
 };
@@ -56,7 +56,8 @@ export function Importar() {
   const campos = tipo ? camposDe(tipo) : [];
   const filas: FilaOrigen[] = datos?.filas ?? [];
   const faltantes = campos.filter((c) => c.requerido && mapeo[c.clave] == null);
-  const tieneReferencia = tipo === 'vehiculos' ? ['cliente_documento', 'cliente_codigo', 'cliente_nombre'].some((k) => mapeo[k] != null) : true;
+  // El cliente es opcional en los vehículos: sin columnas de cliente se cargan sin clientes vinculados.
+  const sinReferenciaCliente = tipo === 'vehiculos' && !['cliente_documento', 'cliente_codigo', 'cliente_nombre'].some((k) => mapeo[k] != null);
   const opciones = () => ({
     decimal,
     crear_catalogos: crearCatalogos,
@@ -332,10 +333,10 @@ export function Importar() {
             </TablaApilable>
           </Tarjeta>
           {faltantes.length > 0 && <Aviso tono="ambar">Falta relacionar: {faltantes.map((f) => f.etiqueta).join(', ')}.</Aviso>}
-          {!tieneReferencia && <Aviso tono="ambar">Para vincular cada vehículo con su cliente relacioná al menos una de las columnas del cliente (documento, código o nombre).</Aviso>}
+          {sinReferenciaCliente && <Aviso tono="azul">Sin columnas del cliente (documento, código o nombre) los vehículos se cargan sin clientes vinculados; podés vincularlos después desde la ficha de cada vehículo.</Aviso>}
           <div className="flex justify-between">
             <Boton icono={<ArrowLeft className="size-4" />} onClick={() => setPaso(0)}>Atrás</Boton>
-            <Boton variante="primario" icono={<ArrowRight className="size-4" />} disabled={faltantes.length > 0 || !tieneReferencia} onClick={() => setPaso(2)}>Siguiente: opciones</Boton>
+            <Boton variante="primario" icono={<ArrowRight className="size-4" />} disabled={faltantes.length > 0} onClick={() => setPaso(2)}>Siguiente: opciones</Boton>
           </div>
         </div>
       )}

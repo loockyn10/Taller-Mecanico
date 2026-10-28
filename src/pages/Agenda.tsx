@@ -55,8 +55,8 @@ function FormTurno({ inicial, onCerrar, extra }: { inicial: any; onCerrar: () =>
       <div className="space-y-4">
         {extra && <div className="flex flex-wrap gap-2 rounded-ctl bg-slate-50 p-2">{extra}</div>}
         {inicial.presupuesto_numero && <Aviso>Vinculado al presupuesto P-{numero(inicial.presupuesto_numero)}</Aviso>}
-        <SelectorCliente valor={cliente} onCambio={(c) => { setCliente(c); setF({ ...f, vehiculo_id: null }); }} />
-        <SelectorVehiculo clienteId={cliente?.id ?? null} valor={f.vehiculo_id} onCambio={(v) => setF({ ...f, vehiculo_id: v })} />
+        <SelectorCliente valor={cliente} onCambio={setCliente} />
+        <SelectorVehiculo clienteId={cliente?.id ?? null} cliente={cliente} valor={f.vehiculo_id} onCambio={(v) => setF({ ...f, vehiculo_id: v })} />
         <div className="grid gap-3 sm:grid-cols-3">
           <Campo label="Fecha" requerido><Input type="date" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></Campo>
           <Campo label="Hora" requerido><Input type="time" value={f.hora} onChange={(e) => setF({ ...f, hora: e.target.value })} /></Campo>
@@ -98,7 +98,11 @@ export function Agenda() {
   useEffect(() => {
     const vId = sp.get('vehiculo');
     if (sp.get('nuevo') && vId) {
-      api.get(`/vehiculos/${vId}`).then((v) => setForm({ cliente_id: v.cliente_id, cliente: v.cliente, cliente_telefono: v.cliente_telefono, vehiculo_id: v.id, motivo: sp.get('motivo') ?? '' })).catch(() => undefined);
+      api.get(`/vehiculos/${vId}`).then((v) => {
+        // El vehículo puede tener varios clientes (o ninguno): se propone el titular o el primero vinculado y se puede cambiar.
+        const c = v.clientes_vinculados?.[0];
+        setForm({ cliente_id: c?.cliente_id, cliente: c?.cliente, cliente_telefono: c?.cliente_telefono, vehiculo_id: v.id, motivo: sp.get('motivo') ?? '' });
+      }).catch(() => undefined);
       setSp({}, { replace: true });
     }
   }, [sp, setSp]);

@@ -153,13 +153,16 @@ describe('normalización de proveedores', () => {
 
 describe('normalización de vehículos', () => {
   const anio = 2027;
-  it('normaliza la patente y exige cliente', () => {
+  it('normaliza la patente; el cliente es opcional', () => {
     const r = normalizarVehiculo({ patente: 'ab 123-cd', cliente_documento: '30123456', marca: 'Fiat', modelo: 'Cronos', anio: '2019', km: '85.000' }, anio);
     expect(r.errores).toEqual([]);
     expect(r.datos).toMatchObject({ patente: 'AB123CD', anio: 2019, km: 85000, cliente_ref: { documento: '30123456' } });
     expect(claveReferenciaCliente(r.datos.cliente_ref!)).toBe('doc:30123456');
     expect(clavesDeFila('vehiculos', r.datos)).toEqual(['p:AB123CD']);
-    expect(normalizarVehiculo({ patente: 'AB123CD' }, anio).errores.some((e) => e.includes('cliente'))).toBe(true);
+    // Sin referencia al cliente el vehículo es válido: se carga sin clientes vinculados.
+    const sinCliente = normalizarVehiculo({ patente: 'AB123CD' }, anio);
+    expect(sinCliente.errores).toEqual([]);
+    expect(sinCliente.datos.cliente_ref).toBeUndefined();
   });
   it('rechaza patentes, años y modelos inválidos', () => {
     expect(normalizarVehiculo({ patente: 'ABC', cliente_codigo: 'C1' }, anio).errores.length).toBe(1);

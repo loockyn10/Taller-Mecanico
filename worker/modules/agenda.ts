@@ -36,9 +36,8 @@ const zTurno = z.object({
 async function validarRefs(db: D1Database, tallerId: string, d: Partial<z.infer<typeof zTurno>>) {
   if (d.cliente_id && !(await first(db, 'SELECT 1 FROM clientes WHERE taller_id = ? AND id = ?', tallerId, d.cliente_id))) throw badRequest('Cliente inexistente');
   if (d.vehiculo_id) {
-    const v = await first<{ cliente_id: string }>(db, 'SELECT cliente_id FROM vehiculos WHERE taller_id = ? AND id = ?', tallerId, d.vehiculo_id);
-    if (!v) throw badRequest('Vehículo inexistente');
-    if (d.cliente_id && v.cliente_id !== d.cliente_id) throw badRequest('El vehículo no pertenece al cliente');
+    // El cliente del turno es el responsable de ese turno: no hace falta que esté vinculado al vehículo.
+    if (!(await first(db, 'SELECT 1 FROM vehiculos WHERE taller_id = ? AND id = ?', tallerId, d.vehiculo_id))) throw badRequest('Vehículo inexistente');
   }
   if (d.presupuesto_id && !(await first(db, 'SELECT 1 FROM presupuestos WHERE taller_id = ? AND id = ?', tallerId, d.presupuesto_id))) throw badRequest('Presupuesto inexistente');
   if (d.mecanico_id && !(await first(db, 'SELECT 1 FROM mecanicos WHERE taller_id = ? AND id = ?', tallerId, d.mecanico_id))) throw badRequest('Mecánico inexistente');

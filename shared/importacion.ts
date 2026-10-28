@@ -493,8 +493,8 @@ export function normalizarVehiculo(v: Valores, anioMaximo: number): FilaNormaliz
   if (cod) ref.codigo = cod;
   const nom = a.txt('cliente_nombre', 160, 'Nombre del cliente');
   if (nom) ref.nombre = nom;
+  // El cliente es opcional: un vehículo puede importarse sin clientes vinculados. Si el archivo trae una referencia, tiene que poder resolverse.
   if (ref.documento || ref.codigo || ref.nombre) d.cliente_ref = ref;
-  else if (!a.errores.length) a.errores.push('Falta indicar a qué cliente pertenece el vehículo (documento, código o nombre del cliente)');
   d.marca = a.txt('marca', 60, 'Marca');
   d.modelo = a.txt('modelo', 80, 'Modelo');
   if (d.modelo && !d.marca) a.errores.push('Hay modelo pero falta la marca');

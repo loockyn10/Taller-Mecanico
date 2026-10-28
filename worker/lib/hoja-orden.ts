@@ -4,6 +4,8 @@
 // qué permiso exige. Cambiar el contenido de la copia del mecánico o de la copia de administración es editar SU definición, sin tocar el dibujo.
 //
 // Regla de datos: este módulo sólo recibe `DatosHoja`, que contiene datos operativos (nunca precios, costos, márgenes, totales ni notas internas).
+// Privacidad: la copia del MECÁNICO nunca lleva datos personales del cliente (nombre, teléfono, etc.), sin importar quién la imprima: depende del tipo de
+// documento (`DefVariante.datosCliente`) y no del rol de quien la genera. Sólo la copia de administración muestra al cliente (y únicamente con permiso).
 // Una variante que algún día necesite importes tendrá que sumarlos a `DatosHoja` desde `hoja-orden-datos.ts` exigiendo los permisos de valorización.
 import type { Permiso } from '../../shared/permisos';
 import { Documento, MM, type ImagenJpeg, type Pagina } from './pdf/escritor';
@@ -18,6 +20,7 @@ export interface DatosHoja {
   /** JPEG (miniatura) de la fotografía del vehículo, si tiene alguna a la que quien imprime pueda acceder. */
   foto?: Uint8Array | null;
   orden: { numero: number; fechaApertura: string; fechaPrometida: string | null };
+  /** Cliente responsable de la orden. Sólo se lee cuando se pide una copia que lo muestra y la sesión puede ver clientes; si no, llega vacío. */
   cliente: { visible: boolean; nombre: string | null; telefono: string | null };
   vehiculo: { patente: string; marca: string | null; modelo: string | null; anio: number | null; km: number | null };
   tecnico: { responsable: string | null; participantes: string[] };
@@ -47,6 +50,8 @@ export interface DefVariante {
   secciones: readonly SeccionId[];
   /** Zona de renglones para escribir a mano; `null` si la variante no la lleva. */
   anotaciones: { titulo: string } | null;
+  /** Si la copia muestra los datos del cliente. La del mecánico nunca (privacidad por tipo de documento, no por quién imprime). */
+  datosCliente: boolean;
 }
 
 /**
@@ -61,6 +66,7 @@ export const VARIANTES: Record<VarianteId, DefVariante> = {
     permisos: ['ordenes.imprimir'],
     secciones: ['identidad', 'datos', 'motivo', 'trabajos', 'repuestos', 'diagnostico', 'observaciones'],
     anotaciones: { titulo: 'ANOTACIONES DEL MECÁNICO' },
+    datosCliente: false,
   },
   administracion: {
     id: 'administracion',
@@ -69,12 +75,15 @@ export const VARIANTES: Record<VarianteId, DefVariante> = {
     permisos: ['ordenes.imprimir', 'ordenes.imprimir_administracion'],
     secciones: ['identidad', 'datos', 'motivo', 'trabajos', 'repuestos', 'diagnostico', 'observaciones'],
     anotaciones: { titulo: 'ANOTACIONES DEL MECÁNICO' },
+    datosCliente: true,
   },
 };
 
 export const COPIAS = ['mecanico', 'administracion', 'ambas'] as const;
 export type Copia = (typeof COPIAS)[number];
 export const variantesDeCopia = (c: Copia): VarianteId[] => (c === 'ambas' ? ['mecanico', 'administracion'] : [c]);
+/** Alguna de las variantes pedidas muestra al cliente: sólo entonces hace falta leer sus datos. */
+export const muestraCliente = (variantes: VarianteId[]) => variantes.some((id) => VARIANTES[id].datosCliente);
 
 // ───────────────────────── Medidas (mm) ─────────────────────────
 
@@ -284,14 +293,16 @@ function filaDatos(celdas: Celda[]): Elemento {
 const FOTO = { ancho: 30, alto: 23 } as const;
 const X_FOTO = PAGINA.der - FOTO.ancho;
 
-function seccionDatos({ d, foto }: Contexto): Elemento[] {
+function seccionDatos({ d, v, foto }: Contexto): Elemento[] {
   const vh = d.vehiculo;
   // Con foto, las filas terminan antes de su columna (sin ella conservan el ancho completo de siempre).
   const fin = foto ? X_FOTO - 4 : PAGINA.der;
   const veh = [vh.marca, vh.modelo].filter(Boolean).join(' ');
   const tecnico = [d.tecnico.responsable, ...d.tecnico.participantes.map((n) => `${n} (participa)`)].filter(Boolean).join(' · ');
   const filas: Elemento[] = [];
-  if (d.cliente.visible) {
+  if (!v.datosCliente) {
+    // Copia del mecánico: sin fila de cliente.
+  } else if (d.cliente.visible) {
     filas.push(filaDatos([
       { etiqueta: 'CLIENTE', valor: d.cliente.nombre ?? '', x: PAGINA.izq, ancho: foto ? 88 : 100, negrita: true },
       { etiqueta: 'TELÉFONO', valor: d.cliente.telefono ?? '', x: foto ? 106 : 118, ancho: fin - (foto ? 106 : 118) },
@@ -469,7 +480,9 @@ function zonaAnotaciones(p: Pagina, titulo: string, desde: number) {
   }
 }
 
-function dibujarVariante(doc: Documento, d: DatosHoja, v: DefVariante, logo: ImagenJpeg | null, foto: ImagenJpeg | null): number {
+function dibujarVariante(doc: Documento, datos: DatosHoja, v: DefVariante, logo: ImagenJpeg | null, foto: ImagenJpeg | null): number {
+  // Defensa en profundidad: una copia sin datos del cliente recibe una versión de los datos donde el cliente ya no existe.
+  const d: DatosHoja = v.datosCliente ? datos : { ...datos, cliente: { visible: false, nombre: null, telefono: null } };
   const ctx: Contexto = { d, v, logo, foto };
   const elementos = v.secciones.flatMap((s) => SECCIONES[s](ctx));
   const hojas = paginar(elementos, encabezadoContinuacion(ctx));

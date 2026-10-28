@@ -60,7 +60,8 @@ export function Miniaturas({ ids, tam = 'size-16' }: { ids: string[]; tam?: stri
 export function ResumenRegistro({ reg, info, firmas = true }: { reg: Registro; info: InfoOrden; firmas?: boolean }) {
   const d = reg.datos;
   const ctx = reg.contexto;
-  const cliente = ctx?.cliente.nombre ?? info.cliente;
+  // Sin permiso para ver clientes (mecánicos) el servidor no envía el cliente y la fila no se muestra.
+  const cliente = ctx?.cliente?.nombre ?? info.cliente;
   const vehiculo = ctx ? [ctx.vehiculo.patente, [ctx.vehiculo.marca, ctx.vehiculo.modelo, ctx.vehiculo.anio].filter(Boolean).join(' ')].filter(Boolean).join(' · ') : [info.patente, info.vehiculo].filter(Boolean).join(' · ');
   const prog = progresoItems(d);
   const observados = SECCIONES_CHECKLIST.flatMap((s) => s.items.map((i) => ({ sec: s.titulo, titulo: i.titulo, codigo: `${s.clave}.${i.clave}` }))).filter((i) => (d.items[i.codigo]?.estado ?? 'no_revisado') !== 'no_revisado');
@@ -76,7 +77,7 @@ export function ResumenRegistro({ reg, info, firmas = true }: { reg: Registro; i
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
         <Par k="Orden de trabajo" v={`#${numero(ctx?.orden.numero ?? info.numero)}`} />
-        <Par k="Cliente" v={cliente} />
+        {cliente && <Par k="Cliente" v={cliente} />}
         <Par k="Vehículo" v={vehiculo} />
         <Par k="Fecha y hora" v={fechaHora(d.fecha_hora)} />
         <Par k="Responsable" v={ctx?.responsable.nombre ?? reg.responsable_nombre} />

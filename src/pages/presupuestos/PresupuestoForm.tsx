@@ -4,7 +4,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { hoyISO, sumarDias } from '@/lib/format';
 import { Boton, Campo, Cargando, Encabezado, Input, Tarjeta, Textarea, useToast } from '@/components/ui';
-import { SelectorCliente, SelectorVehiculo, type ClienteMin } from '@/components/selectores';
+import { ClienteVehiculo, valorClienteVehiculoVacio, vinculoParaApi, type ValorClienteVehiculo } from '@/components/ClienteVehiculo';
 import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
 import { EditorItems, itemsDesdeApi, itemsParaApi, paramsVacios, useDefectosEnParams, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 
@@ -16,8 +16,8 @@ export function PresupuestoForm() {
   const [sp] = useSearchParams();
   const { data: cfg } = useQuery({ queryKey: ['config'], queryFn: () => api.get('/taller/config') });
   const { data: existente, isLoading } = useQuery({ queryKey: ['presupuesto', id], queryFn: () => api.get(`/presupuestos/${id}`), enabled: !!id });
-  const [cliente, setCliente] = useState<ClienteMin | null>(null);
-  const [vehiculoId, setVehiculoId] = useState<string | null>(null);
+  const [cv, setCv] = useState<ValorClienteVehiculo>(valorClienteVehiculoVacio);
+  const { cliente, vehiculoId } = cv;
   const [km, setKm] = useState('');
   const [fecha, setFecha] = useState(hoyISO());
   const [valido, setValido] = useState('');
@@ -34,9 +34,9 @@ export function PresupuestoForm() {
     const cId = sp.get('cliente');
     const vId = sp.get('vehiculo');
     const sId = sp.get('servicio');
-    if (cId) api.get(`/clientes/${cId}`).then((c) => setCliente(c)).catch(() => undefined);
+    if (cId) api.get(`/clientes/${cId}`).then((c) => setCv((a) => ({ ...a, cliente: c }))).catch(() => undefined);
     if (vId) {
-      setVehiculoId(vId);
+      setCv((a) => ({ ...a, vehiculoId: vId }));
       if (sId) {
         api.get<any[]>(`/servicios?vehiculo_id=${vId}`).then((lista) => {
           const sv = lista.find((x) => x.id === sId);
@@ -52,8 +52,7 @@ export function PresupuestoForm() {
   }, [cfg, id, valido]);
   useEffect(() => {
     if (!existente) return;
-    setCliente({ id: existente.cliente_id, codigo: 0, nombre: existente.cliente, telefono: existente.cliente_telefono });
-    setVehiculoId(existente.vehiculo_id);
+    setCv({ cliente: { id: existente.cliente_id, codigo: 0, nombre: existente.cliente, telefono: existente.cliente_telefono }, vehiculoId: existente.vehiculo_id, vincular: false, relacion: '' });
     setKm(existente.km != null ? String(existente.km) : '');
     setFecha(existente.fecha);
     setValido(existente.valido_hasta ?? '');
@@ -65,7 +64,7 @@ export function PresupuestoForm() {
 
   const m = useMutation({
     mutationFn: () => {
-      const datos = { cliente_id: cliente!.id, vehiculo_id: vehiculoId, km: km ? Number(km) : null, fecha, valido_hasta: valido || null, observaciones: obs, lista_precio_id: lista, items: itemsParaApi(items), ...params };
+      const datos = { cliente_id: cliente!.id, vehiculo_id: vehiculoId, ...vinculoParaApi(cv), km: km ? Number(km) : null, fecha, valido_hasta: valido || null, observaciones: obs, lista_precio_id: lista, items: itemsParaApi(items), ...params };
       return id ? api.put(`/presupuestos/${id}`, datos).then(() => ({ id })) : api.post('/presupuestos', datos);
     },
     onSuccess: (p) => {
@@ -87,11 +86,8 @@ export function PresupuestoForm() {
       <Encabezado titulo={id ? `Editar presupuesto P-${String(existente?.numero ?? '').padStart(4, '0')}` : 'Nuevo presupuesto'} volver />
       <div className="grid gap-5 xl:grid-cols-3">
         <div className="space-y-5 xl:col-span-2">
-          <Tarjeta titulo="Cliente y vehículo">
-            <div className="space-y-4">
-              <SelectorCliente valor={cliente} onCambio={(c) => { setCliente(c); setVehiculoId(null); }} />
-              <SelectorVehiculo clienteId={cliente?.id ?? null} valor={vehiculoId} onCambio={(v, veh) => { setVehiculoId(v); if (veh && !km) setKm(String(veh.km_actual || '')); }} />
-            </div>
+          <Tarjeta titulo="Vehículo y cliente" subtitulo="El presupuesto conserva su propio cliente responsable">
+            <ClienteVehiculo valor={cv} onCambio={setCv} onVehiculo={(v) => v && !km && setKm(String(v.km_actual || ''))} />
           </Tarjeta>
           <Tarjeta titulo="Detalle">
             <div className="mb-4"><SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} nombreActual={existente?.lista_precio_nombre} /></div>

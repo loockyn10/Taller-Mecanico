@@ -321,7 +321,7 @@ function BusquedaGlobal({ abierto, onCerrar }: { abierto: boolean; onCerrar: () 
         <div className="max-h-[60vh] overflow-y-auto p-2 text-sm">
           {dq.trim().length < 2 && <p className="px-3 py-6 text-center text-tenue">Escribí al menos 2 caracteres</p>}
           {vacio && <p className="px-3 py-6 text-center text-tenue">Sin resultados para “{dq}”</p>}
-          {data?.vehiculos.length > 0 && <Grupo titulo="Vehículos">{data.vehiculos.map((v: any) => <Resultado key={v.id} onClick={() => ir(`/vehiculos/${v.id}`)} titulo={v.patente} detalle={`${[v.marca, v.modelo].filter(Boolean).join(' ')} · ${v.cliente}`} />)}</Grupo>}
+          {data?.vehiculos.length > 0 && <Grupo titulo="Vehículos">{data.vehiculos.map((v: any) => <Resultado key={v.id} onClick={() => ir(`/vehiculos/${v.id}`)} titulo={v.patente} detalle={[[v.marca, v.modelo].filter(Boolean).join(' '), v.cliente].filter(Boolean).join(' · ')} />)}</Grupo>}
           {data?.ordenes.length > 0 && <Grupo titulo="Órdenes">{data.ordenes.map((o: any) => <Resultado key={o.id} onClick={() => ir(soloMecanico ? `/mis-trabajos/${o.id}` : `/ordenes/${o.id}`)} titulo={`OT #${String(o.numero).padStart(4, '0')}`} detalle={[o.patente, o.cliente].filter(Boolean).join(' · ')} />)}</Grupo>}
           {data?.clientes.length > 0 && <Grupo titulo="Clientes">{data.clientes.map((c: any) => <Resultado key={c.id} onClick={() => ir(`/clientes/${c.id}`)} titulo={c.nombre} detalle={c.telefono ?? ''} />)}</Grupo>}
         </div>

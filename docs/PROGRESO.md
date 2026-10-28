@@ -1,6 +1,6 @@
 # Progreso del desarrollo · Fierro v0.1.0
 
-Última actualización: 2026-10-24 (Sprint 20: seguimiento público de órdenes, secciones 123 a 129; Sprint 19: hoja de OT en PDF, §118 a §122; Sprint 18: checklist de recepción y entrega, §109 a §117). Documento para retomar el trabajo en nuevas sesiones.
+Última actualización: 2026-10-28 (Sprint 23: vehículos sin cliente, varios clientes por vehículo y privacidad del mecánico, secciones 134 a 136; Sprint 20: seguimiento público de órdenes, secciones 123 a 129; Sprint 19: hoja de OT en PDF, §118 a §122; Sprint 18: checklist de recepción y entrega, §109 a §117). Documento para retomar el trabajo en nuevas sesiones.
 
 ## 1. Arquitectura implementada
 - **Un único Worker** (`worker/index.ts`, Hono) sirve la API en `/api/*` y la SPA compilada (assets estáticos). En desarrollo, Vite sirve la SPA y redirige `/api` a `wrangler dev`.
@@ -25,7 +25,7 @@
 | Configuración del taller y preferencias | ✅ | ✅ | parcial |
 | Dashboard | ✅ | ✅ (indicadores financieros solo con permiso) | ✅ |
 | Clientes (código correlativo, baja lógica) | ✅ | ✅ lista, ficha, alta rápida | ✅ |
-| Vehículos (patente única por taller, km no regresivo) | ✅ | ✅ lista, ficha, historial | ✅ |
+| Vehículos (patente única por taller, km no regresivo; **sin cliente obligatorio y con varios clientes vinculados**, Sprint 23, `docs/VEHICULOS_CLIENTES.md`) | ✅ | ✅ lista, ficha, clientes vinculados, historial | ✅ |
 | Marcas y modelos (catálogo inicial por taller) | ✅ | ✅ | ✅ |
 | Mecánicos | ✅ | ✅ | — |
 | Servicios / mano de obra (categorías, intervalos, ajuste masivo) | ✅ | ✅ | ✅ |

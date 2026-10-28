@@ -30,8 +30,8 @@ async function pedirPdf(ordenId: string, copia: Copia): Promise<Blob> {
 }
 
 const OPCIONES: Array<{ copia: Copia; titulo: string; detalle: string }> = [
-  { copia: 'mecanico', titulo: 'Mecánico', detalle: 'Datos para trabajar y media hoja para anotaciones. Sin precios.' },
-  { copia: 'administracion', titulo: 'Administración', detalle: 'Copia identificada como «COPIA ADMINISTRACIÓN».' },
+  { copia: 'mecanico', titulo: 'Mecánico', detalle: 'Datos para trabajar y media hoja para anotaciones. Sin precios ni datos personales del cliente (aunque la imprima un administrador).' },
+  { copia: 'administracion', titulo: 'Administración', detalle: 'Copia identificada como «COPIA ADMINISTRACIÓN». Incluye el cliente responsable de la orden, según tus permisos.' },
   { copia: 'ambas', titulo: 'Ambas copias', detalle: 'Un solo PDF con una hoja A4 por cada copia.' },
   { copia: 'cliente', titulo: 'Seguimiento del cliente', detalle: 'Hoja con el código QR para que el cliente siga su vehículo desde el celular.' },
 ];

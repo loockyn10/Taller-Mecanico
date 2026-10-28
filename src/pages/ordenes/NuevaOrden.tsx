@@ -5,7 +5,8 @@ import { api } from '@/lib/api';
 import { km } from '@/lib/format';
 import { SelectorDeposito } from '@/components/SelectorDeposito';
 import { Boton, Campo, Encabezado, Input, Select, Tarjeta, Textarea, useToast } from '@/components/ui';
-import { SelectorCliente, SelectorVehiculo, useMecanicos, type ClienteMin } from '@/components/selectores';
+import { useMecanicos } from '@/components/selectores';
+import { ClienteVehiculo, valorClienteVehiculoVacio, vinculoParaApi, type ValorClienteVehiculo } from '@/components/ClienteVehiculo';
 import { SelectorLista, useListaPorDefecto } from '@/components/SelectorLista';
 import { EditorItems, itemsParaApi, paramsVacios, useDefectosEnParams, type ItemUI, type ParamsUI } from '@/components/EditorItems';
 
@@ -15,8 +16,8 @@ export function NuevaOrden() {
   const qc = useQueryClient();
   const [sp] = useSearchParams();
   const { data: mecanicos = [] } = useMecanicos();
-  const [cliente, setCliente] = useState<ClienteMin | null>(null);
-  const [vehiculoId, setVehiculoId] = useState<string | null>(null);
+  const [cv, setCv] = useState<ValorClienteVehiculo>(valorClienteVehiculoVacio);
+  const { cliente, vehiculoId } = cv;
   const [kmActual, setKmActual] = useState<number | null>(null);
   const [kmIngreso, setKmIngreso] = useState('');
   const [mecanico, setMecanico] = useState('');
@@ -34,9 +35,9 @@ export function NuevaOrden() {
   // Precarga desde un turno de la agenda o desde la ficha de un cliente/vehículo.
   useEffect(() => {
     const cId = sp.get('cliente');
-    if (cId) api.get(`/clientes/${cId}`).then((c) => setCliente(c)).catch(() => undefined);
+    if (cId) api.get(`/clientes/${cId}`).then((c) => setCv((a) => ({ ...a, cliente: c }))).catch(() => undefined);
     const vId = sp.get('vehiculo');
-    if (vId) setVehiculoId(vId);
+    if (vId) setCv((a) => ({ ...a, vehiculoId: vId }));
     if (sp.get('motivo')) setFalla(sp.get('motivo')!);
   }, [sp]);
 
@@ -45,6 +46,7 @@ export function NuevaOrden() {
       api.post('/ordenes', {
         cliente_id: cliente!.id,
         vehiculo_id: vehiculoId,
+        ...vinculoParaApi(cv),
         mecanico_id: mecanico || null,
         deposito_id: deposito || null,
         km_ingreso: kmIngreso ? Number(kmIngreso) : null,
@@ -71,24 +73,8 @@ export function NuevaOrden() {
       <Encabezado titulo="Nueva orden de trabajo" volver="/ordenes" />
       <div className="grid gap-5 xl:grid-cols-3">
         <div className="space-y-5 xl:col-span-2">
-          <Tarjeta titulo="Cliente y vehículo">
-            <div className="space-y-4">
-              <SelectorCliente
-                valor={cliente}
-                onCambio={(c) => {
-                  setCliente(c);
-                  setVehiculoId(null);
-                }}
-              />
-              <SelectorVehiculo
-                clienteId={cliente?.id ?? null}
-                valor={vehiculoId}
-                onCambio={(id, v) => {
-                  setVehiculoId(id);
-                  if (v) setKmActual(v.km_actual);
-                }}
-              />
-            </div>
+          <Tarjeta titulo="Vehículo y cliente" subtitulo="El historial técnico es del vehículo; cada orden conserva su propio cliente responsable">
+            <ClienteVehiculo valor={cv} onCambio={setCv} onVehiculo={(v) => v && setKmActual(v.km_actual)} />
           </Tarjeta>
           <Tarjeta titulo="Trabajos y repuestos" subtitulo="Podés completarlo ahora o después del diagnóstico">
             <div className="mb-4"><SelectorLista valor={lista} onCambio={setLista} items={items} onItems={setItems} /></div>
@@ -114,7 +100,7 @@ export function NuevaOrden() {
               <Campo label="Fecha prometida de entrega">
                 <Input type="date" value={prometida} onChange={(e) => setPrometida(e.target.value)} />
               </Campo>
-              <Campo label="Observaciones internas">
+              <Campo label="Observaciones internas" hint="Las ve el mecánico en su hoja: no cargues datos personales ni de cobro del cliente">
                 <Textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={2} />
               </Campo>
             </div>

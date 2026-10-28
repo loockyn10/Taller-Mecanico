@@ -28,8 +28,9 @@ historial.get('/vehiculos/:id/historial-tecnico', requirePerm('vehiculos.ver'), 
   const ordenes = await all<Record<string, any>>(
     c.env.DB,
     `SELECT o.id, o.numero, o.estado, o.fecha_ingreso, o.fecha_lista, o.fecha_entregada, o.km_ingreso, o.falla_reportada, o.diagnostico, o.resultado, o.observaciones, o.total,
-            m.nombre AS responsable
+            m.nombre AS responsable, cl.nombre AS cliente
        FROM ordenes o LEFT JOIN mecanicos m ON m.taller_id = o.taller_id AND m.id = o.mecanico_id
+       JOIN clientes cl ON cl.taller_id = o.taller_id AND cl.id = o.cliente_id
       WHERE o.taller_id = ? AND o.vehiculo_id = ? ${filtroEstado} ORDER BY o.fecha_ingreso DESC LIMIT 300`,
     s.tallerId, vid,
   );

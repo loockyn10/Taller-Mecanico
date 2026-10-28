@@ -5,12 +5,14 @@ import type { AppEnv } from '../env';
 import { badRequest, body, conflict, notFound, query, zFecha, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, first, guard, like, SEQ_VALOR, seqIncrementar, uid } from '../lib/db';
 import { sentenciasEnlaceInicial } from '../lib/seguimiento';
-import { requirePerm, requireRW } from '../lib/auth';
+import { requirePerm, requireRW, tiene } from '../lib/auth';
+import type { Sesion } from '../env';
+import { validarResponsable } from '../lib/vehiculo-clientes';
 import { exigirValorizado, limpiarDocumento, limpiarItems } from '../lib/privacidad';
 import { fechaComercial } from '../lib/fechas';
 import { resolverLista, sentenciaListaEnDocumento } from '../lib/listas';
 import { COLS_TOTALES, SET_TOTALES, sentenciasItems, totales, validarItems, valoresTotales, zItem, zParametrosTotales } from '../lib/documentos';
-import { normalizarPatente } from '../../shared/dominio';
+import { RELACIONES_VEHICULO, normalizarPatente, type RelacionVehiculo } from '../../shared/dominio';
 import { sentenciaTareasDesdeTrabajos } from '../lib/tareas';
 
 export const presupuestos = new Hono<AppEnv>();
@@ -19,6 +21,8 @@ presupuestos.use('*', requireRW('presupuestos.ver', 'presupuestos.gestionar'));
 const zPresupuesto = zParametrosTotales.extend({
   cliente_id: zId,
   vehiculo_id: zId,
+  vincular_cliente: z.boolean().nullish(),
+  vinculo_relacion: z.enum(RELACIONES_VEHICULO).nullish(),
   fecha: zFecha.optional(),
   valido_hasta: zFecha.nullish(),
   lista_precio_id: zId.nullish(),
@@ -37,10 +41,10 @@ const SELECT = `SELECT p.*, c.nombre AS cliente, c.telefono AS cliente_telefono,
   LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id
   LEFT JOIN ordenes o ON o.taller_id = p.taller_id AND o.id = p.orden_id`;
 
-async function validarClienteVehiculo(db: D1Database, tallerId: string, clienteId: string, vehiculoId: string) {
-  const v = await first<{ cliente_id: string }>(db, 'SELECT cliente_id FROM vehiculos WHERE taller_id = ? AND id = ?', tallerId, vehiculoId);
-  if (!v) throw badRequest('Vehículo inexistente');
-  if (v.cliente_id !== clienteId) throw badRequest('El vehículo no pertenece al cliente');
+/** El cliente del presupuesto es el responsable de ESTE documento: no hace falta que esté vinculado al vehículo (y se lo puede vincular en la misma operación). */
+async function validarClienteVehiculo(db: D1Database, s: Sesion, d: { cliente_id: string; vehiculo_id: string; vincular_cliente?: boolean | null; vinculo_relacion?: RelacionVehiculo | null }, clienteActual?: string) {
+  if (!(await first(db, 'SELECT 1 FROM vehiculos WHERE taller_id = ? AND id = ?', s.tallerId, d.vehiculo_id))) throw badRequest('Vehículo inexistente');
+  return validarResponsable(db, s, d.cliente_id, d.vehiculo_id, { vincular: d.vincular_cliente, relacion: d.vinculo_relacion }, { puedeVincular: tiene(s, 'vehiculos.editar') && tiene(s, 'clientes.ver'), conservaActual: clienteActual === d.cliente_id });
 }
 
 presupuestos.get('/', async (c) => {
@@ -68,7 +72,7 @@ presupuestos.post('/', async (c) => {
   const s = c.get('sesion');
   exigirValorizado(s);
   const d = await body(c, zPresupuesto);
-  await validarClienteVehiculo(c.env.DB, s.tallerId, d.cliente_id, d.vehiculo_id);
+  const vinculo = await validarClienteVehiculo(c.env.DB, s, d);
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
   const t = totales(items, d);
   const cfg = await first<{ validez_presupuesto_dias: number }>(c.env.DB, 'SELECT validez_presupuesto_dias FROM taller_config WHERE taller_id = ?', s.tallerId);
@@ -85,6 +89,7 @@ presupuestos.post('/', async (c) => {
     ...sentenciasItems(c.env.DB, 'presupuesto_items', 'presupuesto_id', s.tallerId, id, items, t.subtotales),
     ...(lista ? [sentenciaListaEnDocumento(c.env.DB, 'presupuestos', s.tallerId, id, lista)] : []),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'presupuesto', id, 'crear', { total: t.total }),
+    ...vinculo,
   ]);
   return c.json(limpiarDocumento(s, (await first(c.env.DB, `${SELECT} WHERE p.taller_id = ? AND p.id = ?`, s.tallerId, id))!), 201);
 });
@@ -94,13 +99,13 @@ presupuestos.put('/:id', async (c) => {
   const id = c.req.param('id');
   exigirValorizado(s);
   const d = await body(c, zPresupuesto);
-  const p = await first<{ estado: string; lista_precio_id: string | null; fecha: string }>(c.env.DB, 'SELECT estado, lista_precio_id, fecha FROM presupuestos WHERE taller_id = ? AND id = ?', s.tallerId, id);
+  const p = await first<{ estado: string; lista_precio_id: string | null; fecha: string; cliente_id: string }>(c.env.DB, 'SELECT estado, lista_precio_id, fecha, cliente_id FROM presupuestos WHERE taller_id = ? AND id = ?', s.tallerId, id);
   if (!p) throw notFound('Presupuesto');
   if (p.estado !== 'pendiente') throw conflict('Solo se pueden editar presupuestos pendientes');
   // Editar sin tocar la fecha la conserva; una fecha nueva se valida como cualquier fecha comercial.
   const fechaNueva = d.fecha && d.fecha !== p.fecha ? fechaComercial(s, d.fecha) : null;
   const lista = await resolverLista(c.env.DB, s.tallerId, d.lista_precio_id, p.lista_precio_id);
-  await validarClienteVehiculo(c.env.DB, s.tallerId, d.cliente_id, d.vehiculo_id);
+  const vinculo = await validarClienteVehiculo(c.env.DB, s, d, p.cliente_id);
   const items = await validarItems(c.env.DB, s.tallerId, d.items);
   const t = totales(items, d);
   await c.env.DB.batch([
@@ -113,6 +118,7 @@ presupuestos.put('/:id', async (c) => {
     ...sentenciasItems(c.env.DB, 'presupuesto_items', 'presupuesto_id', s.tallerId, id, items, t.subtotales),
     sentenciaListaEnDocumento(c.env.DB, 'presupuestos', s.tallerId, id, lista),
     auditar(c.env.DB, s.tallerId, s.usuarioId, 'presupuesto', id, 'modificar', { total: t.total }),
+    ...vinculo,
   ]);
   return c.json({ ok: true });
 });

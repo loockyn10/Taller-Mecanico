@@ -204,37 +204,77 @@ export function huellasTablas(db, columnasPorTabla = null) {
 /**
  * Aplica las migraciones pendientes sobre la copia en memoria de un respaldo y demuestra que NO tocaron los datos que ya existían:
  * mismas filas y mismo contenido en las columnas previas de cada tabla, base íntegra y sin claves foráneas rotas.
+ * Como D1, aplica cada archivo dentro de una transacción y con las claves foráneas ACTIVAS (el volcado se carga con ellas apagadas, pero producción no).
  * `pendientes` = [{ name, sql }] en orden. No toca ninguna base real.
+ * `quitadasPermitidas` = ['tabla.columna', ...]: columnas que una migración elimina a propósito (por ejemplo al reconstruir una tabla). Si falta alguna de las
+ * columnas previas que NO está en esa lista, el ensayo falla; las permitidas se comparan por las columnas que se conservan y se informan aparte.
  */
-export function ensayarMigraciones(db, pendientes) {
+export function ensayarMigraciones(db, pendientes, { quitadasPermitidas = [] } = {}) {
   const antes = huellasTablas(db);
   const columnasAntes = Object.fromEntries(Object.entries(antes).map(([t, h]) => [t, h.columnas]));
+  // Contenido previo de cada tabla (para poder compararlo por las columnas que se conservan si una migración quita alguna a propósito).
+  const filasAntes = Object.fromEntries(
+    Object.entries(columnasAntes).map(([t, cols]) => {
+      const sel = `SELECT ${cols.map(ident).join(', ')} FROM ${ident(t)}`;
+      let filas;
+      try {
+        filas = db.prepare(`${sel} ORDER BY rowid`).all();
+      } catch {
+        filas = db.prepare(sel).all();
+      }
+      return [t, filas.map((f) => ({ ...f }))];
+    }),
+  );
   const errores = [];
   const aplicadas = [];
+  db.exec('PRAGMA foreign_keys = ON');
   for (const m of pendientes) {
     try {
+      db.exec('BEGIN');
       db.exec(m.sql);
+      db.exec('COMMIT');
       aplicadas.push(m.name);
     } catch (e) {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        /* ya revertida */
+      }
       errores.push(`${m.name}: ${e.message}`);
       break;
     }
   }
-  const despues = huellasTablas(db, columnasAntes);
+  const quitadas = [];
+  const comparables = {};
+  for (const [t, cols] of Object.entries(columnasAntes)) {
+    if (!tablasDe(db).includes(t)) continue;
+    const ahora = columnasDe(db, t);
+    for (const c of cols) if (!ahora.includes(c)) quitadas.push(`${t}.${c}`);
+    comparables[t] = cols.filter((c) => ahora.includes(c));
+  }
+  const despues = huellasTablas(db, comparables);
+  const hash = (filas) => crypto.createHash('sha256').update(JSON.stringify(filas)).digest('hex');
   const cambios = [];
   for (const [t, a] of Object.entries(antes)) {
     const d = despues[t];
     if (!d) cambios.push({ tabla: t, motivo: 'la tabla desapareció' });
-    else if (a.filas !== d.filas || a.hash !== d.hash) cambios.push({ tabla: t, motivo: `cambió el contenido (${a.filas} → ${d.filas} filas)` });
+    else {
+      const previo = comparables[t].length === a.columnas.length ? a : { filas: filasAntes[t].length, hash: hash(filasAntes[t].map((f) => Object.fromEntries(comparables[t].map((c) => [c, f[c]])))) };
+      if (previo.filas !== d.filas || previo.hash !== d.hash) cambios.push({ tabla: t, motivo: `cambió el contenido (${previo.filas} → ${d.filas} filas)` });
+    }
   }
+  const noPermitidas = quitadas.filter((c) => !quitadasPermitidas.includes(c));
+  for (const c of noPermitidas) cambios.push({ tabla: c.split('.')[0], motivo: `desapareció la columna ${c.split('.')[1]}` });
   const nuevas = tablasDe(db).filter((t) => !antes[t]);
   const columnasNuevas = Object.entries(antes)
+    .filter(([t]) => tablasDe(db).includes(t))
     .map(([t, a]) => ({ tabla: t, columnas: columnasDe(db, t).filter((c) => !a.columnas.includes(c)) }))
     .filter((x) => x.columnas.length);
   const integridad = db.prepare('PRAGMA integrity_check').all().map((r) => Object.values(r)[0]);
   const claves = db.prepare('PRAGMA foreign_key_check').all().length;
   return {
     aplicadas, errores, cambios, nuevas, columnasNuevas,
+    columnasQuitadas: quitadas.filter((c) => quitadasPermitidas.includes(c)),
     integridadOk: integridad.length === 1 && integridad[0] === 'ok', violacionesClaves: claves,
     ok: !errores.length && !cambios.length && integridad[0] === 'ok' && claves === 0,
     filasComparadas: Object.values(antes).reduce((a, h) => a + h.filas, 0),

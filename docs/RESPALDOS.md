@@ -29,6 +29,12 @@ Antes de aplicar una migración remota, **ensayarla sobre el respaldo** (copia e
 npm run respaldo -- ensayar-migraciones respaldos/d1-antes-sprint13-<fecha>.sql
 ```
 
+El ensayo aplica cada migración **dentro de una transacción y con las claves foráneas activas** (como D1). Si una migración elimina una columna a propósito (por ejemplo la 0019, que reconstruye `vehiculos` sin `cliente_id`), hay que declararla; sin eso el ensayo falla, y con eso compara fila por fila el resto de las columnas de esa tabla:
+
+```bash
+npm run respaldo -- ensayar-migraciones respaldos/d1-antes-sprint23-<fecha>.sql --permitir-quitar vehiculos.cliente_id
+```
+
 Para revisar un respaldo ya existente (por ejemplo antes de usarlo):
 
 ```bash

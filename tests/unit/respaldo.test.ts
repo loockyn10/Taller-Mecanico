@@ -133,6 +133,37 @@ describe.skipIf(!haySqlite())('respaldo y exportación', () => {
     db3.close();
   });
 
+  it('el ensayo de la 0019 (reconstruye vehiculos y quita cliente_id) exige declarar la columna quitada y compara el resto fila por fila', () => {
+    const migraciones = fs.readdirSync(path.join(RAIZ, 'migrations')).filter((f) => f.endsWith('.sql')).sort();
+    const nueva = migraciones.find((m) => m.startsWith('0019'))!;
+    const sql = [
+      ...migraciones.filter((m) => m < '0019').map((m) => fs.readFileSync(path.join(RAIZ, 'migrations', m), 'utf8')),
+      `INSERT INTO talleres (id, nombre) VALUES ('tA', 'Taller A');`,
+      `INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES ('c1', 'tA', 1, 'Juan'), ('c2', 'tA', 2, 'María');`,
+      `INSERT INTO vehiculos (id, taller_id, cliente_id, patente, km_actual) VALUES ('v1', 'tA', 'c1', 'AA111AA', 10), ('v2', 'tA', 'c2', 'BB222BB', 20);`,
+      `INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, fecha_ingreso) VALUES ('o1', 'tA', 1, 'c2', 'v1', '2026-10-01');`,
+    ].join('\n');
+    const previo = path.join(dir, 'previo-0019.sql');
+    fs.writeFileSync(previo, sql);
+    const pendientes = [{ name: nueva, sql: fs.readFileSync(path.join(RAIZ, 'migrations', nueva), 'utf8') }];
+    // Sin declarar la columna que desaparece, el ensayo falla (no se pierde nada sin que alguien lo decida).
+    const db1 = cargarRespaldo(previo);
+    const sinPermiso = ensayarMigraciones(db1, pendientes);
+    expect(sinPermiso.ok).toBe(false);
+    expect(sinPermiso.cambios).toEqual([{ tabla: 'vehiculos', motivo: 'desapareció la columna cliente_id' }]);
+    db1.close();
+    // Declarada, el resto de las columnas queda idéntico, hay 2 vínculos vigentes y la base es íntegra con las claves foráneas activas.
+    const db2 = cargarRespaldo(previo);
+    const ok = ensayarMigraciones(db2, pendientes, { quitadasPermitidas: ['vehiculos.cliente_id'] });
+    expect(ok.errores).toEqual([]);
+    expect(ok.ok).toBe(true);
+    expect(ok.columnasQuitadas).toEqual(['vehiculos.cliente_id']);
+    expect(ok.nuevas).toEqual(['vehiculo_clientes']);
+    expect(db2.prepare('SELECT COUNT(*) AS n FROM vehiculo_clientes WHERE desvinculado_at IS NULL').get().n).toBe(2);
+    expect(db2.prepare("SELECT cliente_id FROM ordenes WHERE id = 'o1'").get().cliente_id).toBe('c2'); // la OT conserva su cliente
+    db2.close();
+  });
+
   it('el CSV neutraliza fórmulas y escapa comas y comillas', () => {
     const csv = aCsv([{ a: '=cmd|calc', b: 'dice "hola", chau', c: -500, d: null }]);
     expect(csv).toContain("'=cmd|calc");

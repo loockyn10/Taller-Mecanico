@@ -54,7 +54,9 @@ describe('contenido del PDF', () => {
     expect(r.texto.startsWith('%PDF-1.4')).toBe(true);
     expect(paginas(r.texto)).toBe(1);
     const t = visible(r.texto);
-    for (const x of ['COPIA MECÁNICO', 'Taller Hoja A', 'Rosario Ñañez', '341 555-7788', 'PDF123', '2017', '98.765 km', 'Ruido al frenar', 'Cambio de pastillas de freno', 'Alineación y balanceo', 'Llamar antes de cambiar discos', 'ANOTACIONES DEL MECÁNICO']) expect(t, x).toContain(x);
+    // Privacidad (Sprint 23): aunque la imprima el propietario, la copia del mecánico no lleva al cliente.
+    for (const x of ['Rosario', 'Ñañez', '341 555-7788']) expect(t, x).not.toContain(x);
+    for (const x of ['COPIA MECÁNICO', 'Taller Hoja A', 'PDF123', '2017', '98.765 km', 'Ruido al frenar', 'Cambio de pastillas de freno', 'Alineación y balanceo', 'Llamar antes de cambiar discos', 'ANOTACIONES DEL MECÁNICO']) expect(t, x).toContain(x);
   });
 
   it('no contiene precios, costos, totales, IVA ni notas internas: ni en el documento ni en los metadatos', async () => {
@@ -103,7 +105,7 @@ describe('permisos y alcance', () => {
     // el mecánico no tiene permiso para ver clientes: ni nombre ni teléfono
     expect(t).not.toContain('Rosario');
     expect(t).not.toContain('341 555-7788');
-    expect(t).toContain('No disponible con los permisos de quien imprime');
+    expect(t).not.toContain('No disponible'); // la copia del mecánico no tiene fila de cliente
     expect((await pedirPdf(T.mec.api, T.ot.id, 'administracion')).status).toBe(403);
     expect((await pedirPdf(T.mec.api, T.ot.id, 'ambas')).status).toBe(403);
   });

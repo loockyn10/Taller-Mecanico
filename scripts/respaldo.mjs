@@ -3,7 +3,7 @@
 //   npm run respaldo -- plataforma [--etiqueta antes-sprint12]   Respaldo de TODA la D1 remota (operador). Lo deja en respaldos/, anota el bookmark de
 //                                                                Time Travel y verifica el archivo con un ensayo de restauración en memoria.
 //   npm run respaldo -- verificar <archivo.sql>                  Ensayo de restauración en memoria: integridad, claves foráneas, filas por tabla y migraciones.
-//   npm run respaldo -- ensayar-migraciones <archivo.sql>        Aplica las migraciones pendientes del proyecto sobre una COPIA EN MEMORIA del respaldo y demuestra
+//   npm run respaldo -- ensayar-migraciones <archivo.sql> [--permitir-quitar tabla.columna,…]   Aplica las migraciones pendientes del proyecto sobre una COPIA EN MEMORIA del respaldo y demuestra
 //                                                                que los datos existentes quedan idénticos (filas y contenido) y la base íntegra.
 //   npm run respaldo -- talleres <archivo.sql>                   Lista los talleres que contiene un respaldo.
 //   npm run respaldo -- exportar-taller <archivo.sql> <taller> [--salida carpeta]
@@ -113,13 +113,15 @@ function ensayar(o) {
     db.close();
     return;
   }
-  const r = ensayarMigraciones(db, pendientes);
+  const permitidas = String(o['permitir-quitar'] ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const r = ensayarMigraciones(db, pendientes, { quitadasPermitidas: permitidas });
   db.close();
   console.log(`Migraciones ensayadas: ${r.aplicadas.join(', ') || '—'}`);
   console.log(`  Tablas comparadas: ${r.tablasComparadas} · filas comparadas: ${r.filasComparadas} → ${r.cambios.length ? `${r.cambios.length} CON CAMBIOS` : 'todas idénticas'}`);
   for (const c of r.cambios) console.log(`    ✗ ${c.tabla}: ${c.motivo}`);
   console.log(`  Tablas nuevas: ${r.nuevas.join(', ') || '—'}`);
   console.log(`  Columnas nuevas: ${r.columnasNuevas.map((x) => `${x.tabla}(${x.columnas.join(',')})`).join(' ') || '—'}`);
+  if (r.columnasQuitadas.length) console.log(`  Columnas quitadas a propósito (--permitir-quitar): ${r.columnasQuitadas.join(', ')}; el resto de las columnas de esas tablas se comparó fila por fila y quedó idéntico`);
   console.log(`  Integridad: ${r.integridadOk ? 'ok' : 'FALLA'} · claves foráneas rotas: ${r.violacionesClaves}`);
   for (const e of r.errores) console.log(`  ✗ ${e}`);
   if (!r.ok) process.exit(1);

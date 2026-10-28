@@ -1,15 +1,16 @@
 // Clientes, vehículos, marcas/modelos y mecánicos.
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../env';
-import { badRequest, body, conflict, notFound, query, zId, zTextoOpt } from '../lib/http';
+import { badRequest, body, conflict, forbidden, notFound, query, zId, zTextoOpt } from '../lib/http';
 import { all, auditar, delTaller, first, like, run, SEQ_VALOR, seqIncrementar, uid, updateParcial } from '../lib/db';
 import { requireAny, requirePerm, tiene } from '../lib/auth';
 import { limpiarDocumento, limpiarMantenimiento } from '../lib/privacidad';
 import { estadoMantenimientos } from '../lib/mantenimiento';
 import { credito_cliente_sql, creditosDisponibles } from '../lib/creditos';
-import { CONDICIONES_IVA, normalizarPatente } from '../../shared/dominio';
+import { CONDICIONES_IVA, RELACIONES_VEHICULO, normalizarPatente } from '../../shared/dominio';
 import { claveBusqueda } from '../../shared/catalogo-auto';
+import { CLIENTES_N_SQL, CLIENTES_TEXTO_SQL, cambiarRelacion, desvincularCliente, exigirClienteActivo, sentenciaVincular, vincularCliente, vinculosDeVehiculo } from '../lib/vehiculo-clientes';
 
 export const maestros = new Hono<AppEnv>();
 
@@ -29,12 +30,12 @@ const zCliente = z.object({
 maestros.get('/clientes', requirePerm('clientes.ver'), async (c) => {
   const s = c.get('sesion');
   const { q, limite, inactivos } = query(c, z.object({ q: z.string().optional(), limite: z.coerce.number().int().min(1).max(500).default(100), inactivos: z.string().optional() }));
-  const filtroQ = q ? 'AND (c.nombre LIKE ? OR c.documento LIKE ? OR c.telefono LIKE ? OR c.email LIKE ? OR EXISTS (SELECT 1 FROM vehiculos v WHERE v.taller_id = c.taller_id AND v.cliente_id = c.id AND v.patente LIKE ?))' : '';
+  const filtroQ = q ? 'AND (c.nombre LIKE ? OR c.documento LIKE ? OR c.telefono LIKE ? OR c.email LIKE ? OR EXISTS (SELECT 1 FROM vehiculo_clientes x JOIN vehiculos v ON v.taller_id = x.taller_id AND v.id = x.vehiculo_id WHERE x.taller_id = c.taller_id AND x.cliente_id = c.id AND x.desvinculado_at IS NULL AND v.patente LIKE ?))' : '';
   const params = q ? [like(q), like(q), like(q), like(q), like(normalizarPatente(q) || q)] : [];
   const rows = await all(
     c.env.DB,
     `SELECT c.id, c.codigo, c.nombre, c.documento_tipo, c.documento, c.condicion_iva, c.telefono, c.email, c.localidad, c.activo,
-            (SELECT COUNT(*) FROM vehiculos v WHERE v.taller_id = c.taller_id AND v.cliente_id = c.id AND v.activo = 1) AS vehiculos,
+            (SELECT COUNT(*) FROM vehiculo_clientes x JOIN vehiculos v ON v.taller_id = x.taller_id AND v.id = x.vehiculo_id WHERE x.taller_id = c.taller_id AND x.cliente_id = c.id AND x.desvinculado_at IS NULL AND v.activo = 1) AS vehiculos,
             (SELECT COALESCE(SUM(total - devuelto - cobrado), 0) FROM ventas ve WHERE ve.taller_id = c.taller_id AND ve.cliente_id = c.id AND ve.estado = 'emitida') AS saldo,
             ${credito_cliente_sql('c')} AS a_favor
        FROM clientes c
@@ -54,10 +55,11 @@ maestros.get('/clientes/:id', requirePerm('clientes.ver'), async (c) => {
   if (!cli) throw notFound('Cliente');
   const vehiculos = await all(
     c.env.DB,
-    `SELECT v.*, ma.nombre AS marca, mo.nombre AS modelo FROM vehiculos v
+    `SELECT v.*, x.id AS vinculo_id, x.relacion, x.vinculado_at, ma.nombre AS marca, mo.nombre AS modelo FROM vehiculo_clientes x
+       JOIN vehiculos v ON v.taller_id = x.taller_id AND v.id = x.vehiculo_id
        LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id
        LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id
-      WHERE v.taller_id = ? AND v.cliente_id = ? AND v.activo = 1 ORDER BY v.patente`,
+      WHERE x.taller_id = ? AND x.cliente_id = ? AND x.desvinculado_at IS NULL AND v.activo = 1 ORDER BY v.patente`,
     s.tallerId,
     cli.id,
   );
@@ -120,8 +122,8 @@ maestros.delete('/clientes/:id', requirePerm('registros.eliminar'), async (c) =>
 });
 
 // ───────────── Vehículos ─────────────
+const zRelacion = z.enum(RELACIONES_VEHICULO).nullish();
 const zVehiculo = z.object({
-  cliente_id: zId,
   patente: z.string().trim().min(5, 'patente inválida').max(12),
   marca_id: zId.nullish(),
   modelo_id: zId.nullish(),
@@ -140,6 +142,12 @@ const zVehiculo = z.object({
   cat_version_id: zId.nullish(),
   marca_texto: zTextoOpt(60),
   modelo_texto: zTextoOpt(80),
+});
+/** Alta: el vehículo puede crearse sin clientes, con uno (`cliente_id`, forma abreviada) o con varios (`clientes`). Son vínculos, no un campo del vehículo. */
+const zAltaVehiculo = zVehiculo.extend({
+  cliente_id: zId.nullish(),
+  relacion: zRelacion,
+  clientes: z.array(z.object({ cliente_id: zId, relacion: zRelacion })).max(10).default([]),
 });
 
 type DatosVehiculo = z.infer<typeof zVehiculo> | Partial<z.infer<typeof zVehiculo>>;
@@ -209,36 +217,47 @@ async function validarMarcaModelo(db: D1Database, tallerId: string, marcaId?: st
   }
 }
 
-const SELECT_VEHICULO = `SELECT v.*, ma.nombre AS marca, mo.nombre AS modelo, ma.cat_marca_id AS marca_cat_id, mo.cat_modelo_id AS modelo_cat_id, c.nombre AS cliente, c.telefono AS cliente_telefono
+/** Datos propios del vehículo. Los clientes vinculados (nombres) se agregan sólo para quien puede ver clientes. */
+const selectVehiculo = (conClientes: boolean) => `SELECT v.*, ma.nombre AS marca, mo.nombre AS modelo, ma.cat_marca_id AS marca_cat_id, mo.cat_modelo_id AS modelo_cat_id, ${CLIENTES_N_SQL} AS clientes_n${conClientes ? `, ${CLIENTES_TEXTO_SQL} AS clientes` : ''}
   FROM vehiculos v
-  JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
   LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id
   LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id`;
 
+const VINCULO_VIGENTE = 'EXISTS (SELECT 1 FROM vehiculo_clientes x WHERE x.taller_id = v.taller_id AND x.vehiculo_id = v.id AND x.desvinculado_at IS NULL';
+
 maestros.get('/vehiculos', requirePerm('vehiculos.ver'), async (c) => {
   const s = c.get('sesion');
-  const { q, cliente_id, cat_modelo_id } = query(c, z.object({ q: z.string().optional(), cliente_id: z.string().optional(), cat_modelo_id: z.string().max(64).optional() }));
+  const verClientes = tiene(s, 'clientes.ver');
+  const { q, cliente_id, cat_modelo_id, sin_clientes } = query(c, z.object({ q: z.string().optional(), cliente_id: z.string().optional(), cat_modelo_id: z.string().max(64).optional(), sin_clientes: z.string().optional() }));
   const cond: string[] = ['v.taller_id = ?', 'v.activo = 1'];
   const params: unknown[] = [s.tallerId];
-  if (cliente_id) (cond.push('v.cliente_id = ?'), params.push(cliente_id));
+  // Los clientes vinculados son datos personales: sin permiso para verlos no se filtra ni se busca por ellos (sería una forma de averiguarlos).
+  if (cliente_id) {
+    if (!verClientes) throw forbidden('No tenés permiso para consultar los vehículos de un cliente');
+    cond.push(`${VINCULO_VIGENTE} AND x.cliente_id = ?)`);
+    params.push(cliente_id);
+  }
+  if (sin_clientes) cond.push(`NOT ${VINCULO_VIGENTE})`);
   // Vehículos del taller vinculados a un modelo del catálogo (directo o por el modelo del taller): sólo ve los suyos.
   if (cat_modelo_id) (cond.push('(v.cat_modelo_id = ? OR mo.cat_modelo_id = ?)'), params.push(cat_modelo_id, cat_modelo_id));
   if (q) {
-    cond.push('(v.patente LIKE ? OR c.nombre LIKE ? OR ma.nombre LIKE ? OR mo.nombre LIKE ?)');
-    params.push(like(normalizarPatente(q) || q), like(q), like(q), like(q));
+    cond.push(`(v.patente LIKE ? OR ma.nombre LIKE ? OR mo.nombre LIKE ?${verClientes ? ` OR ${VINCULO_VIGENTE} AND x.cliente_id IN (SELECT id FROM clientes WHERE taller_id = v.taller_id AND nombre LIKE ?))` : ''})`);
+    params.push(like(normalizarPatente(q) || q), like(q), like(q), ...(verClientes ? [like(q)] : []));
   }
-  return c.json((await all(c.env.DB, `${SELECT_VEHICULO} WHERE ${cond.join(' AND ')} ORDER BY v.patente LIMIT 200`, ...params)).map((v) => limpiarDocumento(s, v)));
+  return c.json((await all(c.env.DB, `${selectVehiculo(verClientes)} WHERE ${cond.join(' AND ')} ORDER BY v.patente LIMIT 200`, ...params)).map((v) => limpiarDocumento(s, v)));
 });
 
 maestros.get('/vehiculos/:id', requirePerm('vehiculos.ver'), async (c) => {
   const s = c.get('sesion');
-  const v = await first<Record<string, unknown>>(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, c.req.param('id'));
+  const verClientes = tiene(s, 'clientes.ver');
+  const v = await first<Record<string, unknown>>(c.env.DB, `${selectVehiculo(verClientes)} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, c.req.param('id'));
   if (!v) throw notFound('Vehículo');
-  // Historial de reparaciones: OT del vehículo con sus trabajos.
-  const ordenes = await all<{ id: string }>(
+  // Historial técnico: pertenece al vehículo (todas sus OT, de cualquier cliente). Cada OT conserva SU cliente responsable; sólo se muestra a quien puede ver clientes.
+  const ordenes = await all<{ id: string; cliente_id: string }>(
     c.env.DB,
-    `SELECT o.id, o.numero, o.estado, o.fecha_ingreso, o.fecha_entregada, o.km_ingreso, o.total, o.falla_reportada, o.diagnostico, m.nombre AS mecanico
+    `SELECT o.id, o.numero, o.estado, o.fecha_ingreso, o.fecha_entregada, o.km_ingreso, o.total, o.falla_reportada, o.diagnostico, m.nombre AS mecanico, o.cliente_id, cl.nombre AS cliente
        FROM ordenes o LEFT JOIN mecanicos m ON m.taller_id = o.taller_id AND m.id = o.mecanico_id
+       JOIN clientes cl ON cl.taller_id = o.taller_id AND cl.id = o.cliente_id
       WHERE o.taller_id = ? AND o.vehiculo_id = ? ORDER BY o.fecha_ingreso DESC`,
     s.tallerId,
     v.id,
@@ -251,24 +270,25 @@ maestros.get('/vehiculos/:id', requirePerm('vehiculos.ver'), async (c) => {
     s.tallerId,
     v.id,
   );
-  const historial = ordenes.map((o) => limpiarDocumento(s, { ...o, items: items.filter((i) => i.orden_id === o.id) }));
+  const historial = ordenes.map((o) => {
+    const { cliente_id, ...resto } = limpiarDocumento(s, { ...o, items: items.filter((i) => i.orden_id === o.id) });
+    return verClientes ? { ...resto, cliente_id } : resto;
+  });
   const proximos = tiene(s, 'mantenimientos.ver') ? (await estadoMantenimientos(c.env.DB, s.tallerId, { vehiculoId: String(v.id) })).map((m) => limpiarMantenimiento(s, m)) : [];
-  return c.json({ ...limpiarDocumento(s, v), historial, proximos });
+  const vinculos = verClientes ? await vinculosDeVehiculo(c.env.DB, s.tallerId, String(v.id), { contacto: true }) : null;
+  return c.json({ ...limpiarDocumento(s, v), historial, proximos, ...(vinculos ? { clientes_vinculados: vinculos.vigentes, clientes_anteriores: vinculos.anteriores } : {}) });
 });
 
 maestros.post('/vehiculos', requirePerm('vehiculos.crear'), async (c) => {
   const s = c.get('sesion');
-  const d = await body(c, zVehiculo);
+  const { cliente_id, relacion, clientes, ...d } = await body(c, zAltaVehiculo);
   const patente = normalizarPatente(d.patente);
   if (patente.length < 5) throw badRequest('Patente inválida');
-  if (!(await delTaller(c.env.DB, 'clientes', s.tallerId, d.cliente_id, 'id'))) throw badRequest('Cliente inexistente');
-  const ex = await first<{ id: string; cliente: string }>(
-    c.env.DB,
-    'SELECT v.id, c.nombre AS cliente FROM vehiculos v JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id WHERE v.taller_id = ? AND v.patente = ?',
-    s.tallerId,
-    patente,
-  );
-  if (ex) throw conflict(`La patente ${patente} ya está registrada (cliente: ${ex.cliente})`, 'duplicado');
+  // Clientes a vincular (opcional): forma abreviada + lista, sin repetidos. Vincular exige poder ver clientes.
+  const vincular = [...(cliente_id ? [{ cliente_id, relacion: relacion ?? 'titular' }] : []), ...clientes].filter((x, i, a) => a.findIndex((y) => y.cliente_id === x.cliente_id) === i);
+  if (vincular.length && !tiene(s, 'clientes.ver')) throw forbidden('Para vincular clientes necesitás permiso para ver clientes');
+  for (const x of vincular) await exigirClienteActivo(c.env.DB, s.tallerId, x.cliente_id);
+  if (await first(c.env.DB, 'SELECT 1 FROM vehiculos WHERE taller_id = ? AND patente = ?', s.tallerId, patente)) throw conflict(`La patente ${patente} ya está registrada`, 'duplicado');
   const cat = await resolverCatalogo(c.env.DB, s.tallerId, d);
   if (!cat) {
     await validarMarcaModelo(c.env.DB, s.tallerId, d.marca_id, d.modelo_id);
@@ -279,11 +299,12 @@ maestros.post('/vehiculos', requirePerm('vehiculos.crear'), async (c) => {
   const id = uid();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      'INSERT INTO vehiculos (id, taller_id, cliente_id, patente, marca_id, modelo_id, anio, color, vin, motor, combustible, km_actual, notas, version, cat_modelo_id, cat_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    ).bind(id, s.tallerId, d.cliente_id, patente, marcaId, modeloId, d.anio ?? null, d.color, d.vin, d.motor, d.combustible, d.km_actual, d.notas, d.version ?? null, cat ? cat.cat_modelo_id : (d.cat_modelo_id ?? null), cat ? cat.cat_version_id : (d.cat_version_id ?? null)),
-    auditar(c.env.DB, s.tallerId, s.usuarioId, 'vehiculo', id, 'crear', { patente }),
+      'INSERT INTO vehiculos (id, taller_id, patente, marca_id, modelo_id, anio, color, vin, motor, combustible, km_actual, notas, version, cat_modelo_id, cat_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    ).bind(id, s.tallerId, patente, marcaId, modeloId, d.anio ?? null, d.color, d.vin, d.motor, d.combustible, d.km_actual, d.notas, d.version ?? null, cat ? cat.cat_modelo_id : (d.cat_modelo_id ?? null), cat ? cat.cat_version_id : (d.cat_version_id ?? null)),
+    ...vincular.map((x) => sentenciaVincular(c.env.DB, s, id, x.cliente_id, x.relacion ?? null)),
+    auditar(c.env.DB, s.tallerId, s.usuarioId, 'vehiculo', id, 'crear', { patente, clientes: vincular.length }),
   ]);
-  return c.json(limpiarDocumento(s, (await first(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id))!), 201);
+  return c.json(limpiarDocumento(s, (await first(c.env.DB, `${selectVehiculo(tiene(s, 'clientes.ver'))} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id))!), 201);
 });
 
 maestros.put('/vehiculos/:id', requirePerm('vehiculos.editar'), async (c) => {
@@ -292,7 +313,6 @@ maestros.put('/vehiculos/:id', requirePerm('vehiculos.editar'), async (c) => {
   const d = await body(c, zVehiculo.partial());
   const v = await delTaller<{ km_actual: number }>(c.env.DB, 'vehiculos', s.tallerId, id, 'km_actual');
   if (!v) throw notFound('Vehículo');
-  if (d.cliente_id && !(await delTaller(c.env.DB, 'clientes', s.tallerId, d.cliente_id, 'id'))) throw badRequest('Cliente inexistente');
   const cat = await resolverCatalogo(c.env.DB, s.tallerId, d);
   if (!cat) {
     await validarMarcaModelo(c.env.DB, s.tallerId, d.marca_id, d.modelo_id);
@@ -302,9 +322,41 @@ maestros.put('/vehiculos/:id', requirePerm('vehiculos.editar'), async (c) => {
   if (cat) Object.assign(datos, cat);
   if (d.patente) datos.patente = normalizarPatente(d.patente);
   if (d.km_actual !== undefined && d.km_actual < v.km_actual) throw badRequest(`El kilometraje no puede ser menor al registrado (${v.km_actual} km)`);
-  const st = updateParcial(c.env.DB, 'vehiculos', s.tallerId, id, datos, ['cliente_id', 'patente', 'marca_id', 'modelo_id', 'anio', 'color', 'vin', 'motor', 'combustible', 'km_actual', 'notas', 'version', 'cat_modelo_id', 'cat_version_id']);
+  const st = updateParcial(c.env.DB, 'vehiculos', s.tallerId, id, datos, ['patente', 'marca_id', 'modelo_id', 'anio', 'color', 'vin', 'motor', 'combustible', 'km_actual', 'notas', 'version', 'cat_modelo_id', 'cat_version_id']);
   if (st) await c.env.DB.batch([st, auditar(c.env.DB, s.tallerId, s.usuarioId, 'vehiculo', id, 'modificar')]);
-  return c.json(limpiarDocumento(s, (await first(c.env.DB, `${SELECT_VEHICULO} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id))!));
+  return c.json(limpiarDocumento(s, (await first(c.env.DB, `${selectVehiculo(tiene(s, 'clientes.ver'))} WHERE v.taller_id = ? AND v.id = ?`, s.tallerId, id))!));
+});
+
+// ───────────── Clientes vinculados a un vehículo ─────────────
+// Ver los vínculos (nombres y teléfonos) exige poder ver clientes; modificarlos, poder editar vehículos. Los vínculos cerrados se conservan como historial.
+const zVinculo = z.object({ cliente_id: zId, relacion: zRelacion });
+const respuestaVinculos = async (c: Context<AppEnv>, vehiculoId: string) => {
+  const r = await vinculosDeVehiculo(c.env.DB, c.get('sesion').tallerId, vehiculoId, { contacto: true });
+  return { vigentes: r.vigentes, anteriores: r.anteriores };
+};
+
+maestros.get('/vehiculos/:id/clientes', requirePerm('vehiculos.ver', 'clientes.ver'), async (c) => {
+  const s = c.get('sesion');
+  const id = c.req.param('id');
+  if (!(await delTaller(c.env.DB, 'vehiculos', s.tallerId, id, 'id'))) throw notFound('Vehículo');
+  return c.json(await respuestaVinculos(c, id));
+});
+
+maestros.post('/vehiculos/:id/clientes', requirePerm('vehiculos.editar', 'clientes.ver'), async (c) => {
+  const d = await body(c, zVinculo);
+  await vincularCliente(c.env.DB, c.get('sesion'), c.req.param('id'), d.cliente_id, d.relacion ?? null);
+  return c.json(await respuestaVinculos(c, c.req.param('id')), 201);
+});
+
+maestros.put('/vehiculos/:id/clientes/:vinculoId', requirePerm('vehiculos.editar', 'clientes.ver'), async (c) => {
+  const d = await body(c, z.object({ relacion: zRelacion }));
+  await cambiarRelacion(c.env.DB, c.get('sesion'), c.req.param('id'), c.req.param('vinculoId'), d.relacion ?? null);
+  return c.json(await respuestaVinculos(c, c.req.param('id')));
+});
+
+maestros.delete('/vehiculos/:id/clientes/:vinculoId', requirePerm('vehiculos.editar', 'clientes.ver'), async (c) => {
+  await desvincularCliente(c.env.DB, c.get('sesion'), c.req.param('id'), c.req.param('vinculoId'));
+  return c.json(await respuestaVinculos(c, c.req.param('id')));
 });
 
 maestros.delete('/vehiculos/:id', requirePerm('registros.eliminar'), async (c) => {

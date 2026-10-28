@@ -62,16 +62,19 @@ export async function fotoParaHoja(db: D1Database, bucket: R2Bucket | undefined,
 
 /** Devuelve los datos operativos de la orden, o null si no existe, es de otro taller o la sesión no tiene acceso a ella. */
 /** `alcance`: condición SQL (sobre el alias `o`) y parámetros que limitan las órdenes a las que la sesión tiene acceso. `bucket`: R2 de fotos; sólo se pasa en las hojas que llevan la foto del vehículo. */
-export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string, alcance: { cond: string[]; params: unknown[] }, bucket?: R2Bucket): Promise<DatosHoja | null> {
+export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string, alcance: { cond: string[]; params: unknown[] }, bucket?: R2Bucket, opciones: { cliente?: boolean } = {}): Promise<DatosHoja | null> {
+  // Los datos del cliente se leen únicamente si la copia pedida los muestra (`opciones.cliente`) Y la sesión puede ver clientes. En la copia del mecánico
+  // (y en la del cliente, que no los lleva) la consulta ni siquiera selecciona esas columnas: no pueden filtrarse por error.
+  const verCliente = !!opciones.cliente && tiene(s, 'clientes.ver');
   const o = await first<{
     id: string; vehiculo_id: string; numero: number; fecha_ingreso: string; fecha_prometida: string | null; km_ingreso: number | null; falla_reportada: string | null; diagnostico: string | null; observaciones: string | null;
-    cliente: string; cliente_telefono: string | null; patente: string; anio: number | null; marca: string | null; modelo: string | null; mecanico: string | null;
+    cliente: string | null; cliente_telefono: string | null; patente: string; anio: number | null; marca: string | null; modelo: string | null; mecanico: string | null;
   }>(
     db,
     `SELECT o.id, o.vehiculo_id, o.numero, o.fecha_ingreso, o.fecha_prometida, o.km_ingreso, o.falla_reportada, o.diagnostico, o.observaciones,
-            c.nombre AS cliente, c.telefono AS cliente_telefono, v.patente, v.anio, ma.nombre AS marca, mo.nombre AS modelo, m.nombre AS mecanico
+            ${verCliente ? 'c.nombre' : 'NULL'} AS cliente, ${verCliente ? 'c.telefono' : 'NULL'} AS cliente_telefono, v.patente, v.anio, ma.nombre AS marca, mo.nombre AS modelo, m.nombre AS mecanico
        FROM ordenes o
-       JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id
+       ${verCliente ? 'JOIN clientes c ON c.taller_id = o.taller_id AND c.id = o.cliente_id' : ''}
        JOIN vehiculos v ON v.taller_id = o.taller_id AND v.id = o.vehiculo_id
        LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id
        LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id
@@ -105,8 +108,6 @@ export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string,
     fotoParaHoja(db, bucket, s, o.vehiculo_id, o.id),
   ]);
 
-  // Con permiso para ver clientes se muestran el nombre y el teléfono; sin él, ninguno de los dos.
-  const verCliente = tiene(s, 'clientes.ver');
   return {
     taller: {
       nombre: taller?.nombre ?? '',
@@ -118,7 +119,8 @@ export async function datosHojaOrden(db: D1Database, s: Sesion, ordenId: string,
     logo: jpegDeLogo(taller?.logo ?? null),
     foto,
     orden: { numero: o.numero, fechaApertura: o.fecha_ingreso, fechaPrometida: o.fecha_prometida },
-    cliente: { visible: verCliente, nombre: verCliente ? o.cliente : null, telefono: verCliente ? o.cliente_telefono : null },
+    // `visible` indica que la copia puede mostrar al cliente; en la de administración sin permiso se imprime «No disponible…».
+    cliente: { visible: verCliente, nombre: o.cliente, telefono: o.cliente_telefono },
     vehiculo: { patente: o.patente, marca: o.marca, modelo: o.modelo, anio: o.anio, km: o.km_ingreso },
     tecnico: { responsable: o.mecanico, participantes: participantes.map((p) => p.nombre).filter(Boolean) },
     motivo: o.falla_reportada,

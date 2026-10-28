@@ -1,5 +1,6 @@
-// Importación de vehículos. Identidad: patente. Cada vehículo se vincula con su cliente por documento, por código del sistema anterior o,
-// solo si no hay ninguno de los dos, por nombre exacto único. Nunca se adivina: ante la duda la fila queda pendiente de resolver.
+// Importación de vehículos. Identidad: patente. El cliente es opcional: si el archivo lo trae, se vincula al vehículo nuevo (como titular) por documento,
+// por código del sistema anterior o, solo si no hay ninguno de los dos, por nombre exacto único. Nunca se adivina: ante la duda la fila queda pendiente de
+// resolver. Sin referencia a un cliente el vehículo se crea sin clientes vinculados. Un vehículo que ya existe no cambia sus vínculos al importar.
 import { all, ahora, lotes, uid, type Stmt } from '../db';
 import {
   claveReferenciaCliente, normalizarTextoImport, normalizarVehiculo, type CambioCampo, type ReferenciaCliente, type ResultadoFila,
@@ -72,8 +73,8 @@ export async function resolverClientes(ctx: Contexto, refs: ReferenciaCliente[])
 
 interface VehiculoExistente {
   id: string;
-  cliente_id: string;
-  cliente: string;
+  /** Ids de los clientes vinculados vigentes, separados por coma. */
+  vinculados: string | null;
   patente: string;
   activo: number;
   anio: number | null;
@@ -97,8 +98,8 @@ export async function planificarVehiculos(ctx: Contexto, filas: FilaEntrada[]): 
   for (const l of lotes(unicos(validas.map((t) => t.datos.patente!).filter(Boolean)))) {
     const rows = await all<VehiculoExistente>(
       ctx.db,
-      `SELECT v.id, v.cliente_id, c.nombre AS cliente, v.patente, v.activo, v.anio, v.color, v.vin, v.motor, v.combustible, v.km_actual, v.notas, ma.nombre AS marca, mo.nombre AS modelo
-         FROM vehiculos v JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
+      `SELECT v.id, (SELECT GROUP_CONCAT(x.cliente_id) FROM vehiculo_clientes x WHERE x.taller_id = v.taller_id AND x.vehiculo_id = v.id AND x.desvinculado_at IS NULL) AS vinculados, v.patente, v.activo, v.anio, v.color, v.vin, v.motor, v.combustible, v.km_actual, v.notas, ma.nombre AS marca, mo.nombre AS modelo
+         FROM vehiculos v
          LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id
          LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id
         WHERE v.taller_id = ? AND v.patente IN (${SQL_IN(l.length)})`,
@@ -137,16 +138,17 @@ export async function planificarVehiculos(ctx: Contexto, filas: FilaEntrada[]): 
 
   for (const t of necesitaCliente) {
     const d = t.datos;
-    const ref = d.cliente_ref!;
-    const clave = claveReferenciaCliente(ref);
-    const cl = clientes.get(clave)!;
-    if (!cl.ok) {
+    const ref = d.cliente_ref;
+    const clave = ref ? claveReferenciaCliente(ref) : '';
+    const cl = ref ? clientes.get(clave)! : null;
+    if (ref && cl && !cl.ok) {
       t.res.accion = 'error';
-      t.res.errores.push(cl.texto + (cl.motivo === 'inexistente' ? '. Importalo primero o elegí a qué cliente corresponde' : cl.motivo === 'ambiguo' ? '. Elegí a qué cliente corresponde' : ''));
+      t.res.errores.push(cl.texto + (cl.motivo === 'inexistente' ? '. Importalo primero, elegí a qué cliente corresponde o dejá la columna vacía para cargar el vehículo sin cliente' : cl.motivo === 'ambiguo' ? '. Elegí a qué cliente corresponde' : ''));
       if (cl.motivo !== 'baja') t.res.pendiente = { tipo: 'cliente', clave, etiqueta: etiquetaRef(ref), motivo: cl.motivo };
       continue;
     }
-    if (cl.aviso) t.res.avisos.push(cl.aviso);
+    if (cl?.ok && cl.aviso) t.res.avisos.push(cl.aviso);
+    const clienteId = cl?.ok ? cl.id : null;
 
     // Marca y modelo.
     let errorCatalogo: string | null = null;
@@ -175,11 +177,8 @@ export async function planificarVehiculos(ctx: Contexto, filas: FilaEntrada[]): 
     const dec = decisiones.get(t.n)!;
     if (dec.tipo === 'actualizar') {
       const e = buscar(t.claves, existentes)[0];
-      if (e.cliente_id !== cl.id) {
-        t.res.accion = 'error';
-        t.res.errores.push(`La patente ya pertenece a otro cliente (${e.cliente}): la importación no cambia de titular. Hacelo desde el vehículo`);
-        continue;
-      }
+      // Los vínculos con clientes no se tocan al importar: se administran desde la ficha del vehículo.
+      if (clienteId && !(e.vinculados ?? '').split(',').includes(clienteId)) t.res.avisos.push('El cliente del archivo no está vinculado a este vehículo: la importación no modifica los vínculos (hacelo desde la ficha del vehículo)');
       const cambios: CambioCampo[] = [];
       const c = [
         cambio('marca', e.marca, d.marca, igualesSinCaso),
@@ -230,11 +229,16 @@ export async function planificarVehiculos(ctx: Contexto, filas: FilaEntrada[]): 
       const id = uid();
       stmts.push(
         ctx.db.prepare(
-          `INSERT INTO vehiculos (id, taller_id, cliente_id, patente, marca_id, modelo_id, anio, color, vin, motor, combustible, km_actual, notas)
-           VALUES (?, ?, ?, ?, (SELECT id FROM marcas WHERE taller_id = ? AND nombre = ?),
+          `INSERT INTO vehiculos (id, taller_id, patente, marca_id, modelo_id, anio, color, vin, motor, combustible, km_actual, notas)
+           VALUES (?, ?, ?, (SELECT id FROM marcas WHERE taller_id = ? AND nombre = ?),
                    (SELECT id FROM modelos WHERE taller_id = ? AND marca_id = (SELECT id FROM marcas WHERE taller_id = ? AND nombre = ?) AND nombre = ?), ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(id, ctx.tallerId, cl.id, d.patente, ctx.tallerId, d.marca ?? null, ctx.tallerId, ctx.tallerId, d.marca ?? null, d.modelo ?? null, d.anio ?? null, d.color ?? null, d.vin ?? null, d.motor ?? null, d.combustible ?? null, d.km ?? 0, d.notas ?? null),
+        ).bind(id, ctx.tallerId, d.patente, ctx.tallerId, d.marca ?? null, ctx.tallerId, ctx.tallerId, d.marca ?? null, d.modelo ?? null, d.anio ?? null, d.color ?? null, d.vin ?? null, d.motor ?? null, d.combustible ?? null, d.km ?? 0, d.notas ?? null),
       );
+      if (clienteId) {
+        stmts.push(
+          ctx.db.prepare("INSERT INTO vehiculo_clientes (id, taller_id, vehiculo_id, cliente_id, relacion, vinculado_por) VALUES (?, ?, ?, ?, 'titular', ?)").bind(uid(), ctx.tallerId, id, clienteId, ctx.sesion.usuarioId),
+        );
+      }
       registros.push({ id, accion: 'creado' });
     }
   }

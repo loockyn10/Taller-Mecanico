@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../env';
 import { badRequest, body, notFound, query, zFecha, zTextoOpt } from '../lib/http';
 import { all, auditar, delTaller, first, hoy, uid } from '../lib/db';
-import { requirePerm } from '../lib/auth';
+import { requirePerm, tiene } from '../lib/auth';
 import { limpiarMantenimiento } from '../lib/privacidad';
 import { estadoMantenimientos, type EstadoMantenimiento } from '../lib/mantenimiento';
 
@@ -21,7 +21,8 @@ mantenimientos.get('/mantenimientos', requirePerm('mantenimientos.ver'), async (
   const texto = (q ?? '').trim().toLowerCase();
   const items = todos
     .filter((m) => (estado === 'todos' ? true : estado === 'pendientes' ? m.estado === 'vencido' || m.estado === 'proximo' : m.estado === estado))
-    .filter((m) => !texto || [m.patente, m.cliente, m.servicio, m.marca, m.modelo].some((x) => (x ?? '').toLowerCase().includes(texto)))
+        // Sin permiso para ver clientes no se busca por su nombre (sería una forma de averiguarlo).
+    .filter((m) => !texto || [m.patente, tiene(s, 'clientes.ver') ? m.cliente : null, m.servicio, m.marca, m.modelo].some((x) => (x ?? '').toLowerCase().includes(texto)))
     .map((m) => limpiarMantenimiento(s, m));
   return c.json({ resumen, items });
 });

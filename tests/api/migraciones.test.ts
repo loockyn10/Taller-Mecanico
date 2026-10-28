@@ -661,4 +661,76 @@ describe.skipIf(!DatabaseSync)('migraciones sobre datos existentes', () => {
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     db.close();
   });
+
+  it('0019 conserva vehículos, clientes y órdenes; cada asociación vehículo-cliente existente pasa a ser un vínculo vigente y el vehículo ya no exige cliente', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    for (const m of fs.readdirSync(path.join(RAIZ, 'migrations')).sort().filter((x) => x < '0019')) db.exec(leer('migrations', m));
+    const uno = (sql: string) => db.prepare(sql).get() as Record<string, any>;
+    const todos = (sql: string) => db.prepare(sql).all().map((r: any) => ({ ...r })) as Array<Record<string, any>>;
+    // Datos como los de producción: dos talleres, vehículos (uno dado de baja) con órdenes, un presupuesto y un turno que los referencian.
+    db.exec(`
+      INSERT INTO talleres (id, nombre) VALUES ('t1', 'Taller Uno'), ('t2', 'Taller Dos');
+      INSERT INTO usuarios (id, taller_id, email, nombre, rol, plantilla, password_hash) VALUES ('u1', 't1', 'a@a.com', 'Dueño', 'propietario', 'propietario', 'x');
+      INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES ('c1', 't1', 1, 'Juan'), ('c2', 't1', 2, 'María'), ('c3', 't2', 1, 'Ajeno');
+      INSERT INTO marcas (id, taller_id, nombre) VALUES ('m1', 't1', 'Toyota');
+      INSERT INTO modelos (id, taller_id, marca_id, nombre) VALUES ('mo1', 't1', 'm1', 'Hilux');
+      INSERT INTO vehiculos (id, taller_id, cliente_id, patente, marca_id, modelo_id, anio, km_actual, color, version, created_at) VALUES
+        ('v1', 't1', 'c1', 'AE123BC', 'm1', 'mo1', 2021, 50000, 'Gris', 'SRV', '2026-01-02T10:00:00.000Z'),
+        ('v2', 't1', 'c2', 'AA111AA', NULL, NULL, NULL, 0, NULL, NULL, '2026-02-03T10:00:00.000Z'),
+        ('v3', 't2', 'c3', 'AE123BC', NULL, NULL, NULL, 10, NULL, NULL, '2026-03-04T10:00:00.000Z');
+      UPDATE vehiculos SET activo = 0 WHERE id = 'v2';
+      INSERT INTO ordenes (id, taller_id, numero, cliente_id, vehiculo_id, fecha_ingreso) VALUES ('o1', 't1', 1, 'c1', 'v1', '2026-10-01'), ('o2', 't1', 2, 'c2', 'v1', '2026-10-02');
+      INSERT INTO presupuestos (id, taller_id, numero, cliente_id, vehiculo_id, fecha) VALUES ('p1', 't1', 1, 'c2', 'v1', '2026-10-01');
+      INSERT INTO turnos (id, taller_id, fecha, hora, cliente_id, vehiculo_id) VALUES ('tu1', 't1', '2026-10-05', '09:00', 'c1', 'v1');
+    `);
+    const tablas = ['clientes', 'ordenes', 'presupuestos', 'turnos', 'marcas', 'modelos'];
+    const antes = tablas.map((t) => todos(`SELECT * FROM ${t} ORDER BY id`));
+    const vehiculosAntes = todos('SELECT id, taller_id, patente, marca_id, modelo_id, anio, km_actual, color, version, activo, created_at, updated_at FROM vehiculos ORDER BY id');
+    // D1 aplica cada migración dentro de una transacción: así se ensaya (y se difieren las claves foráneas que usa la reconstrucción).
+    db.exec('BEGIN');
+    db.exec(leer('migrations', '0019_vehiculos_clientes_vinculados.sql'));
+    db.exec('COMMIT');
+
+    // Nada se perdió ni cambió: las demás tablas quedan idénticas y los vehículos conservan todos sus datos (menos la columna vieja).
+    expect(tablas.map((t) => todos(`SELECT * FROM ${t} ORDER BY id`))).toEqual(antes);
+    expect(todos('SELECT id, taller_id, patente, marca_id, modelo_id, anio, km_actual, color, version, activo, created_at, updated_at FROM vehiculos ORDER BY id')).toEqual(vehiculosAntes);
+    // Una única fuente de verdad: la columna vieja desapareció y su clave foránea con ella.
+    expect(todos("SELECT name FROM pragma_table_info('vehiculos') WHERE name = 'cliente_id'")).toEqual([]);
+    // Cada asociación existente (incluso la del vehículo dado de baja) es un vínculo vigente «titular» del mismo taller y fecha de alta del vehículo.
+    expect(todos('SELECT vehiculo_id, cliente_id, taller_id, relacion, vinculado_at, desvinculado_at FROM vehiculo_clientes ORDER BY vehiculo_id')).toEqual([
+      { vehiculo_id: 'v1', cliente_id: 'c1', taller_id: 't1', relacion: 'titular', vinculado_at: '2026-01-02T10:00:00.000Z', desvinculado_at: null },
+      { vehiculo_id: 'v2', cliente_id: 'c2', taller_id: 't1', relacion: 'titular', vinculado_at: '2026-02-03T10:00:00.000Z', desvinculado_at: null },
+      { vehiculo_id: 'v3', cliente_id: 'c3', taller_id: 't2', relacion: 'titular', vinculado_at: '2026-03-04T10:00:00.000Z', desvinculado_at: null },
+    ]);
+    // Las órdenes conservan su cliente responsable aunque el vehículo tenga otro titular (OT 2 es de María, el titular era Juan).
+    expect(todos("SELECT id, cliente_id FROM ordenes ORDER BY id")).toEqual([{ id: 'o1', cliente_id: 'c1' }, { id: 'o2', cliente_id: 'c2' }]);
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    expect(uno('PRAGMA integrity_check').integrity_check).toBe('ok');
+
+    // Las restricciones del vehículo siguen vigentes: patente única por taller (pero repetible entre talleres) y no se borra lo que tiene órdenes.
+    expect(() => db.exec("INSERT INTO vehiculos (id, taller_id, patente) VALUES ('v9', 't1', 'AE123BC')")).toThrow(/UNIQUE/);
+    expect(() => db.exec("INSERT INTO vehiculos (id, taller_id, patente, km_actual) VALUES ('v9', 't1', 'ZZ999ZZ', -1)")).toThrow(/CHECK/);
+    expect(() => db.exec("DELETE FROM vehiculos WHERE id = 'v1'")).toThrow(/FOREIGN KEY/);
+    expect(() => db.exec("INSERT INTO vehiculos (id, taller_id, patente, marca_id) VALUES ('v9', 't1', 'ZZ999ZZ', 'inexistente')")).toThrow(/FOREIGN KEY/);
+
+    // Ya se puede crear un vehículo sin ningún cliente, y vincular varios; el mismo cliente no puede estar vigente dos veces.
+    db.exec("INSERT INTO vehiculos (id, taller_id, patente) VALUES ('v4', 't1', 'BB222BB')");
+    expect(uno("SELECT COUNT(*) AS n FROM vehiculo_clientes WHERE vehiculo_id = 'v4'").n).toBe(0);
+    db.exec("INSERT INTO vehiculo_clientes (id, taller_id, vehiculo_id, cliente_id) VALUES ('x1', 't1', 'v4', 'c1'), ('x2', 't1', 'v4', 'c2')");
+    expect(() => db.exec("INSERT INTO vehiculo_clientes (id, taller_id, vehiculo_id, cliente_id) VALUES ('x3', 't1', 'v4', 'c1')")).toThrow(/UNIQUE/);
+    // Al desvincular, el vínculo queda como historial y el mismo cliente puede volver a vincularse.
+    db.exec("UPDATE vehiculo_clientes SET desvinculado_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), desvinculado_por = 'u1' WHERE id = 'x1'");
+    db.exec("INSERT INTO vehiculo_clientes (id, taller_id, vehiculo_id, cliente_id) VALUES ('x3', 't1', 'v4', 'c1')");
+    expect(uno("SELECT COUNT(*) AS n FROM vehiculo_clientes WHERE vehiculo_id = 'v4' AND cliente_id = 'c1'").n).toBe(2);
+    // Nada mezcla talleres: ni cliente ajeno, ni vehículo ajeno, ni usuario ajeno.
+    expect(() => db.exec("INSERT INTO vehiculo_clientes (id, taller_id, vehiculo_id, cliente_id) VALUES ('x4', 't1', 'v4', 'c3')")).toThrow(/FOREIGN KEY/);
+    expect(() => db.exec("INSERT INTO vehiculo_clientes (id, taller_id, vehiculo_id, cliente_id) VALUES ('x4', 't2', 'v4', 'c3')")).toThrow(/FOREIGN KEY/);
+    db.exec("INSERT INTO clientes (id, taller_id, codigo, nombre) VALUES ('c4', 't2', 2, 'Otro ajeno')");
+    expect(() => db.exec("INSERT INTO vehiculo_clientes (id, taller_id, vehiculo_id, cliente_id, vinculado_por) VALUES ('x4', 't2', 'v3', 'c4', 'u1')")).toThrow(/FOREIGN KEY/);
+    // La desvinculación no puede fecharse antes que la vinculación.
+    expect(() => db.exec("UPDATE vehiculo_clientes SET desvinculado_at = '2000-01-01T00:00:00.000Z' WHERE id = 'x2'")).toThrow(/CHECK/);
+    expect(todos('PRAGMA foreign_key_check')).toEqual([]);
+    db.close();
+  });
 });

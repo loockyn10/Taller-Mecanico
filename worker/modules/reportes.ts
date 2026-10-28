@@ -7,6 +7,7 @@ import { all, first, hoy, like } from '../lib/db';
 import { requirePerm, tiene } from '../lib/auth';
 import { limpiarDocumento } from '../lib/privacidad';
 import { normalizarPatente } from '../../shared/dominio';
+import { CLIENTES_TEXTO_SQL } from '../lib/vehiculo-clientes';
 
 export const reportes = new Hono<AppEnv>();
 
@@ -145,7 +146,7 @@ reportes.get('/buscar', async (c) => {
     tiene(s, 'vehiculos.ver') && pat.length >= 2
       ? all(
           c.env.DB,
-          `SELECT v.id, v.patente, ma.nombre AS marca, mo.nombre AS modelo, c.nombre AS cliente FROM vehiculos v JOIN clientes c ON c.taller_id = v.taller_id AND c.id = v.cliente_id
+          `SELECT v.id, v.patente, ma.nombre AS marca, mo.nombre AS modelo${tiene(s, 'clientes.ver') ? `, ${CLIENTES_TEXTO_SQL} AS cliente` : ''} FROM vehiculos v
              LEFT JOIN marcas ma ON ma.taller_id = v.taller_id AND ma.id = v.marca_id LEFT JOIN modelos mo ON mo.taller_id = v.taller_id AND mo.id = v.modelo_id
             WHERE v.taller_id = ? AND v.activo = 1 AND v.patente LIKE ? LIMIT 6`,
           s.tallerId,

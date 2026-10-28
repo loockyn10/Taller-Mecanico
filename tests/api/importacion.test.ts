@@ -239,8 +239,8 @@ describe('vehículos', () => {
     const r = await importar(api, 'vehiculos', f);
     expect(r.detalle).toMatchObject({ creados: 2, errores: 0 });
     const lista = (await api.get('/api/vehiculos')).body as any[];
-    expect(lista.find((x) => x.patente === 'AB123CD')).toMatchObject({ cliente_id: ana.id, marca: 'Fiat', modelo: 'Cronos', km_actual: 85000, anio: 2019 });
-    expect(lista.find((x) => x.patente === 'AC456DE')).toMatchObject({ cliente_id: beto.id, marca: 'Marca Nueva', modelo: 'Modelo 1' });
+    expect(lista.find((x) => x.patente === 'AB123CD')).toMatchObject({ clientes: ana.nombre, marca: 'Fiat', modelo: 'Cronos', km_actual: 85000, anio: 2019 });
+    expect(lista.find((x) => x.patente === 'AC456DE')).toMatchObject({ clientes: beto.nombre, marca: 'Marca Nueva', modelo: 'Modelo 1' });
     const marcas = (await api.get('/api/marcas')).body as any[];
     expect(marcas.find((m) => m.nombre === 'Marca Nueva').modelos.map((m: any) => m.nombre)).toEqual(['Modelo 1']);
   });
@@ -272,15 +272,16 @@ describe('vehículos', () => {
     expect(mal.resultados[0].errores[0]).toContain('ya no existe');
     const r = await importar(api, 'vehiculos', pendiente, { resoluciones: { 'cliente:doc:99999991': beto.id } });
     expect(r.detalle.creados).toBe(1);
-    expect(((await api.get('/api/vehiculos')).body as any[]).find((x) => x.patente === 'AD111AA').cliente_id).toBe(beto.id);
+    expect(((await api.get('/api/vehiculos')).body as any[]).find((x) => x.patente === 'AD111AA').clientes).toBe(beto.nombre);
   });
 
-  it('una patente existente se omite o se actualiza, pero nunca cambia de titular ni baja el kilometraje', async () => {
+  it('una patente existente se omite o se actualiza, pero nunca cambia sus vínculos con clientes ni baja el kilometraje', async () => {
     const o = await validar(api, 'vehiculos', filas({ patente: 'AB123CD', cliente_documento: '27456789' }));
     expect(o.resultados[0]).toMatchObject({ accion: 'omitir', motivo: 'Ya existe' });
     const otroTitular = await validar(api, 'vehiculos', filas({ patente: 'AB123CD', cliente_codigo: 'C-002', color: 'Rojo' }), { modo: 'actualizar' });
-    expect(otroTitular.resultados[0].accion).toBe('error');
-    expect(otroTitular.resultados[0].errores[0]).toContain('no cambia de titular');
+    // Sprint 23: el vehículo puede tener varios clientes; la importación actualiza datos pero no toca vínculos y lo avisa.
+    expect(otroTitular.resultados[0].accion).toBe('actualizar');
+    expect(otroTitular.resultados[0].avisos[0]).toContain('no modifica los vínculos');
     const km = await validar(api, 'vehiculos', filas({ patente: 'AB123CD', cliente_documento: '27456789', km: 1000, color: 'Azul' }), { modo: 'actualizar' });
     expect(km.resultados[0].accion).toBe('actualizar');
     expect(km.resultados[0].avisos[0]).toContain('menor al registrado');
@@ -288,6 +289,19 @@ describe('vehículos', () => {
     const r = await importar(api, 'vehiculos', filas({ patente: 'AB123CD', cliente_documento: '27456789', km: 90000, color: 'Azul' }), { modo: 'actualizar' });
     expect(r.detalle.actualizados).toBe(1);
     expect(((await api.get('/api/vehiculos')).body as any[]).find((x) => x.patente === 'AB123CD')).toMatchObject({ km_actual: 90000, color: 'Azul', marca: 'Fiat' });
+  });
+
+  it('el cliente es opcional: un vehículo sin referencia a cliente se carga sin clientes vinculados', async () => {
+    const f = filas({ patente: 'SC111SC', marca: 'Fiat', modelo: 'Palio' });
+    const v = await validar(api, 'vehiculos', f);
+    expect(v.resultados[0]).toMatchObject({ accion: 'crear', errores: [] });
+    const r = await importar(api, 'vehiculos', f);
+    expect(r.detalle).toMatchObject({ creados: 1, errores: 0 });
+    const creado = ((await api.get('/api/vehiculos?sin_clientes=1')).body as any[]).find((x) => x.patente === 'SC111SC');
+    expect(creado).toMatchObject({ clientes_n: 0 });
+    // Con una referencia que no se puede resolver sigue siendo un error (no se descarta en silencio al cliente indicado).
+    const mal = await validar(api, 'vehiculos', filas({ patente: 'SC222SC', cliente_documento: '99999991' }));
+    expect(mal.resultados[0].accion).toBe('error');
   });
 
   it('la misma patente repetida en el archivo es un error en la segunda aparición', async () => {

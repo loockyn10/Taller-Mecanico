@@ -24,7 +24,7 @@ describe('flujo operativo completo', () => {
     const v = await api.post('/api/vehiculos', { cliente_id: c.body.id, patente: 'ab 123 cd', marca_id: vw.id, modelo_id: vw.modelos[0].id, anio: 2019, km_actual: 50000 });
     expect(v.status, JSON.stringify(v.body)).toBe(201);
     expect(v.body.patente).toBe('AB123CD');
-    expect(v.body.cliente).toBe('Juana Pérez');
+    expect(v.body.clientes).toBe('Juana Pérez'); // el cliente de contacto es un vínculo vigente, no un campo del vehículo
     ctx.vehiculo = v.body;
     const dup = await api.post('/api/vehiculos', { cliente_id: c.body.id, patente: 'AB123CD' });
     expect(dup.status).toBe(409);
@@ -63,10 +63,14 @@ describe('flujo operativo completo', () => {
     ctx.presupuesto = p.body;
   });
 
-  it('el vehículo de otro cliente es rechazado', async () => {
+  it('un cliente ajeno al vehículo es válido como responsable del presupuesto (Sprint 23); un cliente inexistente no', async () => {
     const otro = await api.post('/api/clientes', { nombre: 'Otro Cliente' });
     const r = await api.post('/api/presupuestos', { cliente_id: otro.body.id, vehiculo_id: ctx.vehiculo.id, items: [{ tipo: 'libre', descripcion: 'x', cantidad: 1, precio_unitario: 100 }] });
-    expect(r.status).toBe(400);
+    expect(r.status).toBe(201);
+    expect(r.body.cliente).toBe('Otro Cliente');
+    await api.post(`/api/presupuestos/${r.body.id}/estado`, { estado: 'anulado' });
+    const inexistente = await api.post('/api/presupuestos', { cliente_id: 'no-existe', vehiculo_id: ctx.vehiculo.id, items: [{ tipo: 'libre', descripcion: 'x', cantidad: 1, precio_unitario: 100 }] });
+    expect(inexistente.status).toBe(400);
   });
 
   it('aprueba y convierte el presupuesto en OT una sola vez (trazabilidad)', async () => {

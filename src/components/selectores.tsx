@@ -3,8 +3,9 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Car, Plus, UserRound, X } from 'lucide-react';
 import { api } from '@/lib/api';
-import { AccionesForm, Aviso, Boton, Buscador, Campo, cn, Input, Modal, Select, Textarea, useDebounce, useToast } from './ui';
-import { CONDICIONES_IVA, CONDICION_IVA_LABEL } from '@shared/dominio';
+import { useAuth } from '@/lib/auth';
+import { AccionesForm, Aviso, Boton, BotonIcono, Buscador, Campo, cn, Input, Modal, Select, Textarea, useDebounce, useToast } from './ui';
+import { CONDICIONES_IVA, CONDICION_IVA_LABEL, RELACIONES_VEHICULO, RELACION_VEHICULO_LABEL } from '@shared/dominio';
 import { claveBusqueda, type CatVersion } from '@shared/catalogo-auto';
 import { BotonesCamara, GaleriaFotos, ListaLocal, useEstadoFotos, useFotosLocales, usePermisosFotos } from './Fotos';
 import { Combobox, rangoAnios, useCatMarcas, useCatModelo, useCatModelos, type Opcion } from './CatalogoAuto';
@@ -93,9 +94,57 @@ export function useMarcas() {
   return useQuery({ queryKey: ['marcas'], queryFn: () => api.get<Array<{ id: string; nombre: string; modelos: Array<{ id: string; nombre: string }> }>>('/marcas'), staleTime: 300_000 });
 }
 
-export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { clienteId: string; inicial?: any; onGuardado: (v: any) => void; onCancelar: () => void }) {
+/** Opciones de relación entre un cliente y un vehículo (siempre opcional). */
+export function SelectRelacion({ valor, onCambio, className }: { valor: string; onCambio: (v: string) => void; className?: string }) {
+  return (
+    <Select value={valor} onChange={(e) => onCambio(e.target.value)} className={className} aria-label="Relación con el vehículo">
+      <option value="">Sin especificar</option>
+      {RELACIONES_VEHICULO.map((r) => <option key={r} value={r}>{RELACION_VEHICULO_LABEL[r]}</option>)}
+    </Select>
+  );
+}
+
+interface ClienteAVincular {
+  cliente: ClienteMin;
+  relacion: string;
+}
+
+/** Alta del vehículo: clientes a vincular (opcional). Ninguno, uno o varios; después se administran desde la ficha del vehículo. */
+function ClientesDelAlta({ valor, onCambio }: { valor: ClienteAVincular[]; onCambio: (v: ClienteAVincular[]) => void }) {
+  const [vez, setVez] = useState(0);
+  return (
+    <div className="space-y-2 sm:col-span-2">
+      <p className="text-[13px] font-medium text-slate-700">Clientes vinculados <span className="font-normal text-tenue">(opcional)</span></p>
+      {valor.length === 0 && <p className="text-xs text-tenue">Sin clientes vinculados: podés guardar el vehículo así y vincular uno o varios después.</p>}
+      {valor.map((x, i) => (
+        <div key={x.cliente.id} className="flex flex-wrap items-center gap-2 rounded-ctl border border-borde bg-white px-3 py-2">
+          <UserRound className="size-4 shrink-0 text-marca-600" />
+          <span className="min-w-0 flex-1 break-words text-sm font-medium">{x.cliente.nombre}</span>
+          <SelectRelacion valor={x.relacion} onCambio={(r) => onCambio(valor.map((y, j) => (j === i ? { ...y, relacion: r } : y)))} className="w-44" />
+          <BotonIcono etiqueta={`Quitar a ${x.cliente.nombre}`} peligro onClick={() => onCambio(valor.filter((_, j) => j !== i))}><X className="size-4" /></BotonIcono>
+        </div>
+      ))}
+      <SelectorCliente
+        key={vez}
+        valor={null}
+        etiqueta={valor.length ? 'Agregar otro cliente' : 'Vincular un cliente'}
+        onCambio={(c) => {
+          if (!c) return;
+          if (!valor.some((x) => x.cliente.id === c.id)) onCambio([...valor, { cliente: c, relacion: valor.length ? '' : 'titular' }]);
+          setVez((n) => n + 1);
+        }}
+      />
+    </div>
+  );
+}
+
+export function FormVehiculo({ clienteInicial, inicial, onGuardado, onCancelar }: { clienteInicial?: ClienteMin | null; inicial?: any; onGuardado: (v: any) => void; onCancelar: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
+  const { puede } = useAuth();
+  // Clientes a vincular al crear (sólo en el alta y con permiso para ver clientes). El vehículo se puede guardar sin ninguno.
+  const [aVincular, setAVincular] = useState<ClienteAVincular[]>(clienteInicial ? [{ cliente: clienteInicial, relacion: 'titular' }] : []);
+  const conClientes = !inicial?.id && puede('clientes.ver');
   const { data: marcasTaller = [] } = useMarcas();
   const { data: catMarcas = [], isLoading: cargandoMarcas } = useCatMarcas();
   const [f, setF] = useState({
@@ -172,7 +221,6 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
   const m = useMutation({
     mutationFn: async () => {
       const datos: Record<string, unknown> = {
-        cliente_id: clienteId,
         patente: f.patente,
         anio: f.anio ? Number(f.anio) : null,
         color: f.color,
@@ -194,7 +242,7 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
         });
       }
       if (inicial?.id) return { v: await api.put(`/vehiculos/${inicial.id}`, datos), fallos: 0 };
-      const v = await api.post('/vehiculos', datos);
+      const v = await api.post('/vehiculos', { ...datos, clientes: aVincular.map((x) => ({ cliente_id: x.cliente.id, relacion: x.relacion || null })) });
       // El vehículo ya está guardado: ahora se suben las fotos elegidas (con clave de reintento: repetir no las duplica).
       return { v, fallos: fotos.items.length ? await fotos.subirTodas({ vehiculo_id: v.id }) : 0 };
     },
@@ -204,6 +252,7 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
       qc.invalidateQueries({ queryKey: ['vehiculos'] });
       qc.invalidateQueries({ queryKey: ['vehiculo'] });
       qc.invalidateQueries({ queryKey: ['cliente'] });
+      qc.invalidateQueries({ queryKey: ['vehiculo-clientes'] });
       if (fallos > 0) {
         // No se cierra: la persona puede reintentar las fotos que fallaron sin crear el vehículo de nuevo.
         setCreado(v);
@@ -319,6 +368,7 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
       <Campo label="Notas" className="sm:col-span-2">
         <Textarea value={f.notas} onChange={set('notas')} rows={2} />
       </Campo>
+      {conClientes && <ClientesDelAlta valor={aVincular} onCambio={setAVincular} />}
       {fotosOk && permisosFotos.ver && (inicial?.id || permisosFotos.subir) && (
         <div className="space-y-2 sm:col-span-2">
           <p className="text-[13px] font-medium text-slate-700">Fotografías</p>
@@ -343,7 +393,7 @@ export function FormVehiculo({ clienteId, inicial, onGuardado, onCancelar }: { c
 }
 
 // ───────────── Selector de cliente ─────────────
-export function SelectorCliente({ valor, onCambio }: { valor: ClienteMin | null; onCambio: (c: ClienteMin | null) => void }) {
+export function SelectorCliente({ valor, onCambio, etiqueta }: { valor: ClienteMin | null; onCambio: (c: ClienteMin | null) => void; etiqueta?: string }) {
   const [q, setQ] = useState('');
   const [alta, setAlta] = useState(false);
   const dq = useDebounce(q);
@@ -365,7 +415,7 @@ export function SelectorCliente({ valor, onCambio }: { valor: ClienteMin | null;
   return (
     <div>
       <div className="flex gap-2">
-        <Buscador value={q} onChange={setQ} placeholder="Buscar cliente por nombre, teléfono o patente…" className="flex-1" />
+        <Buscador value={q} onChange={setQ} placeholder={etiqueta ? `${etiqueta}: nombre, teléfono o patente…` : 'Buscar cliente por nombre, teléfono o patente…'} className="flex-1" />
         <Boton icono={<Plus className="size-4" />} onClick={() => setAlta(true)}>Nuevo</Boton>
       </div>
       {dq && (
@@ -395,37 +445,100 @@ export function SelectorCliente({ valor, onCambio }: { valor: ClienteMin | null;
   );
 }
 
-// ───────────── Selector de vehículo del cliente ─────────────
-export function SelectorVehiculo({ clienteId, valor, onCambio }: { clienteId: string | null; valor: string | null; onCambio: (id: string | null, v?: any) => void }) {
+// ───────────── Selector de vehículo ─────────────
+export interface VehiculoMin {
+  id: string;
+  patente: string;
+  marca?: string | null;
+  modelo?: string | null;
+  anio?: number | null;
+  km_actual: number;
+  /** Nombres de los clientes vinculados (sólo con permiso para ver clientes). */
+  clientes?: string | null;
+  clientes_n?: number;
+}
+
+const textoVehiculo = (v: VehiculoMin) => [v.marca, v.modelo, v.anio].filter(Boolean).join(' ') || 'Sin datos';
+
+/**
+ * Elige un vehículo del taller buscando por patente, marca, modelo o cliente. No depende de un cliente: el vehículo existe por sí mismo.
+ * Si se indica `clienteId` se ofrecen primero los vehículos vinculados a ese cliente. «Nuevo vehículo» abre el alta (vinculándolo a ese cliente si lo hay).
+ */
+export function SelectorVehiculo({ clienteId, cliente, valor, onCambio }: { clienteId?: string | null; cliente?: ClienteMin | null; valor: string | null; onCambio: (id: string | null, v?: VehiculoMin) => void }) {
+  const { puede } = useAuth();
   const [alta, setAlta] = useState(false);
-  const { data = [] } = useQuery({ queryKey: ['vehiculos', { cliente_id: clienteId }], queryFn: () => api.get<any[]>(`/vehiculos?cliente_id=${clienteId}`), enabled: !!clienteId });
-  if (!clienteId) return <p className="rounded-ctl border border-dashed border-borde px-3 py-2.5 text-sm text-tenue">Elegí primero el cliente</p>;
+  const [q, setQ] = useState('');
+  const dq = useDebounce(q);
+  const [elegido, setElegido] = useState<VehiculoMin | null>(null);
+  const verClientes = puede('clientes.ver');
+  const { data: delCliente = [] } = useQuery({ queryKey: ['vehiculos', { cliente_id: clienteId }], queryFn: () => api.get<VehiculoMin[]>(`/vehiculos?cliente_id=${clienteId}`), enabled: !!clienteId && verClientes && !valor });
+  const { data: resultados = [], isFetching } = useQuery({ queryKey: ['vehiculos', { q: dq, sel: true }], queryFn: () => api.get<VehiculoMin[]>(`/vehiculos?q=${encodeURIComponent(dq)}`), enabled: !valor && dq.length >= 2 });
+  // Con un vehículo ya elegido por otra vía (por ejemplo desde su ficha) se leen sus datos para mostrarlo.
+  const { data: precargado } = useQuery({ queryKey: ['vehiculo', valor, 'min'], queryFn: () => api.get<VehiculoMin>(`/vehiculos/${valor}`), enabled: !!valor && elegido?.id !== valor });
+  const actual = valor ? (elegido?.id === valor ? elegido : precargado ?? null) : null;
+  const elegir = (v: VehiculoMin) => {
+    setElegido(v);
+    onCambio(v.id, v);
+  };
+  if (valor) {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-ctl border border-marca-200 bg-marca-50/60 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Car className="size-4 shrink-0 text-marca-600" />
+          <div className="min-w-0">
+            <div className="font-semibold tracking-wide">{actual?.patente ?? '…'}</div>
+            {actual && <div className="break-words text-xs text-tenue">{textoVehiculo(actual)} · {Number(actual.km_actual).toLocaleString('es-AR')} km</div>}
+          </div>
+        </div>
+        <Boton tam="sm" variante="fantasma" onClick={() => (setElegido(null), onCambio(null))} icono={<X className="size-4" />}>Cambiar</Boton>
+      </div>
+    );
+  }
+  const filaVehiculo = (v: VehiculoMin) => (
+    <button key={v.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-marca-50" onClick={() => elegir(v)}>
+      <span className="min-w-0">
+        <span className="block font-semibold tracking-wide">{v.patente}</span>
+        <span className="block break-words text-xs text-tenue">{textoVehiculo(v)}</span>
+      </span>
+      {verClientes && <span className="max-w-[45%] shrink-0 break-words text-right text-xs text-tenue">{v.clientes || 'Sin clientes'}</span>}
+    </button>
+  );
   return (
     <div>
-      <div className="flex flex-wrap gap-2">
-        {data.map((v) => (
-          <button
-            key={v.id}
-            type="button"
-            onClick={() => onCambio(v.id, v)}
-            className={cn('flex items-center gap-2 rounded-ctl border px-3 py-2 text-left text-sm', valor === v.id ? 'border-marca-400 bg-marca-50 ring-2 ring-marca-100' : 'border-borde bg-white hover:bg-slate-50')}
-          >
-            <Car className="size-4 text-tenue" />
-            <span>
-              <span className="block font-semibold tracking-wide">{v.patente}</span>
-              <span className="block text-xs text-tenue">{[v.marca, v.modelo, v.anio].filter(Boolean).join(' ') || 'Sin datos'} · {Number(v.km_actual).toLocaleString('es-AR')} km</span>
-            </span>
-          </button>
-        ))}
-        <Boton icono={<Plus className="size-4" />} onClick={() => setAlta(true)} className="h-auto min-h-12">Nuevo vehículo</Boton>
+      {delCliente.length > 0 && (
+        <div className="mb-2">
+          <p className="mb-1 text-xs text-tenue">Vehículos de {cliente?.nombre ?? 'este cliente'}</p>
+          <div className="flex flex-wrap gap-2">
+            {delCliente.map((v) => (
+              <button key={v.id} type="button" onClick={() => elegir(v)} className="flex items-center gap-2 rounded-ctl border border-borde bg-white px-3 py-2 text-left text-sm hover:bg-slate-50">
+                <Car className="size-4 text-tenue" />
+                <span>
+                  <span className="block font-semibold tracking-wide">{v.patente}</span>
+                  <span className="block text-xs text-tenue">{textoVehiculo(v)} · {Number(v.km_actual).toLocaleString('es-AR')} km</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Buscador value={q} onChange={setQ} placeholder="Buscar vehículo por patente, marca o modelo…" className="flex-1" />
+        {puede('vehiculos.crear') && <Boton icono={<Plus className="size-4" />} onClick={() => setAlta(true)}>Nuevo</Boton>}
       </div>
+      {dq.length >= 2 && (
+        <ul className="mt-1.5 max-h-56 overflow-y-auto rounded-ctl border border-borde bg-white text-sm shadow-pop">
+          {resultados.map(filaVehiculo)}
+          {!isFetching && !resultados.length && <li className="px-3 py-2 text-tenue">Sin resultados. Podés registrarlo con “Nuevo”.</li>}
+        </ul>
+      )}
       <Modal abierto={alta} onCerrar={() => setAlta(false)} titulo="Nuevo vehículo" ancho="lg">
         <FormVehiculo
-          clienteId={clienteId}
+          clienteInicial={cliente ?? null}
+          inicial={q && dq === q ? { patente: /^[A-Za-z0-9 -]{5,12}$/.test(q) ? q.toUpperCase() : '' } : undefined}
           onCancelar={() => setAlta(false)}
           onGuardado={(v) => {
             setAlta(false);
-            onCambio(v.id, v);
+            elegir(v);
           }}
         />
       </Modal>

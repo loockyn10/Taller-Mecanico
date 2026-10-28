@@ -74,11 +74,46 @@ describe('hoja de la orden de trabajo (PDF)', () => {
   it('la copia del mecánico lleva los datos operativos, con acentos y ñ legibles, y ninguna cifra de dinero', () => {
     const { pdf } = generarHojaOrden(base(), ['mecanico']);
     const t = leer(contenidos(pdf)[0]).join('\n');
-    for (const esperado of ['COPIA MECÁNICO', 'N° 0087', 'Mecánica Rodríguez e Hijos', 'Marta Fernández', '341 600-1122', 'Volkswagen Amarok V6', 'AB123CD', '2019', '128.450 km', 'Ruido metálico', 'Cambio de pastillas de freno delanteras', 'Líquido de frenos DOT 4', 'Julián Álvarez', 'Nicolás Ñandú (participa)', 'ANOTACIONES DEL MECÁNICO', '24/10/2026 14:35', '27/10/2026'].map((x) => x.replace(/^(.*)$/, '$1'))) {
+    for (const esperado of ['COPIA MECÁNICO', 'N° 0087', 'Mecánica Rodríguez e Hijos', 'Volkswagen Amarok V6', 'AB123CD', '2019', '128.450 km', 'Ruido metálico', 'Cambio de pastillas de freno delanteras', 'Líquido de frenos DOT 4', 'Julián Álvarez', 'Nicolás Ñandú (participa)', 'ANOTACIONES DEL MECÁNICO', '24/10/2026 14:35', '27/10/2026'].map((x) => x.replace(/^(.*)$/, '$1'))) {
       expect(t, esperado).toContain(esperado);
     }
     expect(t).not.toMatch(/\$|precio|costo|total|margen|IVA|subtotal/i);
     expect(t).toContain('0,5 lt');
+  });
+
+  it('PRIVACIDAD: la copia del mecánico nunca lleva datos del cliente, aunque los datos los traigan (la privacidad es del tipo de documento)', () => {
+    // Los datos de entrada incluyen un cliente visible con nombre y teléfono, como si lo imprimiera un propietario con todos los permisos.
+    const d = base();
+    const { pdf, hojas } = generarHojaOrden(d, ['mecanico']);
+    const t = leer(contenidos(pdf)[0]).join('\n');
+    expect(hojas).toEqual([1]);
+    for (const dato of ['Marta', 'Fernández', '341 600-1122']) expect(t).not.toContain(dato);
+    expect(t).not.toMatch(/CLIENTE|TEL[ÉE]FONO|DNI|CUIT|DIRECCI[ÓO]N|EMAIL/);
+    expect(t).not.toContain('No disponible'); // tampoco el aviso de «sin permiso»: la fila no existe
+    // En el archivo completo (incluidos metadatos y estructura) tampoco aparece.
+    const crudo = texto(pdf);
+    expect(crudo).not.toContain('Marta');
+    expect(crudo).not.toContain('341 600-1122');
+    expect(VARIANTES.mecanico.datosCliente).toBe(false);
+  });
+
+  it('PRIVACIDAD: en "ambas copias" el cliente está sólo en la hoja de administración; la del mecánico sigue sin él', () => {
+    const { pdf } = generarHojaOrden(base(), ['mecanico', 'administracion']);
+    const [mec, adm] = contenidos(pdf).map((c) => leer(c).join('\n'));
+    expect(mec).not.toContain('Marta Fernández');
+    expect(mec).not.toContain('341 600-1122');
+    expect(adm).toContain('Marta Fernández');
+    expect(adm).toContain('341 600-1122');
+    expect(VARIANTES.administracion.datosCliente).toBe(true);
+  });
+
+  it('la copia de administración sin permiso para ver clientes lo indica; la del mecánico no dice nada', () => {
+    const d = base();
+    d.cliente = { visible: false, nombre: null, telefono: null };
+    const { pdf } = generarHojaOrden(d, ['mecanico', 'administracion']);
+    const [mec, adm] = contenidos(pdf).map((c) => leer(c).join('\n'));
+    expect(adm).toContain('No disponible con los permisos de quien imprime');
+    expect(mec).not.toContain('No disponible');
   });
 
   it('la zona de anotaciones ocupa ~la mitad inferior y tiene renglones amplios', () => {
@@ -120,7 +155,7 @@ describe('hoja de la orden de trabajo (PDF)', () => {
     const t = leer(contenidos(pdf)[0]).join('\n');
     expect(t).toContain('No registrado.');
     expect(t).toContain('No hay trabajos cargados en la orden.');
-    expect(t).toContain('No disponible con los permisos de quien imprime');
+    expect(t).not.toContain('No disponible'); // la copia del mecánico no tiene fila de cliente
     expect(t).not.toContain('REPUESTOS');
     expect(t).not.toContain('OBSERVACIONES\n');
     expect(t).not.toMatch(/TEL[ÉE]FONO/);

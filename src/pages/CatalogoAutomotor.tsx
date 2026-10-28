@@ -7,7 +7,7 @@ import { BookOpen, Car, CircleSlash, ExternalLink, FileText, Gauge, Plus, Search
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Aviso, Boton, Buscador, Campo, Cargando, Dato, Encabezado, ErrorCaja, Insignia, Modal, Select, Tarjeta, useDebounce, useToast, Vacio } from '@/components/ui';
-import { FormVehiculo, SelectorCliente } from '@/components/selectores';
+import { FormVehiculo } from '@/components/selectores';
 import { rangoAnios, useCatModelo } from '@/components/CatalogoAuto';
 import { claveBusqueda, type CatVersion } from '@shared/catalogo-auto';
 
@@ -512,40 +512,28 @@ function Bloque({ icono, titulo, children, className }: { icono: ReactNode; titu
 }
 
 // ───────────── Integración con el taller ─────────────
-/** Registrar un vehículo con estos datos: se elige el cliente (privado del taller) y se abre el alta con el modelo ya cargado. */
+/** Registrar un vehículo con estos datos: se abre el alta con el modelo ya cargado; los clientes se pueden vincular ahí mismo o después. */
 function AccionesFicha({ marca, modelo, version, anio }: { marca: string; modelo: string; version: CatVersion; anio: number }) {
   const { puede } = useAuth();
   const nav = useNavigate();
   const toast = useToast();
   const [abierto, setAbierto] = useState(false);
-  const [cliente, setCliente] = useState<{ id: string; nombre: string } | null>(null);
   if (!puede('vehiculos.crear')) return null;
-  const cerrar = () => {
-    setAbierto(false);
-    setCliente(null);
-  };
+  const cerrar = () => setAbierto(false);
   return (
     <>
       <Boton tam="sm" variante="primario" icono={<Plus className="size-4" />} onClick={() => setAbierto(true)}>Registrar vehículo</Boton>
-      <Modal abierto={abierto} onCerrar={cerrar} titulo={cliente ? 'Datos del vehículo' : 'Registrar vehículo: elegí el cliente'} ancho="lg">
+      <Modal abierto={abierto} onCerrar={cerrar} titulo="Registrar vehículo" ancho="lg">
         <p className="mb-3 text-sm text-tenue">{[marca, modelo, textoVersion(version), anio && version.anios.includes(anio) ? anio : null].filter(Boolean).join(' · ')}</p>
-        {!cliente ? (
-          <SelectorCliente valor={null} onCambio={(c) => c && setCliente(c)} />
-        ) : (
-          <>
-            <div className="mb-3"><SelectorCliente valor={cliente as any} onCambio={() => setCliente(null)} /></div>
-            <FormVehiculo
-              clienteId={cliente.id}
-              inicial={{ marca, modelo, version: textoVersion(version), anio: anio && version.anios.includes(anio) ? anio : version.anios.length === 1 ? version.anios[0] : null, motor: version.motorizacion ?? '', combustible: combustibleForm(version.combustible) }}
-              onCancelar={cerrar}
-              onGuardado={(v) => {
-                cerrar();
-                toast.ok('Vehículo registrado');
-                nav(`/vehiculos/${v.id}`);
-              }}
-            />
-          </>
-        )}
+        <FormVehiculo
+          inicial={{ marca, modelo, version: textoVersion(version), anio: anio && version.anios.includes(anio) ? anio : version.anios.length === 1 ? version.anios[0] : null, motor: version.motorizacion ?? '', combustible: combustibleForm(version.combustible) }}
+          onCancelar={cerrar}
+          onGuardado={(v) => {
+            cerrar();
+            toast.ok('Vehículo registrado');
+            nav(`/vehiculos/${v.id}`);
+          }}
+        />
       </Modal>
     </>
   );

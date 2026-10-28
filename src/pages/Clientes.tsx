@@ -9,7 +9,7 @@ import { Boton, Buscador, Cargando, Dato, Encabezado, ErrorCaja, Insignia, Modal
 import { EstadoOTBadge } from '@/components/estados';
 import { FormCliente, FormVehiculo } from '@/components/selectores';
 import { ModalCobro } from '@/components/Cobro';
-import { CONDICION_IVA_LABEL, type CondicionIva } from '@shared/dominio';
+import { CONDICION_IVA_LABEL, RELACION_VEHICULO_LABEL, type CondicionIva, type RelacionVehiculo } from '@shared/dominio';
 
 export function Clientes() {
   const nav = useNavigate();
@@ -91,7 +91,7 @@ export function ClienteDetalle() {
         <div className="space-y-5 lg:col-span-2">
           <Tarjeta titulo="Vehículos" sinPadding acciones={<Boton tam="sm" icono={<Plus className="size-4" />} onClick={() => setVehiculo(true)}>Agregar</Boton>}>
             {c.vehiculos.length === 0 ? (
-              <Vacio icono={<Car className="size-5" />} titulo="Sin vehículos registrados" />
+              <Vacio icono={<Car className="size-5" />} titulo="Sin vehículos vinculados" />
             ) : (
               <ul className="divide-y divide-borde">
                 {c.vehiculos.map((v: any) => (
@@ -101,7 +101,10 @@ export function ClienteDetalle() {
                         <div className="font-semibold tracking-wide">{v.patente}</div>
                         <div className="text-sm text-tenue">{[v.marca, v.modelo, v.anio].filter(Boolean).join(' ') || 'Sin datos'}</div>
                       </div>
-                      <span className="text-sm text-tenue">{km(v.km_actual)}</span>
+                      <span className="flex flex-col items-end gap-0.5 text-sm text-tenue">
+                        {v.relacion && <Insignia>{RELACION_VEHICULO_LABEL[v.relacion as RelacionVehiculo] ?? v.relacion}</Insignia>}
+                        <span>{km(v.km_actual)}</span>
+                      </span>
                     </Link>
                   </li>
                 ))}
@@ -154,7 +157,7 @@ export function ClienteDetalle() {
         <FormCliente inicial={c} onCancelar={() => setEditar(false)} onGuardado={() => setEditar(false)} />
       </Modal>
       <Modal abierto={vehiculo} onCerrar={() => setVehiculo(false)} titulo="Nuevo vehículo" ancho="lg">
-        <FormVehiculo clienteId={c.id} onCancelar={() => setVehiculo(false)} onGuardado={() => setVehiculo(false)} />
+        <FormVehiculo clienteInicial={{ id: c.id, codigo: c.codigo, nombre: c.nombre, telefono: c.telefono }} onCancelar={() => setVehiculo(false)} onGuardado={() => setVehiculo(false)} />
       </Modal>
       {cobro && <ModalCobro abierto onCerrar={() => setCobro(false)} clienteId={c.id} />}
     </>

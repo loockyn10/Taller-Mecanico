@@ -72,6 +72,7 @@ function EntradaOrden({ e, puedeVerOrden }: { e: any; puedeVerOrden: boolean }) 
         <EstadoOTBadge estado={e.estado} />
         <span className="text-sm text-tenue">{fecha(e.fecha)} · {km(e.km)}</span>
       </div>
+      {e.cliente && <p className="mt-1 text-sm"><span className="text-tenue">Cliente de esta orden:</span> {e.cliente}</p>}
       {e.falla_reportada && <p className="mt-1 text-sm"><span className="text-tenue">Motivo:</span> {e.falla_reportada}</p>}
       {e.diagnostico && <p className="text-sm"><span className="text-tenue">Diagnóstico:</span> {e.diagnostico}</p>}
       {e.trabajos.length > 0 && (
