@@ -17,6 +17,7 @@ import { estimarManoObra, rentabilidadOrdenes } from '../lib/rentabilidad';
 import { sentenciasAplicarCredito, validarOrigenCredito } from '../lib/creditos';
 import { ESTADOS_TAREA } from '../../shared/tempario';
 import { validarResponsable } from '../lib/vehiculo-clientes';
+import { indicadoresPago } from '../lib/pago-cliente';
 import { datosHojaOrden } from '../lib/hoja-orden-datos';
 import { generarHojaCliente } from '../lib/hoja-cliente';
 import { urlPublica } from '../lib/url-publica';
@@ -142,7 +143,10 @@ ordenes.get('/', async (c) => {
   }
   if (desde) (cond.push('o.fecha_ingreso >= ?'), params.push(desde));
   if (hasta) (cond.push('o.fecha_ingreso <= ?'), params.push(`${hasta}T23:59:59.999Z`));
-  return c.json((await all(c.env.DB, `${SELECT} WHERE ${cond.join(' AND ')} ORDER BY o.numero DESC LIMIT ?`, ...params, limite)).map((o) => vistaOrden(s, o)));
+  const filas = await all<any>(c.env.DB, `${SELECT} WHERE ${cond.join(' AND ')} ORDER BY o.numero DESC LIMIT ?`, ...params, limite);
+  // Indicador de pago del tablero (Sprint 25): sólo con permiso financiero (ver órdenes y ventas); sin él la respuesta no lleva ningún dato de pago.
+  const pagos = tiene(s, 'ordenes.ver') && tiene(s, 'ventas.ver') ? await indicadoresPago(c.env.DB, s.tallerId, filas) : null;
+  return c.json(filas.map((o) => ({ ...vistaOrden(s, o), ...(pagos ? { pago: pagos.get(o.id) ?? null } : {}) })));
 });
 
 /** Mi cronómetro en marcha (si lo hay) y en qué orden y tarea: lo usa la barra de la vista del mecánico. */

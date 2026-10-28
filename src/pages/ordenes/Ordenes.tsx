@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Columns3, List, Plus, Wrench } from 'lucide-react';
+import { Banknote, CheckCircle2, Clock, Columns3, Landmark, List, Plus, Wrench, XCircle } from 'lucide-react';
 import { api, qs } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { fecha, money, numero } from '@/lib/format';
@@ -14,6 +14,21 @@ import { ESTADOS_OT, ESTADOS_OT_ABIERTOS, ESTADO_OT_LABEL } from '@shared/domini
 const BORDE: Record<string, string> = {
   gris: 'border-t-slate-400', violeta: 'border-t-violet-500', azul: 'border-t-marca-500', ambar: 'border-t-amber-500', verde: 'border-t-emerald-500', cian: 'border-t-cyan-500', rojo: 'border-t-red-500',
 };
+
+type Pago = { medio: 'efectivo' | 'transferencia'; estado: 'sin_comprobante' | 'pendiente' | 'verificado' | 'rechazado' | null } | null | undefined;
+
+/** Colores del medio de pago elegido por el cliente (independientes del color de la columna) e indicador de la esquina inferior derecha. */
+function estiloPago(p: Pago) {
+  if (!p) return { clase: 'border-borde bg-white', ind: null as null | { texto: string; icono: JSX.Element } };
+  if (p.medio === 'efectivo') return { clase: 'border-emerald-200 bg-emerald-50', ind: { texto: 'Pago previsto en efectivo', icono: <Banknote className="size-4 text-emerald-700" /> } };
+  const ind = {
+    sin_comprobante: { texto: 'Transferencia seleccionada — sin comprobante', icono: <Landmark className="size-4 text-sky-700" /> },
+    pendiente: { texto: 'Comprobante pendiente de verificación', icono: <Clock className="size-4 text-amber-600" /> },
+    verificado: { texto: 'Transferencia verificada', icono: <CheckCircle2 className="size-4 text-emerald-600" /> },
+    rechazado: { texto: 'Comprobante rechazado', icono: <XCircle className="size-4 text-red-600" /> },
+  }[p.estado ?? 'sin_comprobante'];
+  return { clase: 'border-sky-200 bg-sky-50', ind };
+}
 
 export function Ordenes() {
   const nav = useNavigate();
@@ -85,8 +100,10 @@ export function Ordenes() {
                   <span className="rounded-full bg-white px-2 text-xs font-medium text-tenue ring-1 ring-borde">{col.length}</span>
                 </div>
                 <div className="space-y-2 px-2 pb-2">
-                  {col.map((o) => (
-                    <Link key={o.id} to={`/ordenes/${o.id}`} className="block rounded-ctl border border-borde bg-white p-3 shadow-card transition hover:border-marca-300 hover:shadow-pop">
+                  {col.map((o) => {
+                    const est = estiloPago(o.pago);
+                    return (
+                    <Link key={o.id} to={`/ordenes/${o.id}`} className={cn('relative block rounded-ctl border p-3 shadow-card transition hover:border-marca-300 hover:shadow-pop', est.clase, est.ind && 'pb-7')}>
                       <div className="flex items-center justify-between">
                         <span className="font-bold tracking-wide">{o.patente}</span>
                         <span className="text-xs text-tenue">#{numero(o.numero)}</span>
@@ -98,8 +115,14 @@ export function Ordenes() {
                         {o.total !== undefined && <span className="font-semibold tabular-nums">{money(o.total)}</span>}
                       </div>
                       {o.fecha_prometida && <div className={cn('mt-1 text-xs', o.fecha_prometida < new Date().toISOString().slice(0, 10) ? 'font-medium text-red-600' : 'text-tenue')}>Prometida: {fecha(o.fecha_prometida)}</div>}
+                      {est.ind && (
+                        <span role="img" aria-label={est.ind.texto} title={est.ind.texto} className="absolute bottom-1.5 right-2 grid size-5 place-items-center rounded-full bg-white/80 ring-1 ring-black/5">
+                          {est.ind.icono}
+                        </span>
+                      )}
                     </Link>
-                  ))}
+                    );
+                  })}
                   {!col.length && <p className="px-1 py-4 text-center text-xs text-slate-500">—</p>}
                 </div>
               </div>

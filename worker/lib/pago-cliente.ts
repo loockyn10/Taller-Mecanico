@@ -480,3 +480,48 @@ export async function rechazarComprobante(db: D1Database, s: Sesion, ordenId: st
   }
   return { duplicado: false };
 }
+
+// ───────────────────────── Indicador de pago del tablero de órdenes ─────────────────────────
+
+export type IndicadorPago = { medio: MedioPortal; estado: 'sin_comprobante' | 'pendiente' | 'verificado' | 'rechazado' | null } | null;
+
+interface OrdenParaIndicador { id: string; total: number; presupuesto_id: string | null; venta_total: number | null; venta_cobrado: number | null; venta_devuelto: number | null }
+
+/**
+ * Indicador de pago de varias órdenes con 3 consultas en total (no una por tarjeta), con las mismas reglas del Sprint 25:
+ * total/abonado/saldo como `finanzasOrden` y estado como `estadoPagoCliente`. «Verificado» sólo si el saldo quedó cubierto (un comprobante parcial no cuenta).
+ * Sin elección del cliente → null (tarjeta neutra). El llamador decide si quien pregunta puede ver información financiera.
+ */
+export async function indicadoresPago(db: D1Database, tallerId: string, ordenes: OrdenParaIndicador[]): Promise<Map<string, IndicadorPago>> {
+  const res = new Map<string, IndicadorPago>();
+  const eleciones = new Map<string, Eleccion>();
+  const comps = new Map<string, Array<{ estado: EstadoComprobante; at: string }>>();
+  const anticipos = new Map<string, number>();
+  for (let i = 0; i < ordenes.length; i += 80) {
+    const lote = ordenes.slice(i, i + 80);
+    const ids = lote.map((o) => o.id);
+    const q = ids.map(() => '?').join(',');
+    for (const e of await all<Eleccion & { orden_id: string }>(db, `SELECT orden_id, medio, estado, importe_total, importe_pendiente, created_at FROM pago_elecciones WHERE taller_id = ? AND orden_id IN (${q}) ORDER BY created_at, rowid`, tallerId, ...ids)) eleciones.set(e.orden_id, e);
+    for (const c of await all<{ orden_id: string; estado: EstadoComprobante; created_at: string }>(db, `SELECT orden_id, estado, created_at FROM pago_comprobantes WHERE taller_id = ? AND orden_id IN (${q}) AND estado <> 'subiendo'`, tallerId, ...ids)) {
+      (comps.get(c.orden_id) ?? comps.set(c.orden_id, []).get(c.orden_id)!).push({ estado: c.estado, at: c.created_at });
+    }
+    for (const a of await all<{ orden_id: string; n: number }>(
+      db,
+      `SELECT o.id AS orden_id, COALESCE(SUM(co.total - co.credito_aplicado - co.devuelto), 0) AS n FROM ordenes o
+         JOIN cobros co ON co.taller_id = o.taller_id AND co.tipo = 'anticipo' AND co.estado = 'registrado' AND (co.orden_id = o.id OR (o.presupuesto_id IS NOT NULL AND co.presupuesto_id = o.presupuesto_id))
+        WHERE o.taller_id = ? AND o.id IN (${q}) GROUP BY o.id`,
+      tallerId, ...ids,
+    )) anticipos.set(a.orden_id, a.n);
+  }
+  for (const o of ordenes) {
+    const el = eleciones.get(o.id);
+    if (!el) { res.set(o.id, null); continue; }
+    const total = o.venta_total != null ? o.venta_total - (o.venta_devuelto ?? 0) : o.total;
+    const abonado = (o.venta_cobrado ?? 0) + Math.max(0, anticipos.get(o.id) ?? 0);
+    const pendiente = Math.max(0, total - abonado);
+    const clave = estadoPagoCliente({ importeConfirmado: true, total, pendiente, abonado, eleccion: { medio: el.medio, estado: el.estado, at: el.created_at }, comprobantes: comps.get(o.id) ?? [] });
+    const estado = el.medio !== 'transferencia' ? null : clave === 'cobro_confirmado' ? 'verificado' : clave === 'comprobante_recibido' ? 'pendiente' : clave === 'comprobante_rechazado' ? 'rechazado' : 'sin_comprobante';
+    res.set(o.id, { medio: el.medio, estado });
+  }
+  return res;
+}
