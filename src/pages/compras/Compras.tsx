@@ -10,6 +10,7 @@ import { cantidad, fecha, hoyISO, money, numero } from '@/lib/format';
 import { SelectorDeposito } from '@/components/SelectorDeposito';
 import { Aviso, Boton, Buscador, Campo, Cargando, Check, Encabezado, ErrorCaja, Input, InputMoneda, Insignia, Modal, Select, Tabla, Tarjeta, Textarea, useConfirmar, useDebounce, useToast, Vacio } from '@/components/ui';
 import { AvisoCaja, useCajaBloqueada } from '@/components/Cobro';
+import { FormArticulo } from '@/pages/stock/Articulos';
 import { MEDIO_PAGO_LABEL, type MedioPago } from '@shared/dominio';
 import { CamposMedio, errorMedio, extraAPayload, extraVacio, SelectorMedio, type ExtraMedio } from '@/components/MedioPago';
 
@@ -133,6 +134,7 @@ export function NuevaCompra() {
   const [vence, setVence] = useState('');
   const [deposito, setDeposito] = useState('');
   const [q, setQ] = useState('');
+  const [nuevoArt, setNuevoArt] = useState(false);
   const dq = useDebounce(q);
   const [clave] = useState(nuevaClave());
   const { data: res = [] } = useQuery({ queryKey: ['articulos', { q: dq, compra: 1 }], queryFn: () => api.get<any[]>(`/articulos?limite=15&q=${encodeURIComponent(dq)}`), enabled: dq.length >= 1 });
@@ -164,7 +166,10 @@ export function NuevaCompra() {
       <Encabezado titulo="Registrar compra" volver="/compras" />
       <div className="grid gap-5 xl:grid-cols-3">
         <Tarjeta titulo="Artículos recibidos" className="xl:col-span-2">
-          <Buscador value={q} onChange={setQ} placeholder="Buscar artículo para agregar… (o escaneá el código de barras)" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (!a) return toast.error(new Error(`No hay ningún artículo con el código ${codigo}`)); setItems((prev) => (prev.some((i) => i.articulo.id === a.id) ? prev : [...prev, { articulo: a, cantidad: 1, costo: a.costo }])); setQ(''); }} />
+          <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1"><Buscador value={q} onChange={setQ} placeholder="Buscar artículo para agregar… (o escaneá el código de barras)" onEnter={async (codigo) => { const a = await buscarPorCodigo(codigo).catch(() => null); if (!a) return toast.error(new Error(`No hay ningún artículo con el código ${codigo}`)); setItems((prev) => (prev.some((i) => i.articulo.id === a.id) ? prev : [...prev, { articulo: a, cantidad: 1, costo: a.costo }])); setQ(''); }} /></div>
+          {puede('catalogo.editar') && <Boton icono={<Plus className="size-4" />} onClick={() => setNuevoArt(true)}>Nuevo artículo</Boton>}
+          </div>
           {dq && (
             <ul className="mt-1.5 max-h-56 divide-y divide-borde overflow-y-auto rounded-ctl border border-borde text-sm">
               {res.map((a) => (
@@ -175,7 +180,7 @@ export function NuevaCompra() {
                   </button>
                 </li>
               ))}
-              {!res.length && <li className="px-3 py-2 text-tenue">Sin resultados. Crealo primero en Artículos.</li>}
+              {!res.length && <li className="px-3 py-2 text-tenue">Sin resultados. Podés crearlo con «Nuevo artículo».</li>}
             </ul>
           )}
           <ul className="mt-4 divide-y divide-borde rounded-card border border-borde">
@@ -245,6 +250,23 @@ export function NuevaCompra() {
           <Boton variante="primario" tam="lg" className="w-full" disabled={!valido} cargando={m.isPending} onClick={() => m.mutate()}>{contado ? `Registrar y pagar ${money(importePago)}` : 'Registrar compra'}</Boton>
         </div>
       </div>
+      {nuevoArt && (
+        <FormArticulo
+          sinStock
+          nombreInicial={q.trim()}
+          onCerrar={async (id) => {
+            setNuevoArt(false);
+            if (!id) return;
+            try {
+              const a = await api.get<any>(`/articulos/${id}`);
+              setItems((prev) => (prev.some((i) => i.articulo.id === a.id) ? prev : [...prev, { articulo: a, cantidad: 1, costo: a.costo ?? 0 }]));
+              setQ('');
+            } catch (e) {
+              toast.error(e as Error);
+            }
+          }}
+        />
+      )}
     </>
   );
 }

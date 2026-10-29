@@ -10,6 +10,7 @@ import { EstadoPresupuestoBadge } from '@/components/estados';
 import { EditorItems, itemsDesdeApi } from '@/components/EditorItems';
 import { useMecanicos } from '@/components/selectores';
 import { ModalAnticipo } from '@/components/Devolucion';
+import { mensajePresupuestoWhatsApp } from '@shared/mensaje-presupuesto';
 import { ESTADO_ANTICIPO_LABEL, type EstadoAnticipo } from '@shared/dominio';
 
 export function PresupuestoDetalle() {
@@ -49,7 +50,10 @@ export function PresupuestoDetalle() {
   if (isLoading) return <Cargando />;
   if (error) return <ErrorCaja error={error} reintentar={refetch} />;
   const abierto = p.estado === 'pendiente' || p.estado === 'aprobado';
-  const wa = whatsapp(p.cliente_telefono, `Hola ${p.cliente}! Te enviamos el presupuesto P-${numero(p.numero)} de ${me?.taller.nombre} para tu ${p.patente}: total ${money(p.total)}${p.valido_hasta ? `, válido hasta el ${fecha(p.valido_hasta)}` : ''}. Quedamos atentos a tu confirmación.`);
+  const wa = whatsapp(p.cliente_telefono, mensajePresupuestoWhatsApp({
+    taller: me?.taller.nombre, cliente: p.cliente, vehiculo: [p.marca, p.modelo].filter(Boolean).join(' '), patente: p.patente,
+    numero: numero(p.numero), total: p.total == null ? null : money(p.total), validez: p.valido_hasta ? fecha(p.valido_hasta) : null,
+  }));
 
   return (
     <>

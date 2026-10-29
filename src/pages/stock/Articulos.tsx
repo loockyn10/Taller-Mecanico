@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowDownUp, Package, Pencil, Plus, ShoppingCart } from 'lucide-react';
@@ -17,7 +17,8 @@ function useProveedores() {
   return useQuery({ queryKey: ['proveedores'], queryFn: () => api.get<any[]>('/proveedores'), staleTime: 60_000 });
 }
 
-export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (id?: string) => void }) {
+/** `sinStock`: alta desde una compra; el stock entra por la recepción de la compra, no como stock inicial. */
+export function FormArticulo({ inicial, onCerrar, sinStock, nombreInicial }: { inicial?: any; onCerrar: (id?: string) => void; sinStock?: boolean; nombreInicial?: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const { data: cats = [] } = useCategoriasArticulo();
@@ -30,7 +31,7 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
   const [f, setF] = useState({
     codigo: inicial?.codigo ?? '',
     codigo_barras: inicial?.codigo_barras ?? '',
-    nombre: inicial?.nombre ?? '',
+    nombre: inicial?.nombre ?? nombreInicial ?? '',
     marca: inicial?.marca ?? '',
     categoria_id: inicial?.categoria_id ?? '',
     proveedor_id: inicial?.proveedor_id ?? '',
@@ -45,6 +46,8 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
   });
   const set = (k: keyof typeof f, v: any) => setF({ ...f, [k]: v });
   const [deposito, setDeposito] = useState('');
+  // Si el alta ya se hizo y la respuesta se perdió, el reintento reutiliza el artículo en vez de duplicarlo.
+  const creado = useRef<string | null>(null);
   const m = useMutation({
     mutationFn: () => {
       const d: any = { ...f, categoria_id: f.categoria_id || null, proveedor_id: f.proveedor_id || null, stock_minimo: Number(f.stock_minimo), stock_objetivo: f.stock_objetivo === '' ? null : Number(f.stock_objetivo), alicuota_iva: Number(f.alicuota_iva) };
@@ -52,9 +55,10 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
         delete d.stock_inicial;
         return api.put(`/articulos/${inicial.id}`, d).then(() => ({ id: inicial.id }));
       }
-      d.stock_inicial = Number(f.stock_inicial);
-      d.deposito_id = deposito || null;
-      return api.post('/articulos', d);
+      if (creado.current) return Promise.resolve({ id: creado.current });
+      d.stock_inicial = sinStock ? 0 : Number(f.stock_inicial);
+      d.deposito_id = sinStock ? null : deposito || null;
+      return api.post('/articulos', d).then((r: any) => { creado.current = r.id; return r; });
     },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['articulos'] });
@@ -99,12 +103,13 @@ export function FormArticulo({ inicial, onCerrar }: { inicial?: any; onCerrar: (
             <option value="un">Unidad</option><option value="lt">Litro</option><option value="kg">Kilo</option><option value="m">Metro</option><option value="juego">Juego</option>
           </Select>
         </Campo>
-        {!inicial?.id && <Campo label="Stock inicial" hint="Queda registrado como movimiento de entrada"><Input type="number" min={0} step="any" value={f.stock_inicial} onChange={(e) => set('stock_inicial', e.target.value)} /></Campo>}
-        {!inicial?.id && <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito del stock inicial" />}
+        {!inicial?.id && !sinStock && <Campo label="Stock inicial" hint="Queda registrado como movimiento de entrada"><Input type="number" min={0} step="any" value={f.stock_inicial} onChange={(e) => set('stock_inicial', e.target.value)} /></Campo>}
+        {!inicial?.id && !sinStock && <SelectorDeposito valor={deposito} onCambio={setDeposito} label="Depósito del stock inicial" />}
         <Campo label="Stock mínimo (alerta)"><Input type="number" min={0} step="any" value={f.stock_minimo} onChange={(e) => set('stock_minimo', e.target.value)} /></Campo>
         <Campo label="Stock ideal (opcional)" hint="Hasta cuánto reponer. Vacío = el doble del mínimo"><Input type="number" min={0} step="any" value={f.stock_objetivo} onChange={(e) => set('stock_objetivo', e.target.value)} /></Campo>
         <Campo label="Ubicación"><Input value={f.ubicacion} onChange={(e) => set('ubicacion', e.target.value)} placeholder="Estante A2" /></Campo>
       </div>
+      {sinStock && <p className="mt-3 text-xs text-tenue">El stock no se carga acá: entra al registrar la compra.</p>}
       {inicial?.id && <p className="mt-3 text-xs text-tenue">El stock no se edita directamente: usá “Movimiento de stock” para entradas, salidas o ajustes.</p>}
     </Modal>
   );
